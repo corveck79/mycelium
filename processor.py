@@ -4,14 +4,28 @@ from typing import Optional
 
 import db
 import jellyfin
+import monitor
 import torbox
 import torrentio
 import zilean
-from config import JELLYFIN_REFRESH_DELAY_SEC, ZILEAN_ENABLED
+from config import JELLYFIN_REFRESH_DELAY_SEC, TMC_CONTAINER_NAME, ZILEAN_ENABLED
 from torrentio import TorrentioStream
 from webhook_parser import MediaRequest
 
 log = logging.getLogger(__name__)
+
+
+def _restart_tmc() -> None:
+    if not TMC_CONTAINER_NAME:
+        return
+    try:
+        import docker
+        client = docker.from_env()
+        container = client.containers.get(TMC_CONTAINER_NAME)
+        container.restart()
+        log.info("TMC container '%s' restarted to pick up new content", TMC_CONTAINER_NAME)
+    except Exception as exc:
+        log.warning("Could not restart TMC container '%s': %s", TMC_CONTAINER_NAME, exc)
 
 
 def _rank(streams, prefer_season_pack: bool = False):
@@ -139,8 +153,11 @@ def process(req: MediaRequest) -> bool:
             source=winner.name.split()[0] if winner else None,
             info_hash=winner.info_hash if winner else None,
         )
+        if not req.is_movie:
+            monitor.add_series(req.imdb_id, req.title, req.seasons)
+        _restart_tmc()
         if JELLYFIN_REFRESH_DELAY_SEC > 0:
-            log.info("Waiting %ds before triggering Jellyfin refresh", JELLYFIN_REFRESH_DELAY_SEC)
+            log.info("Waiting %ds for TMC + Jellyfin refresh", JELLYFIN_REFRESH_DELAY_SEC)
             time.sleep(JELLYFIN_REFRESH_DELAY_SEC)
         jellyfin.refresh_library()
     else:

@@ -13,3 +13,4 @@ services:
       - LISTEN_PORT=8088
     volumes:
       - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock

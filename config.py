@@ -65,6 +65,14 @@ CATCHUP_ENABLED = _env("CATCHUP_ENABLED", "true").lower() in ("1", "true", "yes"
 CATCHUP_DELAY_SEC = _env_int("CATCHUP_DELAY_SEC", 30)
 CATCHUP_TAKE = _env_int("CATCHUP_TAKE", 20)
 
+# Path where TMC writes .strm files (inside container, mount /data/media there).
+MEDIA_PATH = _env("MEDIA_PATH", "/data/media")
+MONITOR_INTERVAL_HOURS = _env_int("MONITOR_INTERVAL_HOURS", 6)
+MOVIE_SYNC_INTERVAL_MINUTES = _env_int("MOVIE_SYNC_INTERVAL_MINUTES", 30)
+MAX_RETRY_ATTEMPTS = _env_int("MAX_RETRY_ATTEMPTS", 10)
+
+TMC_CONTAINER_NAME = _env("TMC_CONTAINER_NAME", "tmc")
+
 # Automatic Jellyfin merge of duplicate movie versions (every N hours; 0 disables).
 MERGE_VERSIONS_INTERVAL_HOURS = _env_int("MERGE_VERSIONS_INTERVAL_HOURS", 6)
 

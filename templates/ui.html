@@ -2,227 +2,322 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Seerr → TorBox</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, sans-serif; background: #0f1117; color: #cbd5e1; min-height: 100vh; padding: 24px; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f1117; color: #cbd5e1; min-height: 100vh; }
     a { color: #818cf8; text-decoration: none; }
-    a:hover { text-decoration: underline; }
 
-    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
-    header h1 { font-size: 22px; font-weight: 700; color: #e2e8f0; }
-    header h1 span { color: #818cf8; }
-    .refresh-hint { font-size: 12px; color: #475569; }
+    /* Layout */
+    .topbar { background: #161d2e; border-bottom: 1px solid #1e2535; padding: 14px 24px;
+              display: flex; align-items: center; justify-content: space-between; }
+    .topbar h1 { font-size: 18px; font-weight: 700; color: #e2e8f0; }
+    .topbar h1 span { color: #818cf8; }
+    .hint { font-size: 11px; color: #475569; }
+    .container { padding: 20px 24px; max-width: 1400px; }
 
-    .section { margin-bottom: 32px; }
-    .section-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #64748b; margin-bottom: 12px; }
-
-    /* Manual form */
-    form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
-    .field { display: flex; flex-direction: column; gap: 4px; }
-    label { font-size: 11px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
-    input, select {
-      background: #1e2535; border: 1px solid #2d3a4e; color: #e2e8f0;
-      padding: 8px 12px; border-radius: 6px; font-size: 14px; outline: none;
-      transition: border-color .15s;
-    }
-    input:focus, select:focus { border-color: #818cf8; }
-    input[name="imdb_id"] { width: 160px; }
-    input[name="seasons"] { width: 140px; }
-    button[type="submit"] {
-      background: #4f46e5; color: #fff; border: none; padding: 9px 20px;
-      border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
-      transition: background .15s;
-    }
-    button[type="submit"]:hover { background: #4338ca; }
-
-    /* Flash message */
-    .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; }
+    /* Flash */
+    .flash { padding: 10px 14px; border-radius: 6px; margin: 12px 0; font-size: 13px; }
     .flash-ok  { background: #052e16; color: #4ade80; border: 1px solid #166534; }
     .flash-err { background: #2d0a0a; color: #f87171; border: 1px solid #7f1d1d; }
 
-    /* Table */
+    /* Tabs */
+    .tabs { display: flex; gap: 2px; border-bottom: 1px solid #1e2535; margin-bottom: 20px; }
+    .tab-btn { background: none; border: none; padding: 10px 18px; font-size: 13px; font-weight: 600;
+               color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; }
+    .tab-btn:hover { color: #cbd5e1; }
+    .tab-btn.active { color: #818cf8; border-bottom-color: #818cf8; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* Stats */
+    .stats { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .stat { background: #161d2e; border: 1px solid #1e2535; border-radius: 8px;
+            padding: 12px 18px; min-width: 90px; }
+    .stat-val { font-size: 22px; font-weight: 700; color: #e2e8f0; }
+    .stat-lbl { font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+
+    /* Manual form */
+    .form-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 20px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    label { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    input, select { background: #1e2535; border: 1px solid #2d3a4e; color: #e2e8f0;
+                    padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
+    input:focus, select:focus { border-color: #818cf8; }
+    input[name="imdb_id"] { width: 150px; }
+    input[name="seasons"]  { width: 130px; }
+    .btn { border: none; padding: 9px 18px; border-radius: 6px; font-size: 13px;
+           font-weight: 600; cursor: pointer; transition: background .15s; white-space: nowrap; }
+    .btn-primary { background: #4f46e5; color: #fff; }
+    .btn-primary:hover { background: #4338ca; }
+    .btn-sm { padding: 4px 10px; font-size: 11px; }
+    .btn-secondary { background: #1e2535; color: #94a3b8; border: 1px solid #2d3a4e; }
+    .btn-secondary:hover { background: #2d3a4e; }
+    .btn-danger { background: #7f1d1d; color: #fca5a5; }
+    .btn-danger:hover { background: #991b1b; }
+
+    /* Tables */
     .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid #1e2535; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
     thead tr { background: #161d2e; }
-    th { padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 700;
+    th { padding: 9px 12px; text-align: left; font-size: 10px; font-weight: 700;
          text-transform: uppercase; letter-spacing: .06em; color: #475569; white-space: nowrap; }
-    tbody tr { border-top: 1px solid #1a2236; transition: background .1s; }
+    tbody tr { border-top: 1px solid #1a2236; }
     tbody tr:hover { background: #1a2236; }
-    td { padding: 10px 14px; vertical-align: middle; }
-    .empty { text-align: center; color: #334155; padding: 32px !important; }
+    td { padding: 9px 12px; vertical-align: middle; }
+    .empty { text-align: center; color: #334155; padding: 28px !important; font-size: 13px; }
 
     /* Badges */
-    .badge { display: inline-block; padding: 2px 9px; border-radius: 9999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
-    .badge-success { background: #052e16; color: #4ade80; }
-    .badge-failed  { background: #2d0a0a; color: #f87171; }
-    .badge-pending { background: #2d1b00; color: #fbbf24; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 700; }
+    .badge-success, .badge-available, .badge-found   { background: #052e16; color: #4ade80; }
+    .badge-failed,  .badge-give_up                   { background: #2d0a0a; color: #f87171; }
+    .badge-pending, .badge-wanted                    { background: #2d1b00; color: #fbbf24; }
+    .badge-processing, .badge-not_aired              { background: #1e1b4b; color: #a5b4fc; }
+    .badge-active   { background: #052e16; color: #4ade80; }
+    .badge-complete { background: #1e2535; color: #64748b; }
 
-    .mono { font-family: monospace; font-size: 12px; color: #94a3b8; }
-    .dim  { color: #475569; font-size: 12px; }
+    .mono { font-family: monospace; color: #94a3b8; }
+    .dim  { color: #475569; }
+    .section-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .section-title { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #64748b; }
 
     /* Log box */
-    #log-box {
-      background: #090d14; border: 1px solid #1a2236; border-radius: 8px;
-      padding: 14px 16px; font-family: monospace; font-size: 12px; line-height: 1.6;
-      max-height: 340px; overflow-y: auto; white-space: pre-wrap; color: #7dd3fc;
-    }
-    .log-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-    .log-status { font-size: 11px; color: #475569; }
+    .log-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    #log-box { background: #090d14; border: 1px solid #1a2236; border-radius: 8px; padding: 14px 16px;
+               font-family: monospace; font-size: 11px; line-height: 1.6; max-height: 400px;
+               overflow-y: auto; white-space: pre-wrap; color: #7dd3fc; }
+    #log-status { font-size: 11px; color: #475569; }
     #log-toggle { background: #1e2535; border: 1px solid #2d3a4e; color: #94a3b8;
-                  padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; }
-
-    .stats { display: flex; gap: 16px; margin-bottom: 24px; }
-    .stat { background: #161d2e; border: 1px solid #1e2535; border-radius: 8px; padding: 14px 20px; flex: 1; min-width: 100px; }
-    .stat-value { font-size: 24px; font-weight: 700; color: #e2e8f0; }
-    .stat-label { font-size: 11px; color: #475569; margin-top: 2px; text-transform: uppercase; letter-spacing: .05em; }
+                  padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Seerr <span>→</span> TorBox</h1>
-    <span class="refresh-hint">Page auto-refreshes every 30s</span>
-  </header>
 
+<div class="topbar">
+  <h1>Seerr <span>→</span> TorBox</h1>
+  <span class="hint">Auto-refreshes every 30s</span>
+</div>
+
+<div class="container">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% for cat, msg in messages %}
       <div class="flash flash-{{ cat }}">{{ msg }}</div>
     {% endfor %}
   {% endwith %}
 
-  <!-- Stats -->
-  <div class="stats">
-    <div class="stat">
-      <div class="stat-value">{{ rows | selectattr('status','eq','success') | list | length }}</div>
-      <div class="stat-label">Succeeded</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">{{ rows | selectattr('status','eq','pending') | list | length }}</div>
-      <div class="stat-label">Pending</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">{{ rows | selectattr('status','eq','failed') | list | length }}</div>
-      <div class="stat-label">Failed</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">{{ rows | length }}</div>
-      <div class="stat-label">Total</div>
-    </div>
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn" data-tab="requests">Requests</button>
+    <button class="tab-btn" data-tab="movies">Movies</button>
+    <button class="tab-btn" data-tab="series">Monitored Series</button>
+    <button class="tab-btn" data-tab="wanted">Wanted Episodes</button>
+    <button class="tab-btn" data-tab="logs">Logs</button>
   </div>
 
-  <!-- Manual request form -->
-  <div class="section">
-    <div class="section-title">Manual Request</div>
+  <!-- ── Requests ── -->
+  <div id="tab-requests" class="tab-pane">
+    <div class="stats">
+      <div class="stat"><div class="stat-val">{{ requests | selectattr('status','eq','success') | list | length }}</div><div class="stat-lbl">Success</div></div>
+      <div class="stat"><div class="stat-val">{{ requests | selectattr('status','eq','pending')  | list | length }}</div><div class="stat-lbl">Pending</div></div>
+      <div class="stat"><div class="stat-val">{{ requests | selectattr('status','eq','failed')   | list | length }}</div><div class="stat-lbl">Failed</div></div>
+      <div class="stat"><div class="stat-val">{{ requests | length }}</div><div class="stat-lbl">Total</div></div>
+    </div>
+
+    <div class="section-hdr"><span class="section-title">Manual Request</span></div>
     <form method="post" action="/ui/submit">
-      <div class="field">
-        <label>IMDB ID</label>
-        <input name="imdb_id" placeholder="tt0293662" required pattern="tt\d{6,10}">
-      </div>
-      <div class="field">
-        <label>Type</label>
-        <select name="media_type">
-          <option value="movie">Movie</option>
-          <option value="series">Series</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Seasons (series only)</label>
-        <input name="seasons" placeholder="1  or  1,2,3" value="1">
-      </div>
-      <div class="field">
-        <label>&nbsp;</label>
-        <button type="submit">Add to TorBox</button>
+      <div class="form-row">
+        <div class="field"><label>IMDB ID</label><input name="imdb_id" placeholder="tt0293662" required pattern="tt\d{6,10}"></div>
+        <div class="field"><label>Type</label><select name="media_type"><option value="movie">Movie</option><option value="series">Series</option></select></div>
+        <div class="field"><label>Seasons</label><input name="seasons" placeholder="1  or  1,2,3" value="1"></div>
+        <div class="field"><label>&nbsp;</label><button type="submit" class="btn btn-primary">Add to TorBox</button></div>
       </div>
     </form>
-  </div>
 
-  <!-- Request history table -->
-  <div class="section">
-    <div class="section-title">Recent Requests</div>
+    <div class="section-hdr"><span class="section-title">Recent Requests</span></div>
     <div class="table-wrap">
       <table>
-        <thead>
-          <tr>
-            <th>Title</th>
-            <th>IMDB</th>
-            <th>Type</th>
-            <th>Seasons</th>
-            <th>Status</th>
-            <th>Quality</th>
-            <th>Source</th>
-            <th>Added</th>
-          </tr>
-        </thead>
+        <thead><tr><th>Title</th><th>IMDB</th><th>Type</th><th>Seasons</th><th>Status</th><th>Quality</th><th>Source</th><th>Added</th></tr></thead>
         <tbody>
-          {% for row in rows %}
+          {% for r in requests %}
           <tr>
-            <td>{{ row.title }}</td>
-            <td><a href="https://www.imdb.com/title/{{ row.imdb_id }}" target="_blank">{{ row.imdb_id }}</a></td>
-            <td class="dim">{{ row.media_type }}</td>
-            <td class="dim">{{ row.seasons or '—' }}</td>
-            <td><span class="badge badge-{{ row.status }}">{{ row.status }}</span></td>
-            <td class="mono">{{ row.quality or '—' }}</td>
-            <td class="dim">{{ row.source or '—' }}</td>
-            <td class="dim">{{ row.created_at }}</td>
+            <td>{{ r.title }}</td>
+            <td><a href="https://www.imdb.com/title/{{ r.imdb_id }}" target="_blank">{{ r.imdb_id }}</a></td>
+            <td class="dim">{{ r.media_type }}</td>
+            <td class="dim">{{ r.seasons or '—' }}</td>
+            <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+            <td class="mono">{{ r.quality or '—' }}</td>
+            <td class="dim">{{ r.source or '—' }}</td>
+            <td class="dim">{{ r.created_at }}</td>
           </tr>
-          {% else %}
-          <tr><td colspan="8" class="empty">No requests yet</td></tr>
+          {% else %}<tr><td colspan="8" class="empty">No requests yet</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- Live logs -->
-  <div class="section">
-    <div class="section-title">Live Logs</div>
+  <!-- ── Movies ── -->
+  <div id="tab-movies" class="tab-pane">
+    <div class="section-hdr">
+      <span class="section-title">Approved Movies</span>
+      <form method="post" action="/ui/sync-movies" style="display:inline">
+        <button class="btn btn-secondary btn-sm">↻ Sync Now</button>
+      </form>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Title</th><th>IMDB</th><th>Status</th><th>Requested By</th><th>Requested At</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for m in movies %}
+          <tr>
+            <td>{{ m.title }}</td>
+            <td><a href="https://www.imdb.com/title/{{ m.imdb_id }}" target="_blank">{{ m.imdb_id }}</a></td>
+            <td>
+              {% if m.strm_found %}<span class="badge badge-available">✓ available</span>
+              {% elif m.status == 'processing' %}<span class="badge badge-processing">⟳ processing</span>
+              {% elif m.status == 'failed' %}<span class="badge badge-failed">✗ failed</span>
+              {% else %}<span class="badge badge-pending">⏳ pending</span>{% endif %}
+            </td>
+            <td class="dim">{{ m.requested_by or '—' }}</td>
+            <td class="dim">{{ (m.requested_at or '')[:10] }}</td>
+            <td>
+              {% if not m.strm_found %}
+              <form method="post" action="/ui/download-movie" style="display:inline">
+                <input type="hidden" name="imdb_id" value="{{ m.imdb_id }}">
+                <button class="btn btn-secondary btn-sm">Download</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}<tr><td colspan="6" class="empty">No approved movies found — click Sync Now</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Monitored Series ── -->
+  <div id="tab-series" class="tab-pane">
+    <div class="section-hdr"><span class="section-title">Monitored Series</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Title</th><th>IMDB</th><th>TMDB</th><th>Seasons</th><th>Status</th><th>Last Checked</th></tr></thead>
+        <tbody>
+          {% for s in monitored %}
+          <tr>
+            <td>{{ s.title }}</td>
+            <td><a href="https://www.imdb.com/title/{{ s.imdb_id }}" target="_blank">{{ s.imdb_id }}</a></td>
+            <td class="dim">{{ s.tmdb_id or '—' }}</td>
+            <td class="dim">{{ s.seasons or '—' }}</td>
+            <td><span class="badge badge-{{ s.status }}">{{ s.status }}</span></td>
+            <td class="dim">{{ s.last_checked or 'never' }}</td>
+          </tr>
+          {% else %}<tr><td colspan="6" class="empty">No monitored series yet</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Wanted Episodes ── -->
+  <div id="tab-wanted" class="tab-pane">
+    <div class="section-hdr">
+      <span class="section-title">Wanted Episodes</span>
+      <span class="dim" style="font-size:11px">Retries every {{ config.MONITOR_INTERVAL_HOURS }}h · max {{ config.MAX_RETRY_ATTEMPTS }} attempts</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Show</th><th>S</th><th>E</th><th>Air Date</th><th>Status</th><th>Attempts</th><th>Last Try</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for ep in wanted %}
+          <tr>
+            <td>{{ ep.title }}</td>
+            <td class="mono">{{ "%02d" % ep.season }}</td>
+            <td class="mono">{{ "%02d" % ep.episode }}</td>
+            <td class="dim">{{ ep.air_date or '—' }}</td>
+            <td><span class="badge badge-{{ ep.status }}">{{ ep.status }}</span></td>
+            <td class="dim">{{ ep.attempt_count }}/{{ config.MAX_RETRY_ATTEMPTS }}</td>
+            <td class="dim">{{ (ep.last_attempted or '')[:16] }}</td>
+            <td>
+              {% if ep.status in ('wanted', 'not_aired') %}
+              <form method="post" action="/ui/search-episode" style="display:inline">
+                <input type="hidden" name="imdb_id" value="{{ ep.imdb_id }}">
+                <input type="hidden" name="title"   value="{{ ep.title }}">
+                <input type="hidden" name="season"  value="{{ ep.season }}">
+                <input type="hidden" name="episode" value="{{ ep.episode }}">
+                <button class="btn btn-secondary btn-sm">Search Now</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}<tr><td colspan="8" class="empty">No wanted episodes</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Logs ── -->
+  <div id="tab-logs" class="tab-pane">
     <div class="log-controls">
-      <button id="log-toggle" onclick="toggleAuto()">Auto-refresh: ON</button>
-      <span class="log-status" id="log-status">Loading…</span>
+      <button id="log-toggle" onclick="toggleAuto()">Auto: ON</button>
+      <span id="log-status">Loading…</span>
     </div>
     <div id="log-box">Loading…</div>
   </div>
+</div>
 
-  <script>
-    let autoRefresh = true;
-    let logTimer = null;
+<script>
+  // ── Config passed from Flask ──
+  const MONITOR_INTERVAL_HOURS = {{ config.MONITOR_INTERVAL_HOURS }};
+  const MAX_RETRY_ATTEMPTS = {{ config.MAX_RETRY_ATTEMPTS }};
 
-    function toggleAuto() {
-      autoRefresh = !autoRefresh;
-      document.getElementById('log-toggle').textContent = 'Auto-refresh: ' + (autoRefresh ? 'ON' : 'OFF');
-      if (autoRefresh) scheduleLogs();
-      else clearTimeout(logTimer);
-    }
+  // ── Tabs ──
+  function showTab(name) {
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    const pane = document.getElementById('tab-' + name);
+    const btn  = document.querySelector('[data-tab="' + name + '"]');
+    if (pane) pane.classList.add('active');
+    if (btn)  btn.classList.add('active');
+    location.hash = name;
+  }
 
-    async function fetchLogs() {
-      try {
-        const r = await fetch('/ui/logs');
-        const data = await r.json();
-        const box = document.getElementById('log-box');
-        const atBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 40;
-        box.textContent = data.lines.join('\n');
-        if (atBottom) box.scrollTop = box.scrollHeight;
-        document.getElementById('log-status').textContent =
-          data.lines.length + ' lines · ' + new Date().toLocaleTimeString();
-      } catch(e) {
-        document.getElementById('log-status').textContent = 'fetch failed';
-      }
-    }
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => showTab(btn.dataset.tab));
+  });
 
-    function scheduleLogs() {
-      clearTimeout(logTimer);
-      logTimer = setTimeout(async () => {
-        await fetchLogs();
-        if (autoRefresh) scheduleLogs();
-      }, 5000);
-    }
+  // Restore tab from hash or default
+  const hash = location.hash.replace('#', '') || 'requests';
+  showTab(hash);
 
-    // Page auto-refresh every 30s for the table
-    setTimeout(() => location.reload(), 30000);
+  // ── Logs ──
+  let autoRefresh = true, logTimer = null;
+  function toggleAuto() {
+    autoRefresh = !autoRefresh;
+    document.getElementById('log-toggle').textContent = 'Auto: ' + (autoRefresh ? 'ON' : 'OFF');
+    if (autoRefresh) scheduleLogs(); else clearTimeout(logTimer);
+  }
+  async function fetchLogs() {
+    try {
+      const r = await fetch('/ui/logs');
+      const d = await r.json();
+      const box = document.getElementById('log-box');
+      const atBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 40;
+      box.textContent = d.lines.join('\n');
+      if (atBottom) box.scrollTop = box.scrollHeight;
+      document.getElementById('log-status').textContent = d.lines.length + ' lines · ' + new Date().toLocaleTimeString();
+    } catch(e) { document.getElementById('log-status').textContent = 'fetch failed'; }
+  }
+  function scheduleLogs() {
+    clearTimeout(logTimer);
+    logTimer = setTimeout(async () => { await fetchLogs(); if (autoRefresh) scheduleLogs(); }, 5000);
+  }
+  fetchLogs(); scheduleLogs();
 
-    fetchLogs();
-    scheduleLogs();
-  </script>
+  // ── Page reload ──
+  setTimeout(() => location.reload(), 30000);
+</script>
 </body>
 </html>

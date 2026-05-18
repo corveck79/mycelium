@@ -6,15 +6,19 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 
 import catchup
+import config as cfg
 import db
 import jellyfin
 import log_buffer
+import monitor
 import processor
 from config import (
     CATCHUP_ENABLED,
     LISTEN_HOST,
     LISTEN_PORT,
     MERGE_VERSIONS_INTERVAL_HOURS,
+    MONITOR_INTERVAL_HOURS,
+    MOVIE_SYNC_INTERVAL_MINUTES,
     WEBHOOK_SECRET,
     configure_logging,
 )
@@ -30,20 +34,34 @@ app.secret_key = "seerr-torbox-ui"
 db.init()
 
 
-def _start_scheduler() -> BackgroundScheduler | None:
-    if MERGE_VERSIONS_INTERVAL_HOURS <= 0:
-        log.info("MergeVersions scheduler disabled (interval=%d)", MERGE_VERSIONS_INTERVAL_HOURS)
-        return None
+def _start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(daemon=True)
-    scheduler.add_job(
-        jellyfin.merge_duplicate_versions,
-        trigger="interval",
-        hours=MERGE_VERSIONS_INTERVAL_HOURS,
-        id="merge_versions",
-        next_run_time=None,
-    )
+
+    if MERGE_VERSIONS_INTERVAL_HOURS > 0:
+        scheduler.add_job(
+            jellyfin.merge_duplicate_versions,
+            trigger="interval", hours=MERGE_VERSIONS_INTERVAL_HOURS,
+            id="merge_versions", next_run_time=None,
+        )
+        log.info("Scheduled MergeVersions every %dh", MERGE_VERSIONS_INTERVAL_HOURS)
+
+    if MONITOR_INTERVAL_HOURS > 0:
+        scheduler.add_job(
+            monitor.run_series_check,
+            trigger="interval", hours=MONITOR_INTERVAL_HOURS,
+            id="series_monitor", next_run_time=None,
+        )
+        log.info("Scheduled series monitor every %dh", MONITOR_INTERVAL_HOURS)
+
+    if MOVIE_SYNC_INTERVAL_MINUTES > 0:
+        scheduler.add_job(
+            monitor.sync_movies,
+            trigger="interval", minutes=MOVIE_SYNC_INTERVAL_MINUTES,
+            id="movie_sync", next_run_time=None,
+        )
+        log.info("Scheduled movie sync every %dm", MOVIE_SYNC_INTERVAL_MINUTES)
+
     scheduler.start()
-    log.info("Scheduled Jellyfin MergeVersions every %d hours", MERGE_VERSIONS_INTERVAL_HOURS)
     return scheduler
 
 
@@ -51,6 +69,9 @@ scheduler = _start_scheduler()
 
 if CATCHUP_ENABLED:
     catchup.schedule()
+
+# Kick off initial movie sync shortly after startup
+threading.Thread(target=monitor.sync_movies, name="movie-sync-init", daemon=True).start()
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -100,8 +121,14 @@ def webhook():
 
 @app.get("/ui")
 def ui_dashboard():
-    rows = db.get_recent(100)
-    return render_template("ui.html", rows=rows)
+    return render_template(
+        "ui.html",
+        requests=db.get_recent(100),
+        monitored=db.get_all_monitored_series(),
+        wanted=db.get_all_wanted_episodes(),
+        movies=db.get_media_items("movie"),
+        config=cfg,
+    )
 
 
 @app.post("/ui/submit")
@@ -122,20 +149,47 @@ def ui_submit():
         seasons = [1]
 
     media_request = MediaRequest(
-        title=imdb_id,
-        media_type=media_type,
-        imdb_id=imdb_id,
-        seasons=seasons,
+        title=imdb_id, media_type=media_type, imdb_id=imdb_id, seasons=seasons,
     )
-    thread = threading.Thread(
-        target=processor.process,
-        args=(media_request,),
-        name=f"manual-{imdb_id}",
-        daemon=True,
-    )
-    thread.start()
-    flash(f"Request queued: {imdb_id} ({media_type})", "ok")
+    threading.Thread(target=processor.process, args=(media_request,),
+                     name=f"manual-{imdb_id}", daemon=True).start()
+    flash(f"Queued: {imdb_id} ({media_type})", "ok")
     return redirect(url_for("ui_dashboard"))
+
+
+@app.post("/ui/search-episode")
+def ui_search_episode():
+    imdb_id = request.form.get("imdb_id", "")
+    title = request.form.get("title", imdb_id)
+    season = int(request.form.get("season", 1))
+    episode = int(request.form.get("episode", 1))
+    threading.Thread(
+        target=monitor.search_episode_now,
+        args=(imdb_id, title, season, episode),
+        name=f"ep-{imdb_id}-s{season}e{episode}", daemon=True,
+    ).start()
+    flash(f"Searching {title} S{season:02d}E{episode:02d}…", "ok")
+    return redirect(url_for("ui_dashboard") + "#wanted")
+
+
+@app.post("/ui/download-movie")
+def ui_download_movie():
+    imdb_id = request.form.get("imdb_id", "")
+    media_request = MediaRequest(
+        title=imdb_id, media_type="movie", imdb_id=imdb_id, seasons=[],
+    )
+    db.update_media_item_status(imdb_id, "movie", "processing")
+    threading.Thread(target=processor.process, args=(media_request,),
+                     name=f"movie-{imdb_id}", daemon=True).start()
+    flash(f"Download queued for {imdb_id}", "ok")
+    return redirect(url_for("ui_dashboard") + "#movies")
+
+
+@app.post("/ui/sync-movies")
+def ui_sync_movies():
+    threading.Thread(target=monitor.sync_movies, name="movie-sync-manual", daemon=True).start()
+    flash("Movie sync started", "ok")
+    return redirect(url_for("ui_dashboard") + "#movies")
 
 
 @app.get("/ui/logs")
