@@ -4,9 +4,11 @@ import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, abort, jsonify, request
 
+import catchup
 import jellyfin
 import processor
 from config import (
+    CATCHUP_ENABLED,
     LISTEN_HOST,
     LISTEN_PORT,
     MERGE_VERSIONS_INTERVAL_HOURS,
@@ -39,6 +41,9 @@ def _start_scheduler() -> BackgroundScheduler | None:
 
 
 scheduler = _start_scheduler()
+
+if CATCHUP_ENABLED:
+    catchup.schedule()
 
 
 def _check_auth() -> None:

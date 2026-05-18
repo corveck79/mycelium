@@ -49,6 +49,16 @@ def find_by_hash(info_hash: str) -> dict | None:
     return None
 
 
+def title_exists(title: str) -> bool:
+    """Return True if any torrent in mylist appears to match the given title."""
+    needle = title.lower()
+    for item in list_torrents():
+        name = (item.get("name") or "").lower()
+        if needle in name or name in needle:
+            return True
+    return False
+
+
 def _is_ready(item: dict) -> bool:
     if item.get("download_finished"):
         return True

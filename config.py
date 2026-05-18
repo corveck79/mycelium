@@ -57,6 +57,10 @@ TORBOX_POLL_TIMEOUT_SEC = _env_int("TORBOX_POLL_TIMEOUT_SEC", 600)
 
 WEBHOOK_SECRET = _env("WEBHOOK_SECRET", "")
 
+CATCHUP_ENABLED = _env("CATCHUP_ENABLED", "true").lower() in ("1", "true", "yes")
+CATCHUP_DELAY_SEC = _env_int("CATCHUP_DELAY_SEC", 30)
+CATCHUP_TAKE = _env_int("CATCHUP_TAKE", 20)
+
 # Automatic Jellyfin merge of duplicate movie versions (every N hours; 0 disables).
 MERGE_VERSIONS_INTERVAL_HOURS = _env_int("MERGE_VERSIONS_INTERVAL_HOURS", 6)
 
