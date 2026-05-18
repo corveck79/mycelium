@@ -6,6 +6,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 
 import catchup
+import cleanup
 import config as cfg
 import db
 import jellyfin
@@ -14,6 +15,7 @@ import monitor
 import processor
 from config import (
     CATCHUP_ENABLED,
+    CLEANUP_INTERVAL_HOURS,
     LISTEN_HOST,
     LISTEN_PORT,
     MERGE_VERSIONS_INTERVAL_HOURS,
@@ -60,6 +62,14 @@ def _start_scheduler() -> BackgroundScheduler:
             id="movie_sync", next_run_time=None,
         )
         log.info("Scheduled movie sync every %dm", MOVIE_SYNC_INTERVAL_MINUTES)
+
+    if CLEANUP_INTERVAL_HOURS > 0:
+        scheduler.add_job(
+            cleanup.run_cleanup,
+            trigger="interval", hours=CLEANUP_INTERVAL_HOURS,
+            id="strm_cleanup", next_run_time=None,
+        )
+        log.info("Scheduled strm cleanup every %dh", CLEANUP_INTERVAL_HOURS)
 
     scheduler.start()
     return scheduler
@@ -127,6 +137,8 @@ def ui_dashboard():
         monitored=db.get_all_monitored_series(),
         wanted=db.get_all_wanted_episodes(),
         movies=db.get_media_items("movie"),
+        repair_items=db.get_repair_items(200),
+        last_cleanup=db.get_last_cleanup_run(),
         config=cfg,
     )
 
@@ -195,6 +207,20 @@ def ui_sync_movies():
 @app.get("/ui/logs")
 def ui_logs():
     return jsonify(lines=log_buffer.get_lines(100))
+
+
+@app.post("/ui/run-cleanup")
+def ui_run_cleanup():
+    threading.Thread(target=cleanup.run_cleanup, name="cleanup-manual", daemon=True).start()
+    flash("Cleanup scan started — check Repair tab for results", "ok")
+    return redirect(url_for("ui_dashboard") + "#repair")
+
+
+@app.post("/ui/repair-all")
+def ui_repair_all():
+    threading.Thread(target=cleanup.run_cleanup, name="repair-all-manual", daemon=True).start()
+    flash("Repair All started — check Repair tab for results", "ok")
+    return redirect(url_for("ui_dashboard") + "#repair")
 
 
 if __name__ == "__main__":

@@ -76,6 +76,9 @@ TMC_CONTAINER_NAME = _env("TMC_CONTAINER_NAME", "tmc")
 # Automatic Jellyfin merge of duplicate movie versions (every N hours; 0 disables).
 MERGE_VERSIONS_INTERVAL_HOURS = _env_int("MERGE_VERSIONS_INTERVAL_HOURS", 6)
 
+# Cleanup/repair scan every N hours (0 disables).
+CLEANUP_INTERVAL_HOURS = _env_int("CLEANUP_INTERVAL_HOURS", 24)
+
 LOG_LEVEL = _env("LOG_LEVEL", "INFO").upper()
 
 

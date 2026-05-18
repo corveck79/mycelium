@@ -63,3 +63,32 @@ def get_season_episodes(tmdb_id: int, season: int) -> list[dict]:
     if not data:
         return []
     return data.get("episodes") or []
+
+
+def search_movie(title: str, year: int | None = None) -> str | None:
+    """Search TMDB for a movie by title; return IMDB ID or None."""
+    params: dict = {"query": title}
+    if year:
+        params["year"] = year
+    data = _get("/search/movie", params=params)
+    if not data:
+        return None
+    results = data.get("results") or []
+    if not results:
+        log.warning("TMDB search_movie: no results for %r (year=%s)", title, year)
+        return None
+    tmdb_id = results[0]["id"]
+    return tmdb_to_imdb(tmdb_id, media_type="movie")
+
+
+def search_tv(title: str) -> str | None:
+    """Search TMDB for a TV show by title; return IMDB ID or None."""
+    data = _get("/search/tv", params={"query": title})
+    if not data:
+        return None
+    results = data.get("results") or []
+    if not results:
+        log.warning("TMDB search_tv: no results for %r", title)
+        return None
+    tmdb_id = results[0]["id"]
+    return tmdb_to_imdb(tmdb_id, media_type="tv")

@@ -112,6 +112,7 @@
     <button class="tab-btn" data-tab="movies">Movies</button>
     <button class="tab-btn" data-tab="series">Monitored Series</button>
     <button class="tab-btn" data-tab="wanted">Wanted Episodes</button>
+    <button class="tab-btn" data-tab="repair">Repair</button>
     <button class="tab-btn" data-tab="logs">Logs</button>
   </div>
 
@@ -252,6 +253,58 @@
             </td>
           </tr>
           {% else %}<tr><td colspan="8" class="empty">No wanted episodes</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Repair ── -->
+  <div id="tab-repair" class="tab-pane">
+    <div class="section-hdr">
+      <span class="section-title">Cleanup &amp; Repair</span>
+      <div style="display:flex;gap:8px">
+        <form method="post" action="/ui/run-cleanup" style="display:inline">
+          <button class="btn btn-secondary btn-sm">▶ Run Now</button>
+        </form>
+        <form method="post" action="/ui/repair-all" style="display:inline">
+          <button class="btn btn-primary btn-sm">↺ Repair All</button>
+        </form>
+      </div>
+    </div>
+
+    {% if last_cleanup %}
+    <div class="stats" style="margin-bottom:16px">
+      <div class="stat"><div class="stat-val">{{ last_cleanup.scanned }}</div><div class="stat-lbl">Scanned</div></div>
+      <div class="stat"><div class="stat-val" style="color:#4ade80">{{ last_cleanup.repaired }}</div><div class="stat-lbl">Repaired</div></div>
+      <div class="stat"><div class="stat-val" style="color:#94a3b8">{{ last_cleanup.deleted }}</div><div class="stat-lbl">Deleted</div></div>
+      <div class="stat"><div class="stat-val" style="color:#f87171">{{ last_cleanup.unfixable }}</div><div class="stat-lbl">Unfixable</div></div>
+      <div class="stat" style="min-width:160px"><div class="stat-val" style="font-size:13px;margin-top:4px">{{ last_cleanup.ran_at[:16] }}</div><div class="stat-lbl">Last Run</div></div>
+    </div>
+    {% else %}
+    <p class="dim" style="margin-bottom:16px;font-size:13px">No cleanup run yet — click Run Now to scan your media files.</p>
+    {% endif %}
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Old ID</th><th>New Hash</th><th>Reason</th><th>Time</th></tr></thead>
+        <tbody>
+          {% for item in repair_items %}
+          <tr>
+            <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ item.path }}">{{ item.title or item.path }}</td>
+            <td class="dim">{{ item.media_type or '—' }}</td>
+            <td>
+              {% if item.status == 'repaired' %}<span class="badge badge-success">✓ repaired</span>
+              {% elif item.status == 'unfixable' %}<span class="badge badge-failed">✗ unfixable</span>
+              {% elif item.status == 'deleted' %}<span class="badge badge-complete">deleted</span>
+              {% else %}<span class="badge badge-pending">{{ item.status }}</span>{% endif %}
+            </td>
+            <td class="mono dim">{{ item.old_torrent_id or '—' }}</td>
+            <td class="mono dim" style="font-size:10px">{{ (item.new_info_hash or '—')[:16] }}{% if item.new_info_hash %}…{% endif %}</td>
+            <td class="dim" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ item.reason or '—' }}</td>
+            <td class="dim">{{ (item.created_at or '')[:16] }}</td>
+          </tr>
+          {% else %}<tr><td colspan="7" class="empty">No repair history yet</td></tr>
           {% endfor %}
         </tbody>
       </table>

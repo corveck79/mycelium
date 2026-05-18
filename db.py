@@ -56,6 +56,28 @@ CREATE TABLE IF NOT EXISTS media_items (
     last_checked     TEXT,
     UNIQUE(imdb_id, media_type)
 );
+
+CREATE TABLE IF NOT EXISTS cleanup_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ran_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    scanned     INTEGER NOT NULL DEFAULT 0,
+    repaired    INTEGER NOT NULL DEFAULT 0,
+    deleted     INTEGER NOT NULL DEFAULT 0,
+    unfixable   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS repair_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    cleanup_run_id  INTEGER NOT NULL REFERENCES cleanup_runs(id),
+    path            TEXT    NOT NULL,
+    title           TEXT,
+    media_type      TEXT,
+    old_torrent_id  TEXT,
+    new_info_hash   TEXT,
+    status          TEXT    NOT NULL DEFAULT 'unknown',
+    reason          TEXT,
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
 """
 
 
@@ -253,4 +275,54 @@ def get_media_items(media_type: str | None = None) -> list[dict]:
             rows = conn.execute(
                 "SELECT * FROM media_items ORDER BY requested_at DESC"
             ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ── cleanup_runs ──────────────────────────────────────────────────────────────
+
+def insert_cleanup_run() -> int:
+    with _connect() as conn:
+        cur = conn.execute("INSERT INTO cleanup_runs DEFAULT VALUES")
+        conn.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+
+def update_cleanup_run(run_id: int, scanned: int, repaired: int,
+                        deleted: int, unfixable: int) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE cleanup_runs SET scanned=?, repaired=?, deleted=?, unfixable=? WHERE id=?",
+            (scanned, repaired, deleted, unfixable, run_id),
+        )
+        conn.commit()
+
+
+def get_last_cleanup_run() -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM cleanup_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else None
+
+
+# ── repair_items ──────────────────────────────────────────────────────────────
+
+def insert_repair_item(run_id: int, path: str, title: str | None, media_type: str | None,
+                        old_torrent_id: str | None, new_info_hash: str | None,
+                        status: str, reason: str | None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO repair_items
+               (cleanup_run_id, path, title, media_type, old_torrent_id, new_info_hash, status, reason)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (run_id, path, title, media_type, old_torrent_id, new_info_hash, status, reason),
+        )
+        conn.commit()
+
+
+def get_repair_items(limit: int = 200) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM repair_items ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
         return [dict(r) for r in rows]
