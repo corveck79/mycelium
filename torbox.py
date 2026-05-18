@@ -49,6 +49,24 @@ def find_by_hash(info_hash: str) -> dict | None:
     return None
 
 
+def check_cached(hashes: list[str], timeout: int = 15) -> set[str]:
+    """Return the subset of hashes that TorBox has cached (instant download available)."""
+    if not hashes:
+        return set()
+    url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/checkcached"
+    params = {"hash": ",".join(hashes), "format": "object"}
+    try:
+        resp = requests.get(url, headers=_headers(), params=params, timeout=timeout)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        log.warning("TorBox checkcached failed: %s", exc)
+        return set()
+    data = (resp.json() or {}).get("data") or {}
+    cached = {h.lower() for h in data.keys()}
+    log.info("TorBox cache check: %d/%d hashes cached", len(cached), len(hashes))
+    return cached
+
+
 def title_exists(title: str) -> bool:
     """Return True if any torrent in mylist appears to match the given title."""
     needle = title.lower()

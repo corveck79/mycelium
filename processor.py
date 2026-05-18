@@ -40,18 +40,29 @@ def _fetch_season_candidates(req: MediaRequest, season: int, episode: int, prefe
 
 
 def _add_best_from(candidates: list, label: str) -> bool:
-    """Try each ranked candidate in order; return True on first success."""
-    for stream in candidates:
+    """Check cache, prefer cached candidates, fall back to adding uncached if none cached."""
+    cached_hashes = torbox.check_cached([s.info_hash for s in candidates])
+
+    cached = [s for s in candidates if s.info_hash in cached_hashes]
+    uncached = [s for s in candidates if s.info_hash not in cached_hashes]
+
+    if cached:
+        log.info("%d/%d candidate(s) cached for %s — using cached", len(cached), len(candidates), label)
+    else:
+        log.info("No cached candidates for %s — will add best uncached", label)
+
+    # Try cached first (ranked order preserved); fall back to best uncached.
+    for stream in (cached or uncached[:1]):
         try:
             torbox.add_magnet(stream.magnet)
             torbox.wait_until_ready(stream.info_hash)
             return True
         except Exception as exc:
             log.warning(
-                "Failed to add %s (hash=%s quality=%s): %s — trying next candidate",
-                label, stream.info_hash, stream.quality, exc,
+                "Failed to add %s (hash=%s quality=%s cached=%s): %s — trying next",
+                label, stream.info_hash, stream.quality, stream.info_hash in cached_hashes, exc,
             )
-    log.error("All %d candidate(s) failed for %s", len(candidates), label)
+    log.error("All candidate(s) failed for %s", label)
     return False
 
 
