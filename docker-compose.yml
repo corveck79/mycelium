@@ -1,0 +1,13 @@
+services:
+  seerr-torbox-webhook:
+    build: .
+    image: seerr-torbox-webhook:latest
+    container_name: seerr-torbox-webhook
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    env_file:
+      - .env
+    environment:
+      - LISTEN_HOST=0.0.0.0
+      - LISTEN_PORT=8088
