@@ -31,7 +31,8 @@ TORRENTIO_OPTS = _env("TORRENTIO_OPTS", "")
 JELLYFIN_URL = _env("JELLYFIN_URL", "http://10.0.0.10:8096")
 JELLYFIN_API_KEY = _env("JELLYFIN_API_KEY", "")
 # Seconds to wait after TorBox reports ready before triggering Jellyfin scan.
-JELLYFIN_REFRESH_DELAY_SEC = _env_int("JELLYFIN_REFRESH_DELAY_SEC", 60)
+# TMC runs every hour and picks up new TorBox content automatically; 300s gives it time.
+JELLYFIN_REFRESH_DELAY_SEC = _env_int("JELLYFIN_REFRESH_DELAY_SEC", 300)
 
 SEERR_URL = _env("SEERR_URL", "http://10.0.0.10:5055")
 SEERR_API_KEY = _env("SEERR_API_KEY", "")

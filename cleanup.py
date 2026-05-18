@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 import time
 from pathlib import Path
@@ -7,14 +6,12 @@ from urllib.parse import parse_qs, urlparse
 
 import db
 import jellyfin
-import processor
 import tmdb
 import torbox
 import torrentio
 import zilean
-from config import MEDIA_PATH, TMC_CONTAINER_NAME, ZILEAN_ENABLED
+from config import MEDIA_PATH, ZILEAN_ENABLED
 from torrentio import TorrentioStream
-from webhook_parser import MediaRequest
 
 log = logging.getLogger(__name__)
 
@@ -63,19 +60,6 @@ def _is_available_in_mylist(torrent_id: str, mylist: list[dict]) -> bool:
     return False
 
 
-def _restart_tmc() -> None:
-    if not TMC_CONTAINER_NAME:
-        return
-    try:
-        import docker
-        client = docker.from_env()
-        container = client.containers.get(TMC_CONTAINER_NAME)
-        container.restart()
-        log.info("TMC container '%s' restarted after cleanup", TMC_CONTAINER_NAME)
-    except Exception as exc:
-        log.warning("Could not restart TMC container '%s': %s", TMC_CONTAINER_NAME, exc)
-
-
 def _resolve_imdb(title: str, year: int | None, media_type: str) -> str | None:
     if media_type == "movie":
         return tmdb.search_movie(title, year=year)
@@ -83,7 +67,6 @@ def _resolve_imdb(title: str, year: int | None, media_type: str) -> str | None:
 
 
 def _fetch_candidates(imdb_id: str, title: str, media_type: str) -> list:
-    fake_req = MediaRequest(title=title, media_type=media_type, imdb_id=imdb_id, seasons=[1])
     if media_type == "movie":
         if ZILEAN_ENABLED:
             streams = zilean.fetch_streams(imdb_id)
@@ -225,6 +208,4 @@ def run_cleanup() -> None:
              scanned, repaired, deleted, unfixable)
 
     if tmc_needed:
-        _restart_tmc()
-        time.sleep(15)
         jellyfin.refresh_library()
