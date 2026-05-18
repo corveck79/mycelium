@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seerr → TorBox</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f1117; color: #cbd5e1; min-height: 100vh; padding: 24px; }
+    a { color: #818cf8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+    header h1 { font-size: 22px; font-weight: 700; color: #e2e8f0; }
+    header h1 span { color: #818cf8; }
+    .refresh-hint { font-size: 12px; color: #475569; }
+
+    .section { margin-bottom: 32px; }
+    .section-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #64748b; margin-bottom: 12px; }
+
+    /* Manual form */
+    form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    label { font-size: 11px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+    input, select {
+      background: #1e2535; border: 1px solid #2d3a4e; color: #e2e8f0;
+      padding: 8px 12px; border-radius: 6px; font-size: 14px; outline: none;
+      transition: border-color .15s;
+    }
+    input:focus, select:focus { border-color: #818cf8; }
+    input[name="imdb_id"] { width: 160px; }
+    input[name="seasons"] { width: 140px; }
+    button[type="submit"] {
+      background: #4f46e5; color: #fff; border: none; padding: 9px 20px;
+      border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
+      transition: background .15s;
+    }
+    button[type="submit"]:hover { background: #4338ca; }
+
+    /* Flash message */
+    .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; }
+    .flash-ok  { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+    .flash-err { background: #2d0a0a; color: #f87171; border: 1px solid #7f1d1d; }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid #1e2535; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead tr { background: #161d2e; }
+    th { padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 700;
+         text-transform: uppercase; letter-spacing: .06em; color: #475569; white-space: nowrap; }
+    tbody tr { border-top: 1px solid #1a2236; transition: background .1s; }
+    tbody tr:hover { background: #1a2236; }
+    td { padding: 10px 14px; vertical-align: middle; }
+    .empty { text-align: center; color: #334155; padding: 32px !important; }
+
+    /* Badges */
+    .badge { display: inline-block; padding: 2px 9px; border-radius: 9999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .badge-success { background: #052e16; color: #4ade80; }
+    .badge-failed  { background: #2d0a0a; color: #f87171; }
+    .badge-pending { background: #2d1b00; color: #fbbf24; }
+
+    .mono { font-family: monospace; font-size: 12px; color: #94a3b8; }
+    .dim  { color: #475569; font-size: 12px; }
+
+    /* Log box */
+    #log-box {
+      background: #090d14; border: 1px solid #1a2236; border-radius: 8px;
+      padding: 14px 16px; font-family: monospace; font-size: 12px; line-height: 1.6;
+      max-height: 340px; overflow-y: auto; white-space: pre-wrap; color: #7dd3fc;
+    }
+    .log-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .log-status { font-size: 11px; color: #475569; }
+    #log-toggle { background: #1e2535; border: 1px solid #2d3a4e; color: #94a3b8;
+                  padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+
+    .stats { display: flex; gap: 16px; margin-bottom: 24px; }
+    .stat { background: #161d2e; border: 1px solid #1e2535; border-radius: 8px; padding: 14px 20px; flex: 1; min-width: 100px; }
+    .stat-value { font-size: 24px; font-weight: 700; color: #e2e8f0; }
+    .stat-label { font-size: 11px; color: #475569; margin-top: 2px; text-transform: uppercase; letter-spacing: .05em; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Seerr <span>→</span> TorBox</h1>
+    <span class="refresh-hint">Page auto-refreshes every 30s</span>
+  </header>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+      <div class="flash flash-{{ cat }}">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value">{{ rows | selectattr('status','eq','success') | list | length }}</div>
+      <div class="stat-label">Succeeded</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">{{ rows | selectattr('status','eq','pending') | list | length }}</div>
+      <div class="stat-label">Pending</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">{{ rows | selectattr('status','eq','failed') | list | length }}</div>
+      <div class="stat-label">Failed</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">{{ rows | length }}</div>
+      <div class="stat-label">Total</div>
+    </div>
+  </div>
+
+  <!-- Manual request form -->
+  <div class="section">
+    <div class="section-title">Manual Request</div>
+    <form method="post" action="/ui/submit">
+      <div class="field">
+        <label>IMDB ID</label>
+        <input name="imdb_id" placeholder="tt0293662" required pattern="tt\d{6,10}">
+      </div>
+      <div class="field">
+        <label>Type</label>
+        <select name="media_type">
+          <option value="movie">Movie</option>
+          <option value="series">Series</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Seasons (series only)</label>
+        <input name="seasons" placeholder="1  or  1,2,3" value="1">
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button type="submit">Add to TorBox</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Request history table -->
+  <div class="section">
+    <div class="section-title">Recent Requests</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>IMDB</th>
+            <th>Type</th>
+            <th>Seasons</th>
+            <th>Status</th>
+            <th>Quality</th>
+            <th>Source</th>
+            <th>Added</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ row.title }}</td>
+            <td><a href="https://www.imdb.com/title/{{ row.imdb_id }}" target="_blank">{{ row.imdb_id }}</a></td>
+            <td class="dim">{{ row.media_type }}</td>
+            <td class="dim">{{ row.seasons or '—' }}</td>
+            <td><span class="badge badge-{{ row.status }}">{{ row.status }}</span></td>
+            <td class="mono">{{ row.quality or '—' }}</td>
+            <td class="dim">{{ row.source or '—' }}</td>
+            <td class="dim">{{ row.created_at }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="empty">No requests yet</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Live logs -->
+  <div class="section">
+    <div class="section-title">Live Logs</div>
+    <div class="log-controls">
+      <button id="log-toggle" onclick="toggleAuto()">Auto-refresh: ON</button>
+      <span class="log-status" id="log-status">Loading…</span>
+    </div>
+    <div id="log-box">Loading…</div>
+  </div>
+
+  <script>
+    let autoRefresh = true;
+    let logTimer = null;
+
+    function toggleAuto() {
+      autoRefresh = !autoRefresh;
+      document.getElementById('log-toggle').textContent = 'Auto-refresh: ' + (autoRefresh ? 'ON' : 'OFF');
+      if (autoRefresh) scheduleLogs();
+      else clearTimeout(logTimer);
+    }
+
+    async function fetchLogs() {
+      try {
+        const r = await fetch('/ui/logs');
+        const data = await r.json();
+        const box = document.getElementById('log-box');
+        const atBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 40;
+        box.textContent = data.lines.join('\n');
+        if (atBottom) box.scrollTop = box.scrollHeight;
+        document.getElementById('log-status').textContent =
+          data.lines.length + ' lines · ' + new Date().toLocaleTimeString();
+      } catch(e) {
+        document.getElementById('log-status').textContent = 'fetch failed';
+      }
+    }
+
+    function scheduleLogs() {
+      clearTimeout(logTimer);
+      logTimer = setTimeout(async () => {
+        await fetchLogs();
+        if (autoRefresh) scheduleLogs();
+      }, 5000);
+    }
+
+    // Page auto-refresh every 30s for the table
+    setTimeout(() => location.reload(), 30000);
+
+    fetchLogs();
+    scheduleLogs();
+  </script>
+</body>
+</html>
