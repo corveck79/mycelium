@@ -6,6 +6,7 @@ import time
 
 import processor
 import seerr
+import tmdb
 import torbox
 from config import CATCHUP_DELAY_SEC, CATCHUP_TAKE
 from webhook_parser import MediaRequest
@@ -24,9 +25,13 @@ def _build_request(item: dict) -> MediaRequest | None:
         log.debug("Catch-up: skipping request %s — unknown media type %r", item.get("id"), raw_type)
         return None
 
-    imdb_id = media.get("imdbId") or media.get("imdb_id")
+    imdb_id = media.get("imdbId") or media.get("imdb_id") or None
     if not imdb_id:
-        log.debug("Catch-up: skipping request %s — no IMDB ID", item.get("id"))
+        tmdb_id = media.get("tmdbId") or media.get("tmdb_id")
+        if tmdb_id:
+            imdb_id = tmdb.tmdb_to_imdb(tmdb_id, media_type=raw_type if raw_type in ("movie", "tv") else "movie")
+    if not imdb_id:
+        log.debug("Catch-up: skipping request %s — no IMDB ID (tmdbId=%s)", item.get("id"), media.get("tmdbId"))
         return None
 
     title = media.get("title") or str(imdb_id)

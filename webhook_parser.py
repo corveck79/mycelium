@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass, field
 
 import seerr
+import tmdb
 
 log = logging.getLogger(__name__)
 
@@ -72,10 +73,16 @@ def _fetch_from_seerr(payload: dict) -> tuple[str | None, list[int]]:
         return None, []
 
     media = data.get("media") or {}
-    imdb_id = media.get("imdbId") or media.get("imdb_id") or None
+    imdb_id: str | None = media.get("imdbId") or media.get("imdb_id") or None
     if imdb_id:
         imdb_id = str(imdb_id).strip()
         log.info("Got IMDB ID from Seerr API: %s (request=%s)", imdb_id, request_id)
+    else:
+        tmdb_id = media.get("tmdbId") or media.get("tmdb_id")
+        if tmdb_id:
+            raw_type = (media.get("mediaType") or media.get("media_type") or "movie").lower()
+            media_type_for_tmdb = "movie" if raw_type == "movie" else "tv"
+            imdb_id = tmdb.tmdb_to_imdb(tmdb_id, media_type=media_type_for_tmdb)
 
     seasons: list[int] = []
     for s in data.get("seasons") or []:
