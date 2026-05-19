@@ -66,6 +66,21 @@ CREATE TABLE IF NOT EXISTS cleanup_runs (
     unfixable   INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS activity_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event       TEXT    NOT NULL,
+    title       TEXT,
+    message     TEXT,
+    success     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS poster_cache (
+    imdb_id     TEXT    PRIMARY KEY,
+    poster_path TEXT,
+    cached_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS repair_items (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     cleanup_run_id  INTEGER NOT NULL REFERENCES cleanup_runs(id),
@@ -316,6 +331,47 @@ def insert_repair_item(run_id: int, path: str, title: str | None, media_type: st
                (cleanup_run_id, path, title, media_type, old_torrent_id, new_info_hash, status, reason)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (run_id, path, title, media_type, old_torrent_id, new_info_hash, status, reason),
+        )
+        conn.commit()
+
+
+# ── activity_log ──────────────────────────────────────────────────────────────
+
+def log_activity(event: str, title: str | None = None, message: str | None = None,
+                  success: bool = True) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO activity_log (event, title, message, success) VALUES (?, ?, ?, ?)",
+            (event, title, message, int(success)),
+        )
+        conn.commit()
+
+
+def get_activity(limit: int = 100) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM activity_log ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ── poster_cache ──────────────────────────────────────────────────────────────
+
+def get_poster(imdb_id: str) -> str | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT poster_path FROM poster_cache WHERE imdb_id=?", (imdb_id,)
+        ).fetchone()
+        return row["poster_path"] if row else None
+
+
+def set_poster(imdb_id: str, poster_path: str | None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO poster_cache (imdb_id, poster_path) VALUES (?, ?)
+               ON CONFLICT(imdb_id) DO UPDATE SET poster_path=excluded.poster_path,
+                  cached_at=strftime('%Y-%m-%d %H:%M:%S','now')""",
+            (imdb_id, poster_path),
         )
         conn.commit()
 

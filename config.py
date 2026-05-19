@@ -78,6 +78,13 @@ CLEANUP_INTERVAL_HOURS = _env_int("CLEANUP_INTERVAL_HOURS", 24)
 
 LOG_LEVEL = _env("LOG_LEVEL", "INFO").upper()
 
+# ── Notifications ─────────────────────────────────────────────────────────────
+DISCORD_WEBHOOK_URL = _env("DISCORD_WEBHOOK_URL", "")
+TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID", "")
+NOTIFY_ON_SUCCESS = _env("NOTIFY_ON_SUCCESS", "true").lower() in ("1", "true", "yes")
+NOTIFY_ON_FAILURE = _env("NOTIFY_ON_FAILURE", "true").lower() in ("1", "true", "yes")
+
 
 def configure_logging() -> None:
     logging.basicConfig(

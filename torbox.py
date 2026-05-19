@@ -56,6 +56,22 @@ def find_by_id(torrent_id: int) -> dict | None:
     return None
 
 
+def delete_torrent(torrent_id: int, timeout: int = 15) -> bool:
+    url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/controltorrent"
+    try:
+        resp = requests.post(
+            url, headers=_headers(),
+            json={"torrent_id": torrent_id, "operation": "delete"},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        log.info("Deleted TorBox torrent %s", torrent_id)
+        return True
+    except Exception as exc:
+        log.warning("Delete torrent %s failed: %s", torrent_id, exc)
+        return False
+
+
 def check_cached(hashes: list[str], timeout: int = 15) -> set[str]:
     """Return the subset of hashes that TorBox has cached (instant download available)."""
     if not hashes:

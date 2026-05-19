@@ -1,102 +1,207 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Seerr → TorBox</title>
   <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #161d2e;
+      --panel2: #1a2236;
+      --border: #1e2535;
+      --text: #cbd5e1;
+      --text-bright: #e2e8f0;
+      --muted: #64748b;
+      --dim: #475569;
+      --accent: #818cf8;
+      --accent-bg: #4f46e5;
+      --accent-hover: #4338ca;
+      --green: #4ade80; --green-bg: #052e16; --green-border: #166534;
+      --red: #f87171;   --red-bg: #2d0a0a;   --red-border: #7f1d1d;
+      --amber: #fbbf24; --amber-bg: #2d1b00;
+      --indigo: #a5b4fc; --indigo-bg: #1e1b4b;
+    }
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --panel2: #f1f5f9;
+      --border: #e2e8f0;
+      --text: #334155;
+      --text-bright: #0f172a;
+      --muted: #64748b;
+      --dim: #94a3b8;
+      --accent: #4f46e5;
+      --green-bg: #dcfce7;
+      --red-bg: #fee2e2;
+      --amber-bg: #fef3c7;
+      --indigo-bg: #e0e7ff;
+    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, sans-serif; background: #0f1117; color: #cbd5e1; min-height: 100vh; }
-    a { color: #818cf8; text-decoration: none; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    a { color: var(--accent); text-decoration: none; }
 
-    /* Layout */
-    .topbar { background: #161d2e; border-bottom: 1px solid #1e2535; padding: 14px 24px;
-              display: flex; align-items: center; justify-content: space-between; }
-    .topbar h1 { font-size: 18px; font-weight: 700; color: #e2e8f0; }
-    .topbar h1 span { color: #818cf8; }
-    .hint { font-size: 11px; color: #475569; }
-    .container { padding: 20px 24px; max-width: 1400px; }
+    .topbar { background: var(--panel); border-bottom: 1px solid var(--border); padding: 14px 24px;
+              display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .topbar h1 { font-size: 18px; font-weight: 700; color: var(--text-bright); }
+    .topbar h1 span { color: var(--accent); }
+    .topbar-right { display: flex; align-items: center; gap: 12px; }
+    .health-dots { display: flex; gap: 6px; }
+    .health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); cursor: pointer; }
+    .health-dot.ok   { background: var(--green); }
+    .health-dot.down { background: var(--red); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .icon-btn { background: none; border: 1px solid var(--border); color: var(--muted);
+                width: 30px; height: 30px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .icon-btn:hover { color: var(--text-bright); border-color: var(--accent); }
+    .hint { font-size: 11px; color: var(--dim); }
+    .container { padding: 20px 24px; max-width: 1500px; margin: 0 auto; }
 
-    /* Flash */
     .flash { padding: 10px 14px; border-radius: 6px; margin: 12px 0; font-size: 13px; }
-    .flash-ok  { background: #052e16; color: #4ade80; border: 1px solid #166534; }
-    .flash-err { background: #2d0a0a; color: #f87171; border: 1px solid #7f1d1d; }
+    .flash-ok  { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+    .flash-err { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
 
-    /* Tabs */
-    .tabs { display: flex; gap: 2px; border-bottom: 1px solid #1e2535; margin-bottom: 20px; }
-    .tab-btn { background: none; border: none; padding: 10px 18px; font-size: 13px; font-weight: 600;
-               color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; }
-    .tab-btn:hover { color: #cbd5e1; }
-    .tab-btn.active { color: #818cf8; border-bottom-color: #818cf8; }
+    .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 20px; overflow-x: auto; }
+    .tab-btn { background: none; border: none; padding: 10px 16px; font-size: 13px; font-weight: 600;
+               color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; white-space: nowrap; }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-btn .badge-count { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 9999px;
+                            background: var(--border); color: var(--muted); font-size: 10px; }
     .tab-pane { display: none; }
     .tab-pane.active { display: block; }
 
-    /* Stats */
     .stats { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-    .stat { background: #161d2e; border: 1px solid #1e2535; border-radius: 8px;
-            padding: 12px 18px; min-width: 90px; }
-    .stat-val { font-size: 22px; font-weight: 700; color: #e2e8f0; }
-    .stat-lbl { font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+    .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+            padding: 14px 18px; min-width: 110px; flex: 0 0 auto; }
+    .stat-val { font-size: 22px; font-weight: 700; color: var(--text-bright); }
+    .stat-lbl { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+    .stat-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-    /* Manual form */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .card-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+                  color: var(--muted); margin-bottom: 12px; }
+
     .form-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 20px; }
     .field { display: flex; flex-direction: column; gap: 4px; }
-    label { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-    input, select { background: #1e2535; border: 1px solid #2d3a4e; color: #e2e8f0;
+    label { font-size: 10px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    input, select { background: var(--panel2); border: 1px solid var(--border); color: var(--text-bright);
                     padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
-    input:focus, select:focus { border-color: #818cf8; }
-    input[name="imdb_id"] { width: 150px; }
-    input[name="seasons"]  { width: 130px; }
+    input:focus, select:focus { border-color: var(--accent); }
+    input[name="imdb_id"], input[name="search_imdb"] { width: 160px; }
+    input[name="seasons"]  { width: 110px; }
     .btn { border: none; padding: 9px 18px; border-radius: 6px; font-size: 13px;
            font-weight: 600; cursor: pointer; transition: background .15s; white-space: nowrap; }
-    .btn-primary { background: #4f46e5; color: #fff; }
-    .btn-primary:hover { background: #4338ca; }
+    .btn-primary { background: var(--accent-bg); color: #fff; }
+    .btn-primary:hover { background: var(--accent-hover); }
     .btn-sm { padding: 4px 10px; font-size: 11px; }
-    .btn-secondary { background: #1e2535; color: #94a3b8; border: 1px solid #2d3a4e; }
-    .btn-secondary:hover { background: #2d3a4e; }
-    .btn-danger { background: #7f1d1d; color: #fca5a5; }
-    .btn-danger:hover { background: #991b1b; }
+    .btn-secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--border); }
+    .btn-danger { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+    .btn-danger:hover { background: var(--red-border); color: #fff; }
 
-    /* Tables */
-    .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid #1e2535; }
+    .search-bar { width: 100%; max-width: 320px; margin-bottom: 12px; }
+
+    .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    thead tr { background: #161d2e; }
+    thead tr { background: var(--panel); }
     th { padding: 9px 12px; text-align: left; font-size: 10px; font-weight: 700;
-         text-transform: uppercase; letter-spacing: .06em; color: #475569; white-space: nowrap; }
-    tbody tr { border-top: 1px solid #1a2236; }
-    tbody tr:hover { background: #1a2236; }
+         text-transform: uppercase; letter-spacing: .06em; color: var(--dim); white-space: nowrap;
+         cursor: pointer; user-select: none; }
+    th.sortable:hover { color: var(--text-bright); }
+    th.sort-asc::after  { content: " ▲"; color: var(--accent); }
+    th.sort-desc::after { content: " ▼"; color: var(--accent); }
+    tbody tr { border-top: 1px solid var(--panel2); }
+    tbody tr:hover { background: var(--panel2); }
     td { padding: 9px 12px; vertical-align: middle; }
-    .empty { text-align: center; color: #334155; padding: 28px !important; font-size: 13px; }
+    .empty { text-align: center; color: var(--dim); padding: 28px !important; font-size: 13px; }
 
-    /* Badges */
     .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 700; }
-    .badge-success, .badge-available, .badge-found   { background: #052e16; color: #4ade80; }
-    .badge-failed,  .badge-give_up                   { background: #2d0a0a; color: #f87171; }
-    .badge-pending, .badge-wanted                    { background: #2d1b00; color: #fbbf24; }
-    .badge-processing, .badge-not_aired              { background: #1e1b4b; color: #a5b4fc; }
-    .badge-active   { background: #052e16; color: #4ade80; }
-    .badge-complete { background: #1e2535; color: #64748b; }
+    .badge-success, .badge-available, .badge-found, .badge-ok      { background: var(--green-bg); color: var(--green); }
+    .badge-failed,  .badge-give_up, .badge-down, .badge-unfixable  { background: var(--red-bg); color: var(--red); }
+    .badge-pending, .badge-wanted                                  { background: var(--amber-bg); color: var(--amber); }
+    .badge-processing, .badge-not_aired                            { background: var(--indigo-bg); color: var(--indigo); }
+    .badge-active, .badge-cached, .badge-completed, .badge-uploading { background: var(--green-bg); color: var(--green); }
+    .badge-complete, .badge-disabled, .badge-deleted                 { background: var(--panel2); color: var(--muted); }
+    .badge-downloading, .badge-metadl                                { background: var(--indigo-bg); color: var(--indigo); }
 
-    .mono { font-family: monospace; color: #94a3b8; }
-    .dim  { color: #475569; }
-    .section-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-    .section-title { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #64748b; }
+    .poster { width: 34px; height: 50px; border-radius: 4px; background: var(--panel2);
+              object-fit: cover; vertical-align: middle; margin-right: 8px; }
+    .poster-placeholder { display: inline-block; width: 34px; height: 50px; border-radius: 4px;
+                          background: var(--panel2); vertical-align: middle; margin-right: 8px; }
+    .title-cell { display: flex; align-items: center; }
 
-    /* Log box */
+    .mono { font-family: monospace; color: var(--text); }
+    .dim  { color: var(--dim); }
+    .section-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 12px; flex-wrap: wrap; }
+    .section-title { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
     .log-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-    #log-box { background: #090d14; border: 1px solid #1a2236; border-radius: 8px; padding: 14px 16px;
-               font-family: monospace; font-size: 11px; line-height: 1.6; max-height: 400px;
+    #log-box { background: #090d14; border: 1px solid var(--panel2); border-radius: 8px; padding: 14px 16px;
+               font-family: monospace; font-size: 11px; line-height: 1.6; max-height: 500px;
                overflow-y: auto; white-space: pre-wrap; color: #7dd3fc; }
-    #log-status { font-size: 11px; color: #475569; }
-    #log-toggle { background: #1e2535; border: 1px solid #2d3a4e; color: #94a3b8;
-                  padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; }
+    [data-theme="light"] #log-box { background: #1e293b; color: #7dd3fc; }
+    #log-status { font-size: 11px; color: var(--dim); }
+
+    .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: flex;
+                       flex-direction: column; gap: 8px; max-width: 360px; }
+    .toast { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+             padding: 12px 16px; border-radius: 6px; font-size: 13px; color: var(--text-bright);
+             box-shadow: 0 4px 12px rgba(0,0,0,.3); animation: slidein .3s; }
+    .toast.ok   { border-left-color: var(--green); }
+    .toast.err  { border-left-color: var(--red); }
+    .toast-title { font-weight: 700; margin-bottom: 2px; }
+    .toast-msg   { font-size: 12px; color: var(--muted); }
+    @keyframes slidein { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    .activity-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--panel2); font-size: 12px; }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-time { color: var(--dim); font-size: 10px; min-width: 110px; white-space: nowrap; }
+    .activity-icon { font-size: 14px; }
+    .activity-text { flex: 1; }
+    .activity-text b { color: var(--text-bright); }
+
+    .quality-bars { display: flex; flex-direction: column; gap: 6px; }
+    .quality-bar-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+    .quality-label { width: 60px; color: var(--muted); }
+    .quality-bar-bg { flex: 1; background: var(--panel2); border-radius: 3px; height: 8px; overflow: hidden; }
+    .quality-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+    .quality-count { color: var(--text-bright); font-weight: 700; min-width: 30px; text-align: right; }
+
+    .health-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+    .health-pill { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel2);
+                   border-radius: 6px; font-size: 12px; }
+    .health-pill .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .health-pill .dot.ok { background: var(--green); }
+    .health-pill .dot.down { background: var(--red); }
+    .health-pill .dot.disabled { background: var(--dim); }
+
+    .candidates-list { display: flex; flex-direction: column; gap: 6px; max-height: 500px; overflow-y: auto; }
+    .candidate { display: flex; gap: 12px; align-items: center; padding: 10px 12px; background: var(--panel);
+                 border: 1px solid var(--border); border-radius: 6px; }
+    .candidate.cached { border-left: 3px solid var(--green); }
+    .candidate-info { flex: 1; min-width: 0; }
+    .candidate-name { font-size: 12px; color: var(--text-bright); overflow: hidden; text-overflow: ellipsis;
+                      white-space: nowrap; margin-bottom: 4px; }
+    .candidate-meta { font-size: 11px; color: var(--muted); display: flex; gap: 10px; }
+
+    .storage-bar { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 12px; }
+    .storage-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .storage-count { color: var(--muted); font-family: monospace; min-width: 50px; text-align: right; }
   </style>
 </head>
 <body>
 
 <div class="topbar">
   <h1>Seerr <span>→</span> TorBox</h1>
-  <span class="hint">Auto-refreshes every 30s</span>
+  <div class="topbar-right">
+    <div id="health-dots" class="health-dots" title="Service health (click for details)"></div>
+    <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">🌓</button>
+    <button class="icon-btn" onclick="forceRescan()" title="Force strm rescan">↻</button>
+    <span class="hint">Live updates</span>
+  </div>
 </div>
 
 <div class="container">
@@ -106,43 +211,75 @@
     {% endfor %}
   {% endwith %}
 
-  <!-- Tabs -->
   <div class="tabs">
-    <button class="tab-btn" data-tab="requests">Requests</button>
-    <button class="tab-btn" data-tab="movies">Movies</button>
-    <button class="tab-btn" data-tab="series">Monitored Series</button>
-    <button class="tab-btn" data-tab="wanted">Wanted Episodes</button>
+    <button class="tab-btn" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="requests">Requests <span class="badge-count">{{ requests | length }}</span></button>
+    <button class="tab-btn" data-tab="movies">Movies <span class="badge-count">{{ movies | length }}</span></button>
+    <button class="tab-btn" data-tab="series">Series <span class="badge-count">{{ monitored | length }}</span></button>
+    <button class="tab-btn" data-tab="wanted">Wanted <span class="badge-count">{{ wanted | length }}</span></button>
+    <button class="tab-btn" data-tab="search">Search</button>
+    <button class="tab-btn" data-tab="torbox">TorBox</button>
     <button class="tab-btn" data-tab="repair">Repair</button>
     <button class="tab-btn" data-tab="logs">Logs</button>
   </div>
 
-  <!-- ── Requests ── -->
-  <div id="tab-requests" class="tab-pane">
-    <div class="stats">
-      <div class="stat"><div class="stat-val">{{ requests | selectattr('status','eq','success') | list | length }}</div><div class="stat-lbl">Success</div></div>
-      <div class="stat"><div class="stat-val">{{ requests | selectattr('status','eq','pending')  | list | length }}</div><div class="stat-lbl">Pending</div></div>
-      <div class="stat"><div class="stat-val">{{ requests | selectattr('status','eq','failed')   | list | length }}</div><div class="stat-lbl">Failed</div></div>
-      <div class="stat"><div class="stat-val">{{ requests | length }}</div><div class="stat-lbl">Total</div></div>
+  <!-- ── Overview ── -->
+  <div id="tab-overview" class="tab-pane">
+    <div class="stats" id="overview-stats">
+      <div class="stat"><div class="stat-val" id="ov-movies">—</div><div class="stat-lbl">Movies</div></div>
+      <div class="stat"><div class="stat-val" id="ov-episodes">—</div><div class="stat-lbl">Episodes</div></div>
+      <div class="stat"><div class="stat-val" id="ov-series">—</div><div class="stat-lbl">Series</div></div>
+      <div class="stat"><div class="stat-val" id="ov-wanted">—</div><div class="stat-lbl">Wanted</div></div>
+      <div class="stat"><div class="stat-val" id="ov-success">—</div><div class="stat-lbl">Success 7d</div>
+        <div class="stat-sub" id="ov-success-sub"></div></div>
     </div>
 
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">Service Health</div>
+        <div id="health-list" class="health-card"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Quality Distribution</div>
+        <div id="quality-bars" class="quality-bars"></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">Recent Activity</div>
+        <div id="activity-feed"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Top Folders (.strm count)</div>
+        <div id="storage-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Requests ── -->
+  <div id="tab-requests" class="tab-pane">
     <div class="section-hdr"><span class="section-title">Manual Request</span></div>
     <form method="post" action="/ui/submit">
       <div class="form-row">
         <div class="field"><label>IMDB ID</label><input name="imdb_id" placeholder="tt0293662" required pattern="tt\d{6,10}"></div>
         <div class="field"><label>Type</label><select name="media_type"><option value="movie">Movie</option><option value="series">Series</option></select></div>
-        <div class="field"><label>Seasons</label><input name="seasons" placeholder="1  or  1,2,3" value="1"></div>
+        <div class="field"><label>Seasons</label><input name="seasons" placeholder="1 or 1,2,3" value="1"></div>
         <div class="field"><label>&nbsp;</label><button type="submit" class="btn btn-primary">Add to TorBox</button></div>
       </div>
     </form>
 
-    <div class="section-hdr"><span class="section-title">Recent Requests</span></div>
+    <input type="text" class="search-bar" placeholder="Search requests…" data-filter="requests-table">
     <div class="table-wrap">
-      <table>
-        <thead><tr><th>Title</th><th>IMDB</th><th>Type</th><th>Seasons</th><th>Status</th><th>Quality</th><th>Source</th><th>Added</th></tr></thead>
+      <table id="requests-table">
+        <thead><tr>
+          <th class="sortable">Title</th><th>IMDB</th><th class="sortable">Type</th><th>Seasons</th>
+          <th class="sortable">Status</th><th>Quality</th><th>Source</th><th class="sortable">Added</th><th></th>
+        </tr></thead>
         <tbody>
           {% for r in requests %}
-          <tr>
-            <td>{{ r.title }}</td>
+          <tr data-imdb="{{ r.imdb_id }}" data-type="{{ r.media_type }}">
+            <td><div class="title-cell"><span class="poster-placeholder" data-poster="{{ r.imdb_id }}" data-poster-type="{{ r.media_type }}"></span>{{ r.title }}</div></td>
             <td><a href="https://www.imdb.com/title/{{ r.imdb_id }}" target="_blank">{{ r.imdb_id }}</a></td>
             <td class="dim">{{ r.media_type }}</td>
             <td class="dim">{{ r.seasons or '—' }}</td>
@@ -150,8 +287,15 @@
             <td class="mono">{{ r.quality or '—' }}</td>
             <td class="dim">{{ r.source or '—' }}</td>
             <td class="dim">{{ r.created_at }}</td>
+            <td>
+              {% if r.status == 'failed' %}
+              <form method="post" action="/ui/retry-request/{{ r.id }}" style="display:inline">
+                <button class="btn btn-sm btn-secondary">↻ Retry</button>
+              </form>
+              {% endif %}
+            </td>
           </tr>
-          {% else %}<tr><td colspan="8" class="empty">No requests yet</td></tr>
+          {% else %}<tr><td colspan="9" class="empty">No requests yet</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -166,13 +310,17 @@
         <button class="btn btn-secondary btn-sm">↻ Sync Now</button>
       </form>
     </div>
+    <input type="text" class="search-bar" placeholder="Search movies…" data-filter="movies-table">
     <div class="table-wrap">
-      <table>
-        <thead><tr><th>Title</th><th>IMDB</th><th>Status</th><th>Requested By</th><th>Requested At</th><th>Action</th></tr></thead>
+      <table id="movies-table">
+        <thead><tr>
+          <th class="sortable">Title</th><th>IMDB</th><th class="sortable">Status</th>
+          <th>Requested By</th><th class="sortable">Requested At</th><th></th>
+        </tr></thead>
         <tbody>
           {% for m in movies %}
           <tr>
-            <td>{{ m.title }}</td>
+            <td><div class="title-cell"><span class="poster-placeholder" data-poster="{{ m.imdb_id }}" data-poster-type="movie"></span>{{ m.title }}</div></td>
             <td><a href="https://www.imdb.com/title/{{ m.imdb_id }}" target="_blank">{{ m.imdb_id }}</a></td>
             <td>
               {% if m.strm_found %}<span class="badge badge-available">✓ available</span>
@@ -191,23 +339,27 @@
               {% endif %}
             </td>
           </tr>
-          {% else %}<tr><td colspan="6" class="empty">No approved movies found — click Sync Now</td></tr>
+          {% else %}<tr><td colspan="6" class="empty">No approved movies — click Sync Now</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- ── Monitored Series ── -->
+  <!-- ── Series ── -->
   <div id="tab-series" class="tab-pane">
     <div class="section-hdr"><span class="section-title">Monitored Series</span></div>
+    <input type="text" class="search-bar" placeholder="Search series…" data-filter="series-table">
     <div class="table-wrap">
-      <table>
-        <thead><tr><th>Title</th><th>IMDB</th><th>TMDB</th><th>Seasons</th><th>Status</th><th>Last Checked</th></tr></thead>
+      <table id="series-table">
+        <thead><tr>
+          <th class="sortable">Title</th><th>IMDB</th><th>TMDB</th><th>Seasons</th>
+          <th class="sortable">Status</th><th class="sortable">Last Checked</th>
+        </tr></thead>
         <tbody>
           {% for s in monitored %}
           <tr>
-            <td>{{ s.title }}</td>
+            <td><div class="title-cell"><span class="poster-placeholder" data-poster="{{ s.imdb_id }}" data-poster-type="tv"></span>{{ s.title }}</div></td>
             <td><a href="https://www.imdb.com/title/{{ s.imdb_id }}" target="_blank">{{ s.imdb_id }}</a></td>
             <td class="dim">{{ s.tmdb_id or '—' }}</td>
             <td class="dim">{{ s.seasons or '—' }}</td>
@@ -221,15 +373,20 @@
     </div>
   </div>
 
-  <!-- ── Wanted Episodes ── -->
+  <!-- ── Wanted ── -->
   <div id="tab-wanted" class="tab-pane">
     <div class="section-hdr">
       <span class="section-title">Wanted Episodes</span>
       <span class="dim" style="font-size:11px">Retries every {{ config.MONITOR_INTERVAL_HOURS }}h · max {{ config.MAX_RETRY_ATTEMPTS }} attempts</span>
     </div>
+    <input type="text" class="search-bar" placeholder="Search episodes…" data-filter="wanted-table">
     <div class="table-wrap">
-      <table>
-        <thead><tr><th>Show</th><th>S</th><th>E</th><th>Air Date</th><th>Status</th><th>Attempts</th><th>Last Try</th><th>Action</th></tr></thead>
+      <table id="wanted-table">
+        <thead><tr>
+          <th class="sortable">Show</th><th class="sortable">S</th><th class="sortable">E</th>
+          <th class="sortable">Air Date</th><th class="sortable">Status</th>
+          <th>Attempts</th><th class="sortable">Last Try</th><th></th>
+        </tr></thead>
         <tbody>
           {% for ep in wanted %}
           <tr>
@@ -247,7 +404,7 @@
                 <input type="hidden" name="title"   value="{{ ep.title }}">
                 <input type="hidden" name="season"  value="{{ ep.season }}">
                 <input type="hidden" name="episode" value="{{ ep.episode }}">
-                <button class="btn btn-secondary btn-sm">Search Now</button>
+                <button class="btn btn-secondary btn-sm">Search</button>
               </form>
               {% endif %}
             </td>
@@ -255,6 +412,56 @@
           {% else %}<tr><td colspan="8" class="empty">No wanted episodes</td></tr>
           {% endfor %}
         </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Search ── -->
+  <div id="tab-search" class="tab-pane">
+    <div class="card">
+      <div class="card-title">Manual Search & Pick</div>
+      <p class="dim" style="font-size:12px;margin-bottom:12px">
+        Search Zilean/Torrentio for an IMDB ID and pick exactly which release to add to TorBox.
+      </p>
+      <div class="form-row">
+        <div class="field"><label>IMDB ID</label><input id="search_imdb" name="search_imdb" placeholder="tt0293662" pattern="tt\d{6,10}"></div>
+        <div class="field"><label>Type</label>
+          <select id="search_type"><option value="movie">Movie</option><option value="series">Series</option></select>
+        </div>
+        <div class="field"><label>Season</label><input id="search_season" type="number" value="1" min="1" style="width:80px"></div>
+        <div class="field"><label>Episode</label><input id="search_episode" type="number" value="1" min="1" style="width:80px"></div>
+        <div class="field"><label>&nbsp;</label><button class="btn btn-primary" onclick="doSearch()">Search</button></div>
+      </div>
+      <div id="search-status" class="dim" style="font-size:12px;margin-bottom:10px"></div>
+      <div id="candidates" class="candidates-list"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">Add by Magnet URL</div>
+      <form method="post" action="/ui/add-magnet">
+        <div class="form-row">
+          <div class="field" style="flex:1"><label>Magnet</label>
+            <input name="magnet" placeholder="magnet:?xt=urn:btih:…" style="min-width:400px;width:100%"></div>
+          <div class="field"><label>&nbsp;</label><button type="submit" class="btn btn-primary">Add</button></div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── TorBox ── -->
+  <div id="tab-torbox" class="tab-pane">
+    <div class="section-hdr">
+      <span class="section-title">TorBox Library</span>
+      <button class="btn btn-secondary btn-sm" onclick="refreshTorbox()">↻ Refresh</button>
+    </div>
+    <input type="text" class="search-bar" placeholder="Search TorBox…" data-filter="torbox-table">
+    <div class="table-wrap">
+      <table id="torbox-table">
+        <thead><tr>
+          <th class="sortable">Name</th><th class="sortable">State</th><th class="sortable">Size</th>
+          <th>Files</th><th class="sortable">Added</th><th></th>
+        </tr></thead>
+        <tbody id="torbox-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -272,36 +479,30 @@
         </form>
       </div>
     </div>
-
     {% if last_cleanup %}
     <div class="stats" style="margin-bottom:16px">
       <div class="stat"><div class="stat-val">{{ last_cleanup.scanned }}</div><div class="stat-lbl">Scanned</div></div>
-      <div class="stat"><div class="stat-val" style="color:#4ade80">{{ last_cleanup.repaired }}</div><div class="stat-lbl">Repaired</div></div>
-      <div class="stat"><div class="stat-val" style="color:#94a3b8">{{ last_cleanup.deleted }}</div><div class="stat-lbl">Deleted</div></div>
-      <div class="stat"><div class="stat-val" style="color:#f87171">{{ last_cleanup.unfixable }}</div><div class="stat-lbl">Unfixable</div></div>
+      <div class="stat"><div class="stat-val" style="color:var(--green)">{{ last_cleanup.repaired }}</div><div class="stat-lbl">Repaired</div></div>
+      <div class="stat"><div class="stat-val">{{ last_cleanup.deleted }}</div><div class="stat-lbl">Deleted</div></div>
+      <div class="stat"><div class="stat-val" style="color:var(--red)">{{ last_cleanup.unfixable }}</div><div class="stat-lbl">Unfixable</div></div>
       <div class="stat" style="min-width:160px"><div class="stat-val" style="font-size:13px;margin-top:4px">{{ last_cleanup.ran_at[:16] }}</div><div class="stat-lbl">Last Run</div></div>
     </div>
     {% else %}
-    <p class="dim" style="margin-bottom:16px;font-size:13px">No cleanup run yet — click Run Now to scan your media files.</p>
+    <p class="dim" style="margin-bottom:16px;font-size:13px">No cleanup run yet — click Run Now.</p>
     {% endif %}
-
+    <input type="text" class="search-bar" placeholder="Search repairs…" data-filter="repair-table">
     <div class="table-wrap">
-      <table>
+      <table id="repair-table">
         <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Old ID</th><th>New Hash</th><th>Reason</th><th>Time</th></tr></thead>
         <tbody>
           {% for item in repair_items %}
           <tr>
             <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ item.path }}">{{ item.title or item.path }}</td>
             <td class="dim">{{ item.media_type or '—' }}</td>
-            <td>
-              {% if item.status == 'repaired' %}<span class="badge badge-success">✓ repaired</span>
-              {% elif item.status == 'unfixable' %}<span class="badge badge-failed">✗ unfixable</span>
-              {% elif item.status == 'deleted' %}<span class="badge badge-complete">deleted</span>
-              {% else %}<span class="badge badge-pending">{{ item.status }}</span>{% endif %}
-            </td>
+            <td><span class="badge badge-{{ item.status }}">{{ item.status }}</span></td>
             <td class="mono dim">{{ item.old_torrent_id or '—' }}</td>
             <td class="mono dim" style="font-size:10px">{{ (item.new_info_hash or '—')[:16] }}{% if item.new_info_hash %}…{% endif %}</td>
-            <td class="dim" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ item.reason or '—' }}</td>
+            <td class="dim" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ item.reason or '—' }}</td>
             <td class="dim">{{ (item.created_at or '')[:16] }}</td>
           </tr>
           {% else %}<tr><td colspan="7" class="empty">No repair history yet</td></tr>
@@ -314,36 +515,305 @@
   <!-- ── Logs ── -->
   <div id="tab-logs" class="tab-pane">
     <div class="log-controls">
-      <button id="log-toggle" onclick="toggleAuto()">Auto: ON</button>
+      <button class="btn btn-sm btn-secondary" onclick="toggleAuto()" id="log-toggle">Auto: ON</button>
       <span id="log-status">Loading…</span>
     </div>
     <div id="log-box">Loading…</div>
   </div>
 </div>
 
+<div id="toast-container" class="toast-container"></div>
+
 <script>
-  // ── Config passed from Flask ──
-  const MONITOR_INTERVAL_HOURS = {{ config.MONITOR_INTERVAL_HOURS }};
-  const MAX_RETRY_ATTEMPTS = {{ config.MAX_RETRY_ATTEMPTS }};
+  const CONFIG = {
+    MONITOR_INTERVAL_HOURS: {{ config.MONITOR_INTERVAL_HOURS }},
+    MAX_RETRY_ATTEMPTS: {{ config.MAX_RETRY_ATTEMPTS }},
+  };
+  let LAST_ACTIVITY_ID = null;
+  let userIdleSince = Date.now();
+  document.addEventListener('click', () => userIdleSince = Date.now());
+  document.addEventListener('keydown', () => userIdleSince = Date.now());
+
+  // ── Theme ──
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    localStorage.setItem('theme', t);
+  }
+  function toggleTheme() {
+    const cur = document.documentElement.getAttribute('data-theme');
+    applyTheme(cur === 'dark' ? 'light' : 'dark');
+  }
+  applyTheme(localStorage.getItem('theme') || 'dark');
 
   // ── Tabs ──
   function showTab(name) {
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    const pane = document.getElementById('tab-' + name);
-    const btn  = document.querySelector('[data-tab="' + name + '"]');
-    if (pane) pane.classList.add('active');
-    if (btn)  btn.classList.add('active');
+    document.getElementById('tab-' + name)?.classList.add('active');
+    document.querySelector('[data-tab="' + name + '"]')?.classList.add('active');
     location.hash = name;
+    if (name === 'torbox') refreshTorbox();
+    if (name === 'overview') refreshOverview();
   }
-
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => showTab(btn.dataset.tab));
   });
+  showTab(location.hash.replace('#', '') || 'overview');
 
-  // Restore tab from hash or default
-  const hash = location.hash.replace('#', '') || 'requests';
-  showTab(hash);
+  // ── Search filter ──
+  document.querySelectorAll('[data-filter]').forEach(input => {
+    input.addEventListener('input', () => {
+      const tbl = document.getElementById(input.dataset.filter);
+      if (!tbl) return;
+      const q = input.value.toLowerCase();
+      tbl.querySelectorAll('tbody tr').forEach(row => {
+        if (row.querySelector('.empty')) return;
+        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+  });
+
+  // ── Sortable columns ──
+  document.querySelectorAll('table').forEach(tbl => {
+    tbl.querySelectorAll('th.sortable').forEach((th, idx) => {
+      th.addEventListener('click', () => sortTable(tbl, idx, th));
+    });
+  });
+  function sortTable(tbl, colIdx, th) {
+    const tbody = tbl.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr')).filter(r => !r.querySelector('.empty'));
+    const asc = !th.classList.contains('sort-asc');
+    tbl.querySelectorAll('th').forEach(t => t.classList.remove('sort-asc', 'sort-desc'));
+    th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+    rows.sort((a, b) => {
+      const av = (a.cells[colIdx]?.textContent || '').trim();
+      const bv = (b.cells[colIdx]?.textContent || '').trim();
+      const an = parseFloat(av), bn = parseFloat(bv);
+      if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+      return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
+    rows.forEach(r => tbody.appendChild(r));
+  }
+
+  // ── Posters (lazy via TMDB) ──
+  const posterObserver = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const el = e.target;
+      posterObserver.unobserve(el);
+      const id = el.dataset.poster, type = el.dataset.posterType || 'movie';
+      if (!id) return;
+      fetch(`/ui/api/poster/${id}?type=${type}`).then(r => r.json()).then(d => {
+        if (d.poster) {
+          const img = document.createElement('img');
+          img.className = 'poster';
+          img.src = d.poster;
+          img.loading = 'lazy';
+          el.replaceWith(img);
+        }
+      }).catch(() => {});
+    });
+  });
+  document.querySelectorAll('[data-poster]').forEach(el => posterObserver.observe(el));
+
+  // ── Toasts ──
+  function toast(title, msg, kind='ok') {
+    const c = document.getElementById('toast-container');
+    const t = document.createElement('div');
+    t.className = 'toast ' + kind;
+    t.innerHTML = `<div class="toast-title">${title}</div><div class="toast-msg">${msg||''}</div>`;
+    c.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 5000);
+  }
+
+  // ── Health ──
+  async function refreshHealth() {
+    try {
+      const r = await fetch('/ui/api/health');
+      const d = await r.json();
+      const dots = document.getElementById('health-dots');
+      const list = document.getElementById('health-list');
+      dots.innerHTML = '';
+      list.innerHTML = '';
+      d.services.forEach(s => {
+        const dot = document.createElement('div');
+        dot.className = 'health-dot ' + (s.status === 'ok' ? 'ok' : s.status === 'down' ? 'down' : '');
+        dot.title = `${s.name}: ${s.status}`;
+        dots.appendChild(dot);
+        const pill = document.createElement('div');
+        pill.className = 'health-pill';
+        pill.innerHTML = `<span class="dot ${s.status}"></span><span>${s.name}</span><span class="dim" style="margin-left:auto">${s.status}</span>`;
+        list.appendChild(pill);
+      });
+    } catch(e) {}
+  }
+
+  // ── Overview ──
+  async function refreshOverview() {
+    try {
+      const r = await fetch('/ui/api/stats');
+      const d = await r.json();
+      document.getElementById('ov-movies').textContent = d.library.movie_count;
+      document.getElementById('ov-episodes').textContent = d.library.episode_count;
+      document.getElementById('ov-series').textContent = d.library.series_count;
+      document.getElementById('ov-wanted').textContent = d.wanted.active;
+      document.getElementById('ov-success').textContent = d.requests.success_rate_7d + '%';
+      document.getElementById('ov-success-sub').textContent = `${d.requests.succeeded_7d} ok · ${d.requests.failed_7d} fail`;
+
+      const total = Object.values(d.qualities).reduce((a, b) => a + b, 0) || 1;
+      const bars = document.getElementById('quality-bars');
+      bars.innerHTML = '';
+      const sorted = Object.entries(d.qualities).sort((a, b) => b[1] - a[1]);
+      if (!sorted.length) {
+        bars.innerHTML = '<div class="dim" style="font-size:12px">No data yet</div>';
+      } else {
+        sorted.forEach(([q, n]) => {
+          const pct = (100 * n / total).toFixed(0);
+          bars.innerHTML += `<div class="quality-bar-row">
+            <div class="quality-label">${q}</div>
+            <div class="quality-bar-bg"><div class="quality-bar-fill" style="width:${pct}%"></div></div>
+            <div class="quality-count">${n}</div></div>`;
+        });
+      }
+    } catch(e) {}
+
+    try {
+      const r = await fetch('/ui/api/activity');
+      const d = await r.json();
+      const feed = document.getElementById('activity-feed');
+      feed.innerHTML = '';
+      d.events.slice(0, 15).forEach(ev => {
+        const icon = ev.success ? '✓' : '✗';
+        const color = ev.success ? 'var(--green)' : 'var(--red)';
+        feed.innerHTML += `<div class="activity-item">
+          <span class="activity-time">${(ev.created_at||'').slice(0,16)}</span>
+          <span class="activity-icon" style="color:${color}">${icon}</span>
+          <span class="activity-text"><b>${ev.event}</b> ${ev.title||''} <span class="dim">${ev.message||''}</span></span>
+        </div>`;
+      });
+      if (!d.events.length) feed.innerHTML = '<div class="dim" style="font-size:12px">No activity yet</div>';
+    } catch(e) {}
+
+    try {
+      const r = await fetch('/ui/api/storage');
+      const d = await r.json();
+      const list = document.getElementById('storage-list');
+      list.innerHTML = '';
+      const max = Math.max(...d.folders.map(f => f.count), 1);
+      d.folders.slice(0, 15).forEach(f => {
+        const pct = (100 * f.count / max).toFixed(0);
+        list.innerHTML += `<div class="storage-bar">
+          <div class="storage-name">${f.path}</div>
+          <div class="storage-count">${f.count}</div></div>`;
+      });
+      if (!d.folders.length) list.innerHTML = '<div class="dim" style="font-size:12px">Empty</div>';
+    } catch(e) {}
+  }
+
+  // ── Activity toasts ──
+  async function pollActivity() {
+    try {
+      const r = await fetch('/ui/api/activity');
+      const d = await r.json();
+      if (!d.events.length) return;
+      if (LAST_ACTIVITY_ID === null) {
+        LAST_ACTIVITY_ID = d.events[0].id;
+        return;
+      }
+      const fresh = d.events.filter(e => e.id > LAST_ACTIVITY_ID);
+      fresh.reverse().forEach(e => {
+        toast(`${e.event}: ${e.title || ''}`, e.message || '', e.success ? 'ok' : 'err');
+      });
+      if (fresh.length) LAST_ACTIVITY_ID = d.events[0].id;
+    } catch(e) {}
+  }
+
+  // ── TorBox ──
+  async function refreshTorbox() {
+    const body = document.getElementById('torbox-body');
+    body.innerHTML = '<tr><td colspan="6" class="empty">Loading…</td></tr>';
+    try {
+      const r = await fetch('/ui/api/torbox-list');
+      const d = await r.json();
+      if (d.error) { body.innerHTML = `<tr><td colspan="6" class="empty" style="color:var(--red)">${d.error}</td></tr>`; return; }
+      body.innerHTML = '';
+      d.torrents.forEach(t => {
+        const sizeGB = t.size ? (t.size / 1e9).toFixed(2) + ' GB' : '—';
+        const state = (t.download_state || '').toLowerCase();
+        const stateBadge = `<span class="badge badge-${state}">${state || '—'}</span>`;
+        body.innerHTML += `<tr>
+          <td style="max-width:480px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.name}">${t.name}</td>
+          <td>${stateBadge}</td>
+          <td class="mono">${sizeGB}</td>
+          <td class="dim">${t.file_count}</td>
+          <td class="dim">${(t.created_at||'').slice(0,16)}</td>
+          <td>
+            <form method="post" action="/ui/torbox-delete" style="display:inline"
+                  onsubmit="return confirm('Delete this torrent from TorBox?')">
+              <input type="hidden" name="torrent_id" value="${t.id}">
+              <button class="btn btn-sm btn-danger">Delete</button>
+            </form>
+          </td>
+        </tr>`;
+      });
+      if (!d.torrents.length) body.innerHTML = '<tr><td colspan="6" class="empty">No torrents</td></tr>';
+    } catch(e) {
+      body.innerHTML = `<tr><td colspan="6" class="empty" style="color:var(--red)">${e.message}</td></tr>`;
+    }
+  }
+
+  // ── Manual search ──
+  async function doSearch() {
+    const imdb = document.getElementById('search_imdb').value.trim();
+    const type = document.getElementById('search_type').value;
+    const season = document.getElementById('search_season').value;
+    const episode = document.getElementById('search_episode').value;
+    const status = document.getElementById('search-status');
+    const list = document.getElementById('candidates');
+    if (!/^tt\d{6,10}$/.test(imdb)) { status.textContent = 'Invalid IMDB ID'; return; }
+    status.textContent = 'Searching…';
+    list.innerHTML = '';
+    try {
+      const fd = new FormData();
+      fd.append('imdb_id', imdb); fd.append('media_type', type);
+      fd.append('season', season); fd.append('episode', episode);
+      const r = await fetch('/ui/api/search-candidates', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.error) { status.textContent = d.error; return; }
+      status.textContent = `${d.candidates.length} candidate(s) found · ${d.candidates.filter(c=>c.cached).length} cached`;
+      d.candidates.forEach(c => {
+        const sizeGB = c.size ? (parseFloat(c.size) / 1e9).toFixed(2) + ' GB' : '?';
+        const el = document.createElement('div');
+        el.className = 'candidate ' + (c.cached ? 'cached' : '');
+        el.innerHTML = `
+          <div class="candidate-info">
+            <div class="candidate-name">${c.name}</div>
+            <div class="candidate-meta">
+              <span>${c.quality||'?'}</span>
+              <span>${sizeGB}</span>
+              <span>${c.seeders||'?'} seeds</span>
+              ${c.cached ? '<span style="color:var(--green)">⚡ CACHED</span>' : ''}
+              ${c.is_season_pack ? '<span style="color:var(--indigo)">📦 PACK</span>' : ''}
+            </div>
+          </div>
+          <form method="post" action="/ui/add-magnet" style="margin:0">
+            <input type="hidden" name="magnet" value="${c.magnet}">
+            <button class="btn btn-sm btn-primary">Add</button>
+          </form>`;
+        list.appendChild(el);
+      });
+    } catch(e) {
+      status.textContent = 'Search failed: ' + e.message;
+    }
+  }
+
+  // ── Force rescan ──
+  async function forceRescan() {
+    try {
+      await fetch('/ui/strm-rescan', { method: 'POST' });
+      toast('strm rescan', 'Started — check Logs', 'ok');
+    } catch(e) { toast('Rescan failed', e.message, 'err'); }
+  }
 
   // ── Logs ──
   let autoRefresh = true, logTimer = null;
@@ -369,8 +839,21 @@
   }
   fetchLogs(); scheduleLogs();
 
-  // ── Page reload ──
-  setTimeout(() => location.reload(), 30000);
+  // ── Keyboard shortcuts ──
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    const map = { '1':'overview','2':'requests','3':'movies','4':'series','5':'wanted',
+                  '6':'search','7':'torbox','8':'repair','9':'logs' };
+    if (map[e.key]) { showTab(map[e.key]); e.preventDefault(); }
+  });
+
+  // ── Initial loads + periodic refresh ──
+  refreshHealth();
+  refreshOverview();
+  setInterval(refreshHealth, 30000);
+  setInterval(pollActivity, 5000);
+  setInterval(() => { if (Date.now() - userIdleSince > 10000) refreshOverview(); }, 30000);
+  setInterval(() => { if (Date.now() - userIdleSince > 10000) location.reload(); }, 120000);
 </script>
 </body>
 </html>

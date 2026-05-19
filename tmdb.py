@@ -65,6 +65,22 @@ def get_season_episodes(tmdb_id: int, season: int) -> list[dict]:
     return data.get("episodes") or []
 
 
+def get_poster_path(imdb_id: str, media_type: str = "movie") -> str | None:
+    """Return TMDB poster_path (e.g. /abc123.jpg) for an IMDB ID, or None."""
+    import db
+    cached = db.get_poster(imdb_id)
+    if cached is not None:
+        return cached or None
+    data = _get(f"/find/{imdb_id}", params={"external_source": "imdb_id"})
+    if not data:
+        return None
+    key = "movie_results" if media_type == "movie" else "tv_results"
+    results = data.get(key) or data.get("tv_results") or data.get("movie_results") or []
+    poster = results[0].get("poster_path") if results else None
+    db.set_poster(imdb_id, poster or "")
+    return poster
+
+
 def search_movie(title: str, year: int | None = None) -> str | None:
     """Search TMDB for a movie by title; return IMDB ID or None."""
     params: dict = {"query": title}

@@ -5,6 +5,7 @@ from typing import Optional
 import db
 import jellyfin
 import monitor
+import notify
 import strm_generator
 import torbox
 import torrentio
@@ -167,8 +168,13 @@ def process(req: MediaRequest) -> bool:
         if torrent_id:
             strm_generator.create_strm_for_torrent(torrent_id, req.title, req.media_type)
         jellyfin.refresh_library()
+        quality = winner.quality if winner else "?"
+        db.log_activity("added", req.title, f"{req.media_type} · {quality}", True)
+        notify.send(f"Added: {req.title}", f"{req.media_type} · {quality} · {req.imdb_id}", True)
     else:
         db.update_request(row_id, "failed")
         log.warning("No content added; skipping Jellyfin refresh for %s", req.title)
+        db.log_activity("failed", req.title, f"no suitable stream found for {req.imdb_id}", False)
+        notify.send(f"Failed: {req.title}", f"No suitable stream found · {req.imdb_id}", False)
 
     return success
