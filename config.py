@@ -138,9 +138,11 @@ OPENSUBTITLES_LANGUAGES = [l.strip().lower() for l in _env("OPENSUBTITLES_LANGUA
 CONTINUE_WATCHING_INTERVAL_MINUTES = _env_int("CONTINUE_WATCHING_INTERVAL_MINUTES", 60)
 
 # ── TorBox quota warning ──────────────────────────────────────────────────────
-QUOTA_WARN_TORRENT_COUNT = _env_int("QUOTA_WARN_TORRENT_COUNT", 200)
-QUOTA_WARN_SIZE_GB = _env_int("QUOTA_WARN_SIZE_GB", 4000)
-QUOTA_CHECK_INTERVAL_HOURS = _env_int("QUOTA_CHECK_INTERVAL_HOURS", 1)
+# Disabled by default — TorBox paid plans don't have hard storage limits.
+# Set QUOTA_CHECK_INTERVAL_HOURS > 0 to enable.
+QUOTA_WARN_TORRENT_COUNT = _env_int("QUOTA_WARN_TORRENT_COUNT", 999999)
+QUOTA_WARN_SIZE_GB = _env_int("QUOTA_WARN_SIZE_GB", 999999)
+QUOTA_CHECK_INTERVAL_HOURS = _env_int("QUOTA_CHECK_INTERVAL_HOURS", 0)
 
 # ── Multi-debrid (RealDebrid fallback) ────────────────────────────────────────
 MULTI_DEBRID_ENABLED = _env("MULTI_DEBRID_ENABLED", "false").lower() in ("1", "true", "yes")
