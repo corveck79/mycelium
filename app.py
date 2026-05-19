@@ -64,6 +64,28 @@ log = logging.getLogger("mycelium")
 
 app = Flask(__name__)
 app.secret_key = cfg.AUTH_SESSION_SECRET
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+
+# CSRF protection on all state-changing endpoints; external webhooks opt out below.
+from flask_wtf.csrf import CSRFProtect, generate_csrf
+_csrf = CSRFProtect(app)
+
+
+@app.context_processor
+def _inject_csrf_token():
+    return {"csrf_token": generate_csrf}
+
+
+# Rate limiter — applied selectively to auth endpoints.
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=[],  # opt-in per route
+    storage_uri="memory://",
+)
 
 db.init()
 
@@ -85,6 +107,7 @@ def login_view():
 
 
 @app.post("/login")
+@limiter.limit("5 per minute; 30 per hour")
 def login_submit():
     from flask import session as _session
     username = (request.form.get("username") or "").strip()
@@ -315,6 +338,7 @@ def health_deep():
 
 
 @app.post("/webhook")
+@_csrf.exempt
 def webhook():
     _check_auth()
     payload = request.get_json(silent=True) or {}
@@ -346,6 +370,7 @@ def webhook():
 
 
 @app.post("/torbox-webhook")
+@_csrf.exempt
 def torbox_webhook():
     """Endpoint for TorBox to push completion notifications.
     Triggers strm_generator to catch the newly-ready torrent."""

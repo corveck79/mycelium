@@ -78,6 +78,7 @@
 
     {% if password_enabled or not oidc_enabled %}
     <form method="post" action="/login">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
       <div class="field">
         <label>Username</label>

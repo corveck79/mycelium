@@ -213,17 +213,27 @@ def vacuum() -> None:
         log.warning("DB vacuum failed: %s", exc)
 
 
+_PRUNE_TARGETS: dict[str, str] = {
+    # table_name : timestamp_column. Whitelist so the table name never comes from input.
+    "activity_log":   "created_at",
+    "webhook_events": "received_at",
+    "metric_events":  "created_at",
+}
+
+
 def prune_old(days: int = 90) -> dict[str, int]:
-    """Delete rows in volatile tables older than N days. Returns count per table."""
+    """Delete rows in volatile tables older than N days. Returns count per table.
+    Table names come from a hardcoded whitelist; only the day count is parameterized."""
+    if not isinstance(days, int) or days < 0:
+        raise ValueError("days must be a non-negative int")
     out: dict[str, int] = {}
-    targets = ("activity_log", "webhook_events", "metric_events")
+    cutoff_modifier = f"-{days} days"
     with _connect() as conn:
-        for tbl in targets:
+        for tbl, ts_col in _PRUNE_TARGETS.items():
             try:
                 cur = conn.execute(
-                    f"DELETE FROM {tbl} WHERE "
-                    + ("received_at" if tbl == "webhook_events" else "created_at")
-                    + f" < datetime('now','-{days} days')"
+                    f"DELETE FROM {tbl} WHERE {ts_col} < datetime('now', ?)",
+                    (cutoff_modifier,),
                 )
                 out[tbl] = cur.rowcount or 0
             except Exception as exc:
@@ -636,7 +646,8 @@ def webhook_seen(dedup_key: str) -> bool:
 def prune_webhook_events(max_age_hours: int = 24) -> int:
     with _connect() as conn:
         cur = conn.execute(
-            f"DELETE FROM webhook_events WHERE received_at < datetime('now','-{max_age_hours} hours')"
+            "DELETE FROM webhook_events WHERE received_at < datetime('now', ?)",
+            (f"-{int(max_age_hours)} hours",)
         )
         conn.commit()
         return cur.rowcount or 0
@@ -646,12 +657,15 @@ def prune_webhook_events(max_age_hours: int = 24) -> int:
 
 def enqueue_retry(imdb_id: str, title: str, media_type: str, seasons: list[int] | None,
                    attempt: int, delay_seconds: int) -> None:
+    if not isinstance(delay_seconds, int) or delay_seconds < 0:
+        raise ValueError("delay_seconds must be a non-negative int")
     seasons_str = ",".join(str(s) for s in (seasons or []))
+    delay_modifier = f"+{delay_seconds} seconds"
     with _connect() as conn:
         conn.execute(
-            f"""INSERT INTO retry_queue (imdb_id, title, media_type, seasons, attempt, next_retry_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now','+{delay_seconds} seconds'))""",
-            (imdb_id, title, media_type, seasons_str or None, attempt),
+            """INSERT INTO retry_queue (imdb_id, title, media_type, seasons, attempt, next_retry_at)
+               VALUES (?, ?, ?, ?, ?, datetime('now', ?))""",
+            (imdb_id, title, media_type, seasons_str or None, attempt, delay_modifier),
         )
         conn.commit()
 
@@ -736,14 +750,16 @@ def record_metric(metric: str, label: str | None = None,
 
 def get_metric_summary(metric: str, days: int = 30) -> list[dict]:
     """Aggregate counts per label over the last N days."""
+    if not isinstance(days, int) or days < 0:
+        raise ValueError("days must be a non-negative int")
     with _connect() as conn:
         rows = conn.execute(
-            f"""SELECT label, COUNT(*) as count, AVG(value_real) as avg_real,
-                       SUM(value_int) as sum_int
-                FROM metric_events
-                WHERE metric=? AND created_at > datetime('now','-{days} days')
-                GROUP BY label ORDER BY count DESC""",
-            (metric,),
+            """SELECT label, COUNT(*) as count, AVG(value_real) as avg_real,
+                      SUM(value_int) as sum_int
+               FROM metric_events
+               WHERE metric=? AND created_at > datetime('now', ?)
+               GROUP BY label ORDER BY count DESC""",
+            (metric, f"-{days} days"),
         ).fetchall()
         return [dict(r) for r in rows]
 
