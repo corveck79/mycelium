@@ -219,6 +219,8 @@
     <button class="tab-btn" data-tab="wanted">Wanted <span class="badge-count">{{ wanted | length }}</span></button>
     <button class="tab-btn" data-tab="search">Search</button>
     <button class="tab-btn" data-tab="torbox">TorBox</button>
+    <button class="tab-btn" data-tab="catbox">Catbox</button>
+    <button class="tab-btn" data-tab="blacklist">Blacklist</button>
     <button class="tab-btn" data-tab="repair">Repair</button>
     <button class="tab-btn" data-tab="logs">Logs</button>
   </div>
@@ -466,6 +468,54 @@
     </div>
   </div>
 
+  <!-- ── Catbox ── -->
+  <div id="tab-catbox" class="tab-pane">
+    <div class="section-hdr">
+      <span class="section-title">Catbox · Lazy Materialization</span>
+      <div style="display:flex;gap:8px">
+        {% if config.CATBOX_MODE %}<span class="badge badge-active">enabled</span>{% else %}<span class="badge badge-disabled">disabled</span>{% endif %}
+        <form method="post" action="/ui/catbox-gc" style="display:inline">
+          <button class="btn btn-secondary btn-sm">↻ Release idle now</button>
+        </form>
+        <form method="post" action="/ui/backup-now" style="display:inline">
+          <button class="btn btn-secondary btn-sm">💾 Backup DB</button>
+        </form>
+      </div>
+    </div>
+    <p class="dim" style="font-size:12px;margin-bottom:12px">
+      Items are virtual until you press play. Idle threshold: <b>{{ config.CATBOX_IDLE_MINUTES }} min</b> · GC interval: <b>{{ config.CATBOX_GC_INTERVAL_MINUTES }} min</b>.
+      {% if not config.CATBOX_MODE %}<br><b>To enable:</b> set <code>CATBOX_MODE=true</code> in .env and restart.{% endif %}
+    </p>
+    <input type="text" class="search-bar" placeholder="Search…" data-filter="catbox-table">
+    <div class="table-wrap">
+      <table id="catbox-table">
+        <thead><tr>
+          <th class="sortable">Title</th><th class="sortable">Type</th><th class="sortable">In TorBox</th>
+          <th class="sortable">Plays</th><th class="sortable">Last played</th><th>Created</th><th>Hash</th>
+        </tr></thead>
+        <tbody id="catbox-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Blacklist ── -->
+  <div id="tab-blacklist" class="tab-pane">
+    <div class="section-hdr">
+      <span class="section-title">Failed-hash Blacklist</span>
+      <span class="dim" style="font-size:11px">Hashes are blacklisted after {{ config.BLACKLIST_FAIL_THRESHOLD }} failed add attempts</span>
+    </div>
+    <input type="text" class="search-bar" placeholder="Search…" data-filter="blacklist-table">
+    <div class="table-wrap">
+      <table id="blacklist-table">
+        <thead><tr>
+          <th>Hash</th><th class="sortable">Failures</th><th>Last Error</th>
+          <th class="sortable">Last Try</th><th></th>
+        </tr></thead>
+        <tbody id="blacklist-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ── Repair ── -->
   <div id="tab-repair" class="tab-pane">
     <div class="section-hdr">
@@ -554,6 +604,8 @@
     location.hash = name;
     if (name === 'torbox') refreshTorbox();
     if (name === 'overview') refreshOverview();
+    if (name === 'catbox') refreshCatbox();
+    if (name === 'blacklist') refreshBlacklist();
   }
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => showTab(btn.dataset.tab));
@@ -762,6 +814,61 @@
     }
   }
 
+  // ── Catbox ──
+  async function refreshCatbox() {
+    const body = document.getElementById('catbox-body');
+    body.innerHTML = '<tr><td colspan="7" class="empty">Loading…</td></tr>';
+    try {
+      const r = await fetch('/ui/api/virtual-items');
+      const d = await r.json();
+      body.innerHTML = '';
+      d.items.forEach(i => {
+        const inTb = i.in_torbox
+          ? '<span class="badge badge-active">✓ live</span>'
+          : '<span class="badge badge-disabled">released</span>';
+        body.innerHTML += `<tr>
+          <td>${i.title}</td>
+          <td class="dim">${i.media_type}</td>
+          <td>${inTb}</td>
+          <td class="mono">${i.play_count}</td>
+          <td class="dim">${(i.last_played||'never').slice(0,16)}</td>
+          <td class="dim">${(i.created_at||'').slice(0,16)}</td>
+          <td class="mono dim" style="font-size:10px">${(i.info_hash||'').slice(0,12)}…</td>
+        </tr>`;
+      });
+      if (!d.items.length) body.innerHTML = '<tr><td colspan="7" class="empty">No virtual items yet</td></tr>';
+    } catch(e) {
+      body.innerHTML = `<tr><td colspan="7" class="empty" style="color:var(--red)">${e.message}</td></tr>`;
+    }
+  }
+
+  // ── Blacklist ──
+  async function refreshBlacklist() {
+    const body = document.getElementById('blacklist-body');
+    body.innerHTML = '<tr><td colspan="5" class="empty">Loading…</td></tr>';
+    try {
+      const r = await fetch('/ui/api/blacklist');
+      const d = await r.json();
+      body.innerHTML = '';
+      d.items.forEach(i => {
+        body.innerHTML += `<tr>
+          <td class="mono" style="font-size:11px">${i.info_hash}</td>
+          <td class="mono">${i.fail_count}</td>
+          <td class="dim" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.last_error||'—'}</td>
+          <td class="dim">${(i.last_attempt||'').slice(0,16)}</td>
+          <td>
+            <form method="post" action="/ui/blacklist-clear/${i.info_hash}" style="display:inline">
+              <button class="btn btn-sm btn-secondary">Clear</button>
+            </form>
+          </td>
+        </tr>`;
+      });
+      if (!d.items.length) body.innerHTML = '<tr><td colspan="5" class="empty">No blacklisted hashes</td></tr>';
+    } catch(e) {
+      body.innerHTML = `<tr><td colspan="5" class="empty" style="color:var(--red)">${e.message}</td></tr>`;
+    }
+  }
+
   // ── Manual search ──
   async function doSearch() {
     const imdb = document.getElementById('search_imdb').value.trim();
@@ -843,7 +950,7 @@
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     const map = { '1':'overview','2':'requests','3':'movies','4':'series','5':'wanted',
-                  '6':'search','7':'torbox','8':'repair','9':'logs' };
+                  '6':'search','7':'torbox','8':'catbox','9':'blacklist','0':'logs' };
     if (map[e.key]) { showTab(map[e.key]); e.preventDefault(); }
   });
 

@@ -6,7 +6,7 @@ import requests as req_lib
 
 import jellyfin
 import torbox as torbox_mod
-from config import MEDIA_PATH, TORBOX_API_KEY, TORBOX_BASE_URL
+from config import CATBOX_MODE, MEDIA_PATH, TORBOX_API_KEY, TORBOX_BASE_URL
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +131,28 @@ def _write_strm(path: Path, url: str) -> bool:
         return False
 
 
+def _resolve_url(item: dict, file_id: int, file_name: str, info: dict, media_type: str) -> str | None:
+    """Return the URL to write into a .strm file.
+    In Catbox mode this is a proxy URL pointing at /stream/<token>.
+    Otherwise it is the direct TorBox CDN URL.
+    """
+    torrent_id = item.get("id")
+    if CATBOX_MODE:
+        import catbox
+        magnet = item.get("magnet") or f"magnet:?xt=urn:btih:{item.get('hash')}"
+        title = f"{info.get('title','')} ({info['year']})" if info.get("year") else info.get("title", file_name)
+        token = catbox.register(
+            info_hash=(item.get("hash") or "").lower(),
+            magnet=magnet,
+            title=title,
+            media_type=media_type,
+            torbox_id=torrent_id,
+            file_id=file_id,
+        )
+        return catbox.proxy_url(token)
+    return _get_stream_url(torrent_id, file_id)
+
+
 def process_torrent(item: dict) -> int:
     """Create .strm files for all video files in a ready torrent. Returns new file count."""
     torrent_id = item.get('id')
@@ -163,7 +185,7 @@ def process_torrent(item: dict) -> int:
         path = _strm_path(info)
         if path.exists():
             continue
-        url = _get_stream_url(torrent_id, file_id)
+        url = _resolve_url(item, file_id, file_name, info, info['type'] if info['type'] == 'movie' else 'series')
         if not url:
             continue
         if _write_strm(path, url):
@@ -189,14 +211,15 @@ def create_strm_for_torrent(torrent_id: int, title: str, media_type: str) -> int
         if not main_file:
             log.warning("No suitable video file in torrent %s", torrent_id)
             return 0
-        url = _get_stream_url(torrent_id, main_file['id'])
-        if not url:
-            return 0
         yr = _YEAR_RE.search(title)
         year = int(yr.group(1)) if yr else None
         clean_title = _safe(title[:yr.start()].strip() if yr else title)
         folder = f"{clean_title} ({year})" if year else clean_title
         path = Path(MEDIA_PATH) / 'movies' / folder / f"{folder}.strm"
+        info = {'type': 'movie', 'title': clean_title, 'year': year}
+        url = _resolve_url(item, main_file['id'], main_file.get('name', ''), info, 'movie')
+        if not url:
+            return 0
         return 1 if _write_strm(path, url) else 0
 
     return process_torrent(item)

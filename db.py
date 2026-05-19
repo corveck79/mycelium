@@ -81,6 +81,29 @@ CREATE TABLE IF NOT EXISTS poster_cache (
     cached_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS virtual_items (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    token        TEXT    NOT NULL UNIQUE,
+    info_hash    TEXT    NOT NULL,
+    magnet       TEXT    NOT NULL,
+    title        TEXT    NOT NULL,
+    media_type   TEXT    NOT NULL,
+    strm_path    TEXT,
+    torbox_id    INTEGER,
+    file_id      INTEGER,
+    last_played  TEXT,
+    play_count   INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS failed_hashes (
+    info_hash      TEXT    PRIMARY KEY,
+    fail_count     INTEGER NOT NULL DEFAULT 1,
+    last_error     TEXT,
+    last_attempt   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    created_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS repair_items (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     cleanup_run_id  INTEGER NOT NULL REFERENCES cleanup_runs(id),
@@ -373,6 +396,125 @@ def set_poster(imdb_id: str, poster_path: str | None) -> None:
                   cached_at=strftime('%Y-%m-%d %H:%M:%S','now')""",
             (imdb_id, poster_path),
         )
+        conn.commit()
+
+
+# ── virtual_items (Catbox mode) ───────────────────────────────────────────────
+
+def insert_virtual_item(token: str, info_hash: str, magnet: str, title: str,
+                         media_type: str, strm_path: str | None = None,
+                         torbox_id: int | None = None, file_id: int | None = None) -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO virtual_items (token, info_hash, magnet, title, media_type,
+                                          strm_path, torbox_id, file_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (token, info_hash, magnet, title, media_type, strm_path, torbox_id, file_id),
+        )
+        conn.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+
+def get_virtual_item(token: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM virtual_items WHERE token=?", (token,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_all_virtual_items() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM virtual_items ORDER BY last_played DESC, created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_virtual_torbox_id(token: str, torbox_id: int | None) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE virtual_items SET torbox_id=? WHERE token=?", (torbox_id, token))
+        conn.commit()
+
+
+def update_virtual_file_id(token: str, file_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE virtual_items SET file_id=? WHERE token=?", (file_id, token))
+        conn.commit()
+
+
+def touch_virtual_item(token: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """UPDATE virtual_items SET
+               last_played=strftime('%Y-%m-%d %H:%M:%S','now'),
+               play_count=play_count+1 WHERE token=?""",
+            (token,),
+        )
+        conn.commit()
+
+
+def get_idle_virtual_items(cutoff_iso: str) -> list[dict]:
+    """Items with a torbox_id and either last_played < cutoff or never played + created < cutoff."""
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM virtual_items
+               WHERE torbox_id IS NOT NULL
+                 AND (
+                   (last_played IS NOT NULL AND last_played < ?)
+                   OR (last_played IS NULL AND created_at < ?)
+                 )""",
+            (cutoff_iso, cutoff_iso),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_virtual_item(token: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM virtual_items WHERE token=?", (token,))
+        conn.commit()
+
+
+# ── failed_hashes (blacklist) ─────────────────────────────────────────────────
+
+def record_failed_hash(info_hash: str, error: str | None = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO failed_hashes (info_hash, last_error) VALUES (?, ?)
+               ON CONFLICT(info_hash) DO UPDATE SET
+                 fail_count=fail_count+1,
+                 last_error=COALESCE(excluded.last_error, last_error),
+                 last_attempt=strftime('%Y-%m-%d %H:%M:%S','now')""",
+            (info_hash, error),
+        )
+        conn.commit()
+
+
+def get_failed_hash(info_hash: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM failed_hashes WHERE info_hash=?", (info_hash,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_blacklisted_hashes(threshold: int = 3) -> set[str]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT info_hash FROM failed_hashes WHERE fail_count >= ?", (threshold,)
+        ).fetchall()
+        return {r["info_hash"] for r in rows}
+
+
+def get_all_failed_hashes() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM failed_hashes ORDER BY fail_count DESC, last_attempt DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def clear_failed_hash(info_hash: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM failed_hashes WHERE info_hash=?", (info_hash,))
         conn.commit()
 
 

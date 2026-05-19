@@ -5,6 +5,8 @@ import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 
+import backup
+import catbox
 import catchup
 import cleanup
 import config as cfg
@@ -22,6 +24,9 @@ import torbox
 import torrentio
 import zilean
 from config import (
+    BACKUP_INTERVAL_HOURS,
+    CATBOX_GC_INTERVAL_MINUTES,
+    CATBOX_MODE,
     CATCHUP_ENABLED,
     CLEANUP_INTERVAL_HOURS,
     LISTEN_HOST,
@@ -87,6 +92,23 @@ def _start_scheduler() -> BackgroundScheduler:
             id="strm_cleanup", next_run_time=None,
         )
         log.info("Scheduled strm cleanup every %dh", CLEANUP_INTERVAL_HOURS)
+
+    if CATBOX_MODE and CATBOX_GC_INTERVAL_MINUTES > 0:
+        scheduler.add_job(
+            catbox.release_idle,
+            trigger="interval", minutes=CATBOX_GC_INTERVAL_MINUTES,
+            id="catbox_gc", next_run_time=None,
+        )
+        log.info("Scheduled Catbox GC every %dm (idle threshold %dm)",
+                 CATBOX_GC_INTERVAL_MINUTES, cfg.CATBOX_IDLE_MINUTES)
+
+    if BACKUP_INTERVAL_HOURS > 0:
+        scheduler.add_job(
+            backup.run,
+            trigger="interval", hours=BACKUP_INTERVAL_HOURS,
+            id="db_backup", next_run_time=None,
+        )
+        log.info("Scheduled DB backup every %dh", BACKUP_INTERVAL_HOURS)
 
     scheduler.start()
     return scheduler
@@ -383,6 +405,53 @@ def ui_api_poster(imdb_id: str):
     media_type = request.args.get("type", "movie")
     path = tmdb.get_poster_path(imdb_id, media_type)
     return jsonify(poster=f"https://image.tmdb.org/t/p/w154{path}" if path else None)
+
+
+# ── Catbox lazy materialization ───────────────────────────────────────────────
+
+@app.get("/stream/<token>")
+def stream_redirect(token: str):
+    url = catbox.materialize(token)
+    if not url:
+        abort(404)
+    return redirect(url, code=307)
+
+
+@app.get("/ui/api/virtual-items")
+def ui_api_virtual_items():
+    items = db.get_all_virtual_items()
+    return jsonify(items=[{
+        "id": i["id"], "token": i["token"], "title": i["title"], "media_type": i["media_type"],
+        "torbox_id": i["torbox_id"], "in_torbox": bool(i["torbox_id"]),
+        "play_count": i["play_count"], "last_played": i["last_played"],
+        "created_at": i["created_at"], "info_hash": i["info_hash"],
+    } for i in items])
+
+
+@app.post("/ui/catbox-gc")
+def ui_catbox_gc():
+    n = catbox.release_idle()
+    flash(f"Released {n} idle torrent(s)", "ok")
+    return redirect(url_for("ui_dashboard") + "#catbox")
+
+
+@app.get("/ui/api/blacklist")
+def ui_api_blacklist():
+    return jsonify(items=db.get_all_failed_hashes())
+
+
+@app.post("/ui/blacklist-clear/<info_hash>")
+def ui_blacklist_clear(info_hash: str):
+    db.clear_failed_hash(info_hash)
+    flash(f"Cleared blacklist for {info_hash[:12]}…", "ok")
+    return redirect(url_for("ui_dashboard") + "#blacklist")
+
+
+@app.post("/ui/backup-now")
+def ui_backup_now():
+    threading.Thread(target=backup.run, name="backup-manual", daemon=True).start()
+    flash("DB backup started", "ok")
+    return redirect(url_for("ui_dashboard"))
 
 
 if __name__ == "__main__":

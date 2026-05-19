@@ -85,6 +85,24 @@ TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID", "")
 NOTIFY_ON_SUCCESS = _env("NOTIFY_ON_SUCCESS", "true").lower() in ("1", "true", "yes")
 NOTIFY_ON_FAILURE = _env("NOTIFY_ON_FAILURE", "true").lower() in ("1", "true", "yes")
 
+# ── Failed-hash blacklist ─────────────────────────────────────────────────────
+# Hashes that fail to add to TorBox this many times are skipped on future searches.
+BLACKLIST_FAIL_THRESHOLD = _env_int("BLACKLIST_FAIL_THRESHOLD", 3)
+
+# ── Catbox-style lazy materialization ─────────────────────────────────────────
+# When enabled, .strm files contain a proxy URL pointing to /stream/<token>.
+# The torrent is only added to TorBox when playback starts, and released after
+# CATBOX_IDLE_MINUTES of inactivity. Stays within TorBox 30-day retention.
+CATBOX_MODE = _env("CATBOX_MODE", "false").lower() in ("1", "true", "yes")
+# Externally reachable host for the proxy URL written into .strm files.
+# Example: http://10.0.0.10:8088 (must be reachable from Jellyfin).
+CATBOX_HOST = _env("CATBOX_HOST", "http://10.0.0.10:8088")
+CATBOX_IDLE_MINUTES = _env_int("CATBOX_IDLE_MINUTES", 60)
+CATBOX_GC_INTERVAL_MINUTES = _env_int("CATBOX_GC_INTERVAL_MINUTES", 10)
+
+# ── DB backup ─────────────────────────────────────────────────────────────────
+BACKUP_INTERVAL_HOURS = _env_int("BACKUP_INTERVAL_HOURS", 24)
+
 
 def configure_logging() -> None:
     logging.basicConfig(

@@ -2,6 +2,7 @@ import logging
 import time
 from typing import Optional
 
+import blacklist
 import db
 import jellyfin
 import monitor
@@ -60,7 +61,9 @@ def _try_add_magnet(stream: TorrentioStream, label: str) -> bool:
                     time.sleep(15)
                     continue
             log.warning("Failed to add %s (hash=%s): %s", label, stream.info_hash, exc)
+            blacklist.record_failure(stream.info_hash, str(exc)[:200])
             return False
+    blacklist.record_failure(stream.info_hash, "rate limit / retry exhausted")
     return False
 
 
@@ -68,6 +71,10 @@ def _add_best_from(candidates: list, label: str) -> tuple[bool, Optional[Torrent
     """Check cache, try best cached candidate first, fall back to second-best on failure.
     Returns (success, winning_stream).
     """
+    candidates = blacklist.filter_candidates(candidates)
+    if not candidates:
+        log.warning("All candidates for %s are blacklisted", label)
+        return False, None
     cached_hashes = torbox.check_cached([s.info_hash for s in candidates])
 
     cached = [s for s in candidates if s.info_hash in cached_hashes]
