@@ -48,14 +48,21 @@ Built for the **Jellyfin + TorBox + Synology NAS** stack. No FUSE, no rclone, no
 
 ## 🌱 Why Mycelium?
 
-I run a Synology DS920+ with Jellyfin and a small TorBox subscription. The popular `.strm`-generator for that combination is TorBox Media Center (TMC), and TMC kept tripping over its own feet: wiping my entire `.strm` library on restart, crashing mid-rebuild, leaving Jellyfin staring at a half-built collection. Every few days I was SSHing into the NAS to clean up.
+I've gone through every flavour of self-hosted media stack on my Synology DS920+, and each one had its own way of falling over.
 
-[elfhosted's CatBox](https://docs.elfhosted.com/app/catbox/) showed there's a smarter pattern: torrents that stay *virtual* in your library until you actually press play, then materialise on demand. The whole idea is gorgeous, but CatBox is a managed hosting service. I wanted that same pattern running on my own NAS, alongside my own containers, without rclone, without giving Docker `SYS_ADMIN`, and without renting somebody else's compute.
+**The Sonarr / Radarr era.** Beautiful in theory: indexers feed the *arrs, the *arrs talk to your download client, content lands on disk, Plex scans it. In practice on a NAS, the *arrs would hang for hours on big-library refreshes, indexer queues would silently stall, and Radarr would happily import a 240p TS as "1080p WEB-DL" because release naming is a war crime. Every fix landed me deeper in indexer / quality-profile / custom-format YAML.
+
+**The rclone + Plex + debrid era.** Skip local storage entirely, mount the debrid library via rclone, point Plex at it. Great until your Synology DSM auto-updates, drops the FUSE module, and your entire library vanishes mid-stream. Or until the rclone container needs `SYS_ADMIN` plus `/dev/fuse` and you spend a Saturday figuring out why the bind mount is read-only this week. Or until Plex starts hammering the mount for thumbnail rebuilds and your debrid account hits its rate limit.
+
+**The TMC + Jellyfin era.** TorBox Media Center generates `.strm` files Jellyfin can play. No FUSE. No mounts. Simple. Except TMC kept tripping over its own feet: wiping my entire `.strm` library on restart, crashing mid-rebuild, leaving Jellyfin staring at a half-built collection. Every few days I was SSHing into the NAS to clean up. There was no UI to figure out what went wrong.
+
+**The CatBox lightbulb.** [elfhosted's CatBox](https://docs.elfhosted.com/app/catbox/) showed there's a smarter pattern: torrents that stay *virtual* in your library until you actually press play, then materialise on demand. The whole idea is gorgeous, but CatBox is a managed hosting service. I wanted that same pattern running on my own NAS, alongside my own containers, without rclone, without giving Docker `SYS_ADMIN`, and without renting somebody else's compute.
 
 So Mycelium is the orchestrator I wished existed:
 
 - **Self-hosted end-to-end.** One container, your data, your hardware.
-- **No FUSE in Docker.** `.strm` files for Jellyfin; optional WebDAV at host level for Plex.
+- **No FUSE in Docker.** `.strm` files for Jellyfin; optional WebDAV at host level for Plex if you really want it.
+- **No Radarr / Sonarr.** Seerr makes the request, Mycelium does the rest. No quality profiles to maintain, no indexer drama.
 - **Catbox-style lazy mode**, but optional and built in, not bolted on.
 - **A real dashboard.** I shouldn't have to `tail -f` to know what's going on.
 - **Resilient enough** that my partner can ask "where's that show?" and I don't have to think about it.
