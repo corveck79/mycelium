@@ -202,7 +202,11 @@ def _search_and_add_season(imdb_id: str, title: str, seasons: list[int]) -> None
 # ── Movie sync ────────────────────────────────────────────────────────────────
 
 def sync_movies() -> None:
-    """Sync approved movie requests from Seerr and check filesystem."""
+    """Sync approved movie requests from Seerr and check filesystem.
+    No-op when SEERR_URL is empty (SPA-only mode)."""
+    from config import SEERR_URL
+    if not SEERR_URL:
+        return
     log.info("Monitor: syncing movie requests from Seerr")
     try:
         items = seerr.list_approved_requests(take=100)
@@ -241,7 +245,11 @@ def sync_movies() -> None:
 
 
 def sync_series() -> None:
-    """Sync approved TV requests from Seerr into monitored_series."""
+    """Sync approved TV requests from Seerr into monitored_series.
+    No-op when SEERR_URL is empty (SPA-only mode)."""
+    from config import SEERR_URL
+    if not SEERR_URL:
+        return
     log.info("Monitor: syncing series requests from Seerr")
     try:
         items = seerr.list_approved_requests(take=100)

@@ -12,8 +12,10 @@
 <h3>The hidden network beneath your media library.</h3>
 
 <p>
-  Self-hosted automation that turns <a href="https://jellyseerr.dev">Seerr</a> requests into
-  Jellyfin-ready streams via <a href="https://torbox.app">TorBox</a> in about 30 seconds, with zero local storage.
+  Self-hosted automation that turns watchlist clicks into Jellyfin-ready streams via
+  <a href="https://torbox.app">TorBox</a> in about 30 seconds, with zero local storage.
+  Comes with a modern <strong>in-app discovery + request UI</strong> — no Seerr needed,
+  but Seerr/Jellyseerr webhooks still work if you want them.
 </p>
 
 <p>
@@ -32,17 +34,28 @@
 
 ## 🍄 What is Mycelium?
 
-Mycelium sits between **Seerr**, **TorBox**, and **Jellyfin** and quietly does the boring orchestration so you don't have to:
+Mycelium is a one-container media-request-and-stream pipeline. Browse TMDB, click +Add,
+and within seconds a `.strm` file lands in your Jellyfin library that streams directly
+from **TorBox**. No FUSE, no rclone, no local downloads.
 
 ```
-Seerr webhook  →  search Zilean + Torrentio  →  cache-check TorBox
-                       ↓
-              add the best release         →  Jellyfin-ready .strm file
-                       ↓
-            (optional) Catbox lazy mode    →  TorBox stays small, library stays huge
+       (a) Built-in Discover (TMDB)      OR    (b) Seerr/Jellyseerr webhook
+                  ↓                                       ↓
+       search Zilean + Torrentio  →  cache-check TorBox  →  pick the best release
+                                          ↓
+                          Jellyfin-ready .strm + .nfo files
+                                          ↓
+                  (optional) Catbox lazy mode for huge libraries
 ```
 
 Built for the **Jellyfin + TorBox + Synology NAS** stack. No FUSE, no rclone, no Plex required (but supported).
+
+### Two UIs, one container
+
+| | Path | Purpose |
+|--|--|--|
+| **Modern SPA** | `/app/` | Netflix-style poster grids, per-service browsing (Netflix/Prime/Disney+/…), multi-user, watchlist, request approval, Radarr/Sonarr bulk import |
+| **Classic dashboard** | `/ui` | Full operations console: repair, blacklist, settings, logs, overrides — keep this for power-user maintenance |
 
 ---
 
@@ -71,11 +84,32 @@ The name felt right. Mycelium.
 <details open>
 <summary><b>Core pipeline</b></summary>
 
-- 🪝 **Seerr webhook integration**. Every approved request gets auto-processed.
+- 🪝 **Two request paths**: built-in TMDB browser (default) OR Seerr/Jellyseerr webhook.
 - 🔎 **Zilean (local) + Torrentio (fallback)** with health-aware skipping.
 - ⚡ **TorBox cache-first** strategy with 429 retry and per-hash blacklist.
 - 📝 **Jellyfin-friendly naming**: `Movie (Year)/Movie (Year).strm`, `Series/Season XX/Series S01E01.strm`.
 - 🎬 **Automatic library refresh**.
+
+</details>
+
+<details open>
+<summary><b>🎨 Modern Discover SPA</b> <i>(at /app/)</i></summary>
+
+- **Poster grids** for trending, popular, top rated, now playing, upcoming
+- **Per-service filtering**: Netflix, Prime Video, Disney+, HBO Max, Apple TV+, Videoland, NPO Plus, SkyShowtime (NL region by default)
+- **Live multi-search** across movies + series
+- **Detail modals** with cast, trailers, seasons, where-it-streams badges, recommendations
+- **Watchlist** per user
+- **Multi-user** with optional admin approval flow and per-user auto-approve
+- **First-run bootstrap**: the first account you create becomes the admin
+
+</details>
+
+<details>
+<summary><b>📥 Auto-add + bulk import</b></summary>
+
+- **Auto-add categories**: trending (day/week), popular, top-rated, per-service top lists (Netflix NL Top 10, Prime NL, Disney NL) — configurable count per category, min rating, min votes
+- **Radarr / Sonarr bulk import**: point at an existing Radarr/Sonarr, pull all monitored movies/series in one click
 
 </details>
 
@@ -186,14 +220,21 @@ Open **`http://<your-nas>:8088/ui`** and the setup wizard walks you through:
 
 1. TorBox API key (the one required thing).
 2. Jellyfin URL and API key.
-3. Seerr URL and API key, plus TMDB token for posters.
+3. TMDB token (required for Discover / posters / metadata).
 4. Quality and audio language preferences.
 5. Optional Catbox lazy mode.
 6. Optional Discord/Telegram notifications.
+7. Optional Seerr/Jellyseerr (for inbound webhook requests).
 
 Each connection step has a **Test** button so you find typos before you save. All values land in the runtime settings DB; you can re-run the wizard or edit individual settings via the Settings tab anytime.
 
-Then in Seerr: **Settings → Notifications → Webhook** → `http://<your-nas>:8088/webhook`.
+Then open **`http://<your-nas>:8088/app/`** for the modern Discover UI. The first
+account you create becomes the admin.
+
+**Seerr is optional.** If you set `SEERR_URL` + `SEERR_API_KEY`, the catchup +
+movie/series sync jobs will fetch approved Seerr requests on startup and every
+30 minutes. Without Seerr the SPA's Add / Watchlist / Approval flow is the
+primary entry point. Webhook endpoint stays available at `/webhook` either way.
 
 Prefer the old-school `.env` workflow? Copy `.env.example` to `.env`, fill it in, click **Skip wizard** on first visit.
 
@@ -203,7 +244,10 @@ Prefer the old-school `.env` workflow? Copy `.env.example` to `.env`, fill it in
 
 ```mermaid
 flowchart LR
-    Seerr -->|webhook| Mycelium
+    User[👤 User in SPA] -->|+ Add| Mycelium
+    Seerr -.->|optional webhook| Mycelium
+    Radarr -.->|bulk import| Mycelium
+    Sonarr -.->|bulk import| Mycelium
     Mycelium -->|search| Zilean & Torrentio
     Mycelium -->|cache-check + add| TorBox
     Mycelium -->|TMDB lookup| TMDB

@@ -165,7 +165,7 @@ def _start_scheduler() -> BackgroundScheduler:
         )
         log.info("Scheduled series monitor every %dh", MONITOR_INTERVAL_HOURS)
 
-    if MOVIE_SYNC_INTERVAL_MINUTES > 0:
+    if MOVIE_SYNC_INTERVAL_MINUTES > 0 and cfg.SEERR_URL:
         scheduler.add_job(
             monitor.sync_movies,
             trigger="interval", minutes=MOVIE_SYNC_INTERVAL_MINUTES,
@@ -176,7 +176,9 @@ def _start_scheduler() -> BackgroundScheduler:
             trigger="interval", minutes=MOVIE_SYNC_INTERVAL_MINUTES,
             id="series_sync", next_run_time=None,
         )
-        log.info("Scheduled movie+series sync every %dm", MOVIE_SYNC_INTERVAL_MINUTES)
+        log.info("Scheduled Seerr movie+series sync every %dm", MOVIE_SYNC_INTERVAL_MINUTES)
+    elif MOVIE_SYNC_INTERVAL_MINUTES > 0:
+        log.info("Seerr sync skipped — SEERR_URL not configured (using SPA discovery instead)")
 
     if STRM_GENERATOR_INTERVAL_HOURS > 0:
         scheduler.add_job(
