@@ -191,7 +191,7 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
 
     cached_hashes = torbox.check_cached([s.info_hash for s in candidates])
     cached = [s for s in candidates if s.info_hash in cached_hashes]
-    to_try = cached or candidates[:1]
+    to_try = cached[:1] or candidates[:1]
 
     winner: TorrentioStream | None = None
     rate_limited = False
@@ -498,6 +498,7 @@ def run_cleanup() -> None:
         except _RateLimitedError:
             log.warning("Cleanup: TorBox rate limit hit — stopping repairs for this run")
             break
+        time.sleep(2)
         if result == "repaired":
             repaired += 1
             changed = True
