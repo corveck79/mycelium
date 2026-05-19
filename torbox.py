@@ -84,6 +84,33 @@ def get_usage_summary() -> dict:
     }
 
 
+# Track last warning to avoid spamming
+_last_quota_warn: dict[str, float] = {}
+
+
+def check_quota_and_warn(threshold_count: int = 200, threshold_gb: int = 4000) -> None:
+    """Notify if torrent count or total size approaches the configured threshold.
+    Re-warns at most once every 6 hours per metric."""
+    import time
+    import db
+    import notify
+    summary = get_usage_summary()
+    now = time.monotonic()
+    for metric, value, limit, fmt in (
+        ("count", summary["torrent_count"], threshold_count, "%d torrents"),
+        ("size", summary["total_gb"], threshold_gb, "%.1f GB"),
+    ):
+        if value < limit * 0.8:
+            continue
+        if now - _last_quota_warn.get(metric, 0) < 6 * 3600:
+            continue
+        _last_quota_warn[metric] = now
+        msg = f"TorBox usage approaching limit: {fmt % value} (threshold {limit})"
+        log.warning(msg)
+        db.log_activity("quota_warn", "TorBox", msg, False)
+        notify.send("TorBox quota warning", msg, success=False)
+
+
 def delete_torrent(torrent_id: int, timeout: int = 15) -> bool:
     url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/controltorrent"
     try:

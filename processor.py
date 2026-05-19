@@ -19,14 +19,15 @@ from webhook_parser import MediaRequest
 log = logging.getLogger(__name__)
 
 
-def _rank(streams, prefer_season_pack: bool = False):
-    return torrentio.rank_streams(streams, prefer_season_pack=prefer_season_pack)
+def _rank(streams, prefer_season_pack: bool = False, override: dict | None = None):
+    return torrentio.rank_streams(streams, prefer_season_pack=prefer_season_pack, override=override)
 
 
 def _fetch_movie_candidates(req: MediaRequest) -> list:
+    override = db.get_show_override(req.imdb_id)
     if ZILEAN_ENABLED and health_cache.is_up("zilean"):
         streams = zilean.fetch_streams(req.imdb_id)
-        candidates = _rank(streams)
+        candidates = _rank(streams, override=override)
         if candidates:
             log.info("Zilean found %d candidate(s) for movie %s", len(candidates), req.title)
             return candidates
@@ -35,13 +36,14 @@ def _fetch_movie_candidates(req: MediaRequest) -> list:
         log.warning("Torrentio appears down; no candidates")
         return []
     streams = torrentio.fetch_streams("movie", req.imdb_id)
-    return _rank(streams)
+    return _rank(streams, override=override)
 
 
 def _fetch_season_candidates(req: MediaRequest, season: int, episode: int, prefer_season_pack: bool = False) -> list:
+    override = db.get_show_override(req.imdb_id)
     if ZILEAN_ENABLED and health_cache.is_up("zilean"):
         streams = zilean.fetch_streams(req.imdb_id, season=season, episode=episode)
-        candidates = _rank(streams, prefer_season_pack=prefer_season_pack)
+        candidates = _rank(streams, prefer_season_pack=prefer_season_pack, override=override)
         if candidates:
             log.info("Zilean found %d candidate(s) for %s S%02dE%02d", len(candidates), req.title, season, episode)
             return candidates
@@ -50,7 +52,7 @@ def _fetch_season_candidates(req: MediaRequest, season: int, episode: int, prefe
         log.warning("Torrentio appears down; no candidates")
         return []
     streams = torrentio.fetch_streams("series", req.imdb_id, season=season, episode=episode)
-    return _rank(streams, prefer_season_pack=prefer_season_pack)
+    return _rank(streams, prefer_season_pack=prefer_season_pack, override=override)
 
 
 def _try_add_magnet(stream: TorrentioStream, label: str) -> bool:
@@ -185,6 +187,18 @@ def process(req: MediaRequest, _retry_attempt: int = 0) -> bool:
         torrent_id = item.get('id') if item else None
         if torrent_id:
             strm_generator.create_strm_for_torrent(torrent_id, req.title, req.media_type)
+            # Best-effort subtitle fetch
+            try:
+                import subtitles
+                from pathlib import Path
+                from config import MEDIA_PATH
+                if req.is_movie:
+                    # Find newest .strm in movies for this title (rough match)
+                    media = Path(MEDIA_PATH) / "movies"
+                    for p in sorted(media.rglob("*.strm"), key=lambda p: p.stat().st_mtime, reverse=True)[:3]:
+                        subtitles.fetch_for(p, req.imdb_id, "movie")
+            except Exception as exc:
+                log.debug("Subtitle fetch skipped: %s", exc)
         jellyfin.refresh_library()
         quality = winner.quality if winner else "?"
         db.log_activity("added", req.title, f"{req.media_type} · {quality}", True)

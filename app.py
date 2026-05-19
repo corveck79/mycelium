@@ -10,6 +10,7 @@ import catbox
 import catchup
 import cleanup
 import config as cfg
+import continue_watching
 import db
 import health
 import jellyfin
@@ -34,11 +35,15 @@ from config import (
     CATBOX_MODE,
     CATCHUP_ENABLED,
     CLEANUP_INTERVAL_HOURS,
+    CONTINUE_WATCHING_INTERVAL_MINUTES,
     LISTEN_HOST,
     LISTEN_PORT,
     MERGE_VERSIONS_INTERVAL_HOURS,
     MONITOR_INTERVAL_HOURS,
     MOVIE_SYNC_INTERVAL_MINUTES,
+    QUOTA_CHECK_INTERVAL_HOURS,
+    QUOTA_WARN_SIZE_GB,
+    QUOTA_WARN_TORRENT_COUNT,
     RETRY_QUEUE_INTERVAL_MINUTES,
     SEASON_PACK_CHECK_INTERVAL_HOURS,
     SEASON_PACK_CONSOLIDATION_ENABLED,
@@ -152,6 +157,22 @@ def _start_scheduler() -> BackgroundScheduler:
         )
         log.info("Scheduled trending pre-cache every %dh (top %d)",
                  TRENDING_CHECK_INTERVAL_HOURS, TRENDING_PRECACHE_COUNT)
+
+    if CONTINUE_WATCHING_INTERVAL_MINUTES > 0:
+        scheduler.add_job(
+            continue_watching.prioritize_next_episodes,
+            trigger="interval", minutes=CONTINUE_WATCHING_INTERVAL_MINUTES,
+            id="continue_watching", next_run_time=None,
+        )
+        log.info("Scheduled continue-watching priority every %dm", CONTINUE_WATCHING_INTERVAL_MINUTES)
+
+    if QUOTA_CHECK_INTERVAL_HOURS > 0:
+        scheduler.add_job(
+            lambda: torbox.check_quota_and_warn(QUOTA_WARN_TORRENT_COUNT, QUOTA_WARN_SIZE_GB),
+            trigger="interval", hours=QUOTA_CHECK_INTERVAL_HOURS,
+            id="quota_warn", next_run_time=None,
+        )
+        log.info("Scheduled TorBox quota check every %dh", QUOTA_CHECK_INTERVAL_HOURS)
 
     scheduler.start()
     return scheduler
@@ -533,6 +554,24 @@ def ui_pack_consolidate():
 def ui_trending_now():
     threading.Thread(target=trending.run, name="trending-manual", daemon=True).start()
     flash("Trending pre-cache started", "ok")
+    return redirect(url_for("ui_dashboard") + "#overview")
+
+
+@app.post("/ui/continue-watching")
+def ui_continue_watching():
+    threading.Thread(target=continue_watching.prioritize_next_episodes,
+                     name="cw-manual", daemon=True).start()
+    flash("Continue-watching scan started", "ok")
+    return redirect(url_for("ui_dashboard") + "#overview")
+
+
+@app.post("/ui/quota-check")
+def ui_quota_check():
+    threading.Thread(
+        target=lambda: torbox.check_quota_and_warn(QUOTA_WARN_TORRENT_COUNT, QUOTA_WARN_SIZE_GB),
+        name="quota-manual", daemon=True,
+    ).start()
+    flash("Quota check started", "ok")
     return redirect(url_for("ui_dashboard") + "#overview")
 
 

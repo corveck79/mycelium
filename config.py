@@ -50,6 +50,8 @@ PREFER_HEVC = _env("PREFER_HEVC", "true").lower() in ("1", "true", "yes")
 MIN_SEEDERS = _env_int("MIN_SEEDERS", 3)
 # Maximum file size in GB to include a candidate (0 = no limit; unknown size always passes).
 MAX_SIZE_GB = _env_int("MAX_SIZE_GB", 0)
+# Audio language preference (comma-separated codes: nl, en, multi). Empty = no preference.
+AUDIO_LANGUAGE_PREFERENCE = [l.strip().lower() for l in _env("AUDIO_LANGUAGE_PREFERENCE", "").split(",") if l.strip()]
 
 # How long to wait for Torbox to make the torrent available before triggering Jellyfin scan.
 TORBOX_POLL_INTERVAL_SEC = _env_int("TORBOX_POLL_INTERVAL_SEC", 10)
@@ -126,6 +128,19 @@ TRENDING_CHECK_INTERVAL_HOURS = _env_int("TRENDING_CHECK_INTERVAL_HOURS", 24)
 # ── Health-aware processing ───────────────────────────────────────────────────
 # Cache health status for this many seconds; skip services that recently failed.
 HEALTH_CACHE_SECONDS = _env_int("HEALTH_CACHE_SECONDS", 60)
+
+# ── OpenSubtitles ─────────────────────────────────────────────────────────────
+OPENSUBTITLES_API_KEY = _env("OPENSUBTITLES_API_KEY", "")
+OPENSUBTITLES_USER_AGENT = _env("OPENSUBTITLES_USER_AGENT", "seerr-torbox-webhook v1.0")
+OPENSUBTITLES_LANGUAGES = [l.strip().lower() for l in _env("OPENSUBTITLES_LANGUAGES", "").split(",") if l.strip()]
+
+# ── Continue-watching priority ────────────────────────────────────────────────
+CONTINUE_WATCHING_INTERVAL_MINUTES = _env_int("CONTINUE_WATCHING_INTERVAL_MINUTES", 60)
+
+# ── TorBox quota warning ──────────────────────────────────────────────────────
+QUOTA_WARN_TORRENT_COUNT = _env_int("QUOTA_WARN_TORRENT_COUNT", 200)
+QUOTA_WARN_SIZE_GB = _env_int("QUOTA_WARN_SIZE_GB", 4000)
+QUOTA_CHECK_INTERVAL_HOURS = _env_int("QUOTA_CHECK_INTERVAL_HOURS", 1)
 
 
 def configure_logging() -> None:

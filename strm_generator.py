@@ -242,3 +242,43 @@ def run_and_refresh() -> None:
     """Run strm generation and trigger Jellyfin scan if any new files were created."""
     if run_once() > 0:
         jellyfin.refresh_library()
+    # Self-healing: proactive health probe of a small sample of existing strms.
+    try:
+        _self_heal_sample()
+    except Exception as exc:
+        log.debug("Self-heal sample failed: %s", exc)
+
+
+def _self_heal_sample(sample_size: int = 10) -> None:
+    """HEAD-check a random sample of existing .strm files. If a high fraction
+    fail, log a warning and let the next cleanup cycle do the heavy lifting."""
+    import random
+    media = Path(MEDIA_PATH)
+    if not media.is_dir():
+        return
+    strms: list[Path] = []
+    for sub in ("movies", "series"):
+        d = media / sub
+        if d.is_dir():
+            strms.extend(d.rglob("*.strm"))
+    if len(strms) <= 5:
+        return
+    sample = random.sample(strms, min(sample_size, len(strms)))
+    bad = 0
+    for s in sample:
+        try:
+            url = s.read_text(encoding="utf-8").strip()
+        except Exception:
+            continue
+        # Catbox proxy URLs always work — skip the probe
+        if "/stream/" in url and url.startswith("http://"):
+            continue
+        try:
+            r = req_lib.head(url, timeout=5, allow_redirects=True)
+            if r.status_code >= 400:
+                bad += 1
+        except Exception:
+            bad += 1
+    if bad and bad / len(sample) >= 0.3:
+        log.warning("Self-heal probe: %d/%d sampled strms failed; cleanup will repair",
+                    bad, len(sample))
