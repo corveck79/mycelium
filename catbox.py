@@ -26,7 +26,7 @@ from config import CATBOX_HOST, CATBOX_IDLE_MINUTES
 log = logging.getLogger(__name__)
 
 
-_URL_CACHE_TTL_SEC = 300  # 5 minutes — TorBox CDN URLs typically valid for ~1h
+_URL_CACHE_TTL_SEC = 1800  # 30 minutes — well within TorBox CDN URL validity
 _url_cache: dict[str, tuple[str, float]] = {}
 _url_cache_lock = threading.Lock()
 
