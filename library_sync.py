@@ -93,6 +93,32 @@ def import_existing() -> dict:
     return {"scanned": len(files), "imported": imported}
 
 
+_TORRENT_PREFIX_RE = re.compile(
+    r"^(\[[^\]]+\]\s*|www[\s.][\w.\-]+\s*-\s*|rutor\.?\s*info\s*|\[?DEVIL-TORRENTS[^\]]*\]?\s*|HIDRATORRENTS[^\s]*\s*(?:MKV)?\s*-?(?:LEGENDADO)?-?\s*|superseed\s+\S+\s*)+",
+    re.IGNORECASE,
+)
+_TRAILING_JUNK_RE = re.compile(r"[\[\(]\s*$")
+_LATIN_RE = re.compile(r"[A-Za-z][A-Za-z0-9 :,'!&\-\.]+")
+
+
+def _clean_title(raw: str) -> str:
+    """Strip torrent-site prefixes and trailing junk before TMDB lookup."""
+    s = raw.strip()
+    s = _TORRENT_PREFIX_RE.sub("", s)
+    s = _TRAILING_JUNK_RE.sub("", s).strip()
+    # Drop nested parentheses that aren't the year
+    s = re.sub(r"\([^)]*[A-Za-zА-Яа-я][^)]*\)", "", s).strip()
+    return s
+
+
+def _latin_only(s: str) -> str:
+    """Return the longest contiguous Latin-alphabet run (for mixed Cyrillic titles)."""
+    matches = _LATIN_RE.findall(s)
+    if not matches:
+        return s
+    return max(matches, key=len).strip()
+
+
 def resolve_unknowns() -> dict:
     """Resolve unknown_ placeholder IDs to real IMDb IDs via TMDB."""
     items = db.get_unknown_media_items()
@@ -106,16 +132,36 @@ def resolve_unknowns() -> dict:
         media_type = item["media_type"]
         year_m = _FOLDER_YEAR_RE.search(title_full)
         year = int(year_m.group(1)) if year_m else None
-        title = _FOLDER_YEAR_RE.sub("", title_full).strip()
-        try:
-            real_id = tmdb.search_movie(title, year) if media_type == "movie" else tmdb.search_tv(title)
-        except Exception as exc:
-            log.debug("TMDB lookup failed for %r: %s", title_full, exc)
-            real_id = None
+        base = _FOLDER_YEAR_RE.sub("", title_full).strip()
+
+        candidates: list[str] = []
+        cleaned = _clean_title(base)
+        if cleaned:
+            candidates.append(cleaned)
+        latin = _latin_only(cleaned or base)
+        if latin and latin not in candidates:
+            candidates.append(latin)
+        if base not in candidates:
+            candidates.append(base)
+
+        real_id = None
+        for cand in candidates:
+            try:
+                real_id = (tmdb.search_movie(cand, year)
+                           if media_type == "movie"
+                           else tmdb.search_tv(cand))
+            except Exception as exc:
+                log.debug("TMDB lookup failed for %r: %s", cand, exc)
+                real_id = None
+            if real_id:
+                break
+            time.sleep(0.15)
+
         if real_id and db.rekey_media_item(old_id, real_id, media_type):
             log.info("Resolved %s -> %s (%s)", old_id, real_id, title_full)
             resolved += 1
         else:
+            log.debug("Unresolved: %s (tried %s)", title_full, candidates)
             failed += 1
         time.sleep(0.25)
     log.info("resolve_unknowns: %d resolved, %d unresolved", resolved, failed)
