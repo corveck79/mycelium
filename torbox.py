@@ -24,6 +24,11 @@ def add_magnet(magnet: str, timeout: int = 30) -> dict:
     resp.raise_for_status()
     payload = resp.json() or {}
     if not payload.get("success", False):
+        # DUPLICATE_ITEM means the torrent is already in TorBox — treat as success
+        if payload.get("error") == "DUPLICATE_ITEM":
+            log.info("Torbox: torrent already exists (DUPLICATE_ITEM), treating as success")
+            invalidate_mylist_cache()
+            return payload.get("data", {}) or {}
         raise RuntimeError(f"Torbox add failed: {payload}")
     log.info("Torbox createtorrent response: %s", payload.get("detail") or payload.get("data"))
     invalidate_mylist_cache()
