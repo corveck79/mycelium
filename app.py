@@ -650,6 +650,29 @@ def ui_generate_nfos():
     return redirect(url_for("ui_dashboard") + "#repair")
 
 
+@app.post("/api/run-cleanup")
+@_csrf.exempt
+def api_run_cleanup():
+    """CSRF-exempt, localhost-only trigger for cleanup (curl/automation)."""
+    if request.remote_addr not in ("127.0.0.1", "::1", "localhost"):
+        return jsonify(error="localhost only"), 403
+    threading.Thread(target=cleanup.run_cleanup, name="cleanup-api", daemon=True).start()
+    return jsonify(ok=True, started="run_cleanup")
+
+
+@app.post("/api/generate-nfos")
+@_csrf.exempt
+def api_generate_nfos():
+    """CSRF-exempt, localhost-only trigger for NFO + image generation."""
+    if request.remote_addr not in ("127.0.0.1", "::1", "localhost"):
+        return jsonify(error="localhost only"), 403
+    def _run():
+        nfo_generator.generate_all()
+        nfo_generator.fetch_local_images()
+    threading.Thread(target=_run, name="nfo-api", daemon=True).start()
+    return jsonify(ok=True, started="generate_nfos")
+
+
 # ── New JSON APIs ─────────────────────────────────────────────────────────────
 
 @app.get("/ui/api/health")
