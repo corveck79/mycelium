@@ -323,6 +323,22 @@ function MaintenancePanel() {
     }
   };
 
+  const cleanupDuplicateStrms = async () => {
+    setBusy(true);
+    setResult('Scanning for duplicate .strm files…');
+    try {
+      const r = await fetch('/ui/api/cleanup-duplicate-strms', { method: 'POST' });
+      const data = await r.json();
+      const parts = [`scanned: ${data.scanned}`, `cleaned: ${data.cleaned}`];
+      if (data.skipped) parts.push(`skipped: ${data.skipped}`);
+      setResult('Done — ' + parts.join(', ') + (data.cleaned > 0 ? ' — do a full Jellyfin library rescan now' : ' — nothing to clean'));
+    } catch (e: any) {
+      setResult(`Error: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const migrateCanonical = async () => {
     if (!confirm('This renames movie folders to TMDB canonical names and removes duplicates. Jellyfin needs a full rescan afterwards. Continue?')) return;
     setBusy(true);
@@ -363,6 +379,21 @@ function MaintenancePanel() {
             className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50"
           >
             {busy ? 'Migrating…' : 'Migrate to canonical names'}
+          </button>
+        </div>
+        <div className="border-t border-border pt-3">
+          <p className="text-sm font-medium mb-1">Clean up duplicate .strm files</p>
+          <p className="text-muted text-xs mb-2">
+            Removes extra .strm files from folders that have more than one (e.g. after
+            migration left behind old Cyrillic filenames). Keeps the file matching the
+            folder name. Run once after migration, then rescan Jellyfin.
+          </p>
+          <button
+            onClick={cleanupDuplicateStrms}
+            disabled={busy}
+            className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50"
+          >
+            {busy ? 'Cleaning…' : 'Clean up duplicate strm files'}
           </button>
         </div>
         <div className="border-t border-border pt-3">

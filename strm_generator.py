@@ -656,6 +656,17 @@ def _migrate_to_canonical_names_locked() -> dict:
             old.rename(new)
             # Update DB strm_path: any virtual_item pointing into old folder
             db.update_virtual_strm_path_prefix(str(old), str(new))
+            # Rename .strm/.nfo files inside that still use the old folder stem
+            old_stem = old.name
+            new_stem = new.name
+            for suffix in (".strm", ".nfo"):
+                old_file = new / (old_stem + suffix)
+                if old_file.exists():
+                    new_file = new / (new_stem + suffix)
+                    if not new_file.exists():
+                        old_file.rename(new_file)
+                        if suffix == ".strm":
+                            db.update_virtual_strm_path_prefix(str(old_file), str(new_file))
             log.info("migrate: renamed '%s' → '%s'", old.name, new.name)
             return True
         except Exception as exc:
@@ -922,6 +933,93 @@ def _repair_expired_strms_locked(media_type: str = "movie") -> dict:
         "orphaned_tokens": orphaned, "relinked": relinked,
         "requeued": requeued, "skipped": skipped,
     }
+
+
+def cleanup_duplicate_strms() -> dict:
+    """Remove extra .strm (and matching .nfo) files from folders that have more than one.
+    Keeps the .strm whose stem matches the folder name; falls back to the one whose
+    token has an imdb_id set in virtual_items."""
+    if not _maintenance_lock.acquire(blocking=False):
+        log.warning("cleanup_duplicate_strms: maintenance already running — skipping")
+        return {"scanned": 0, "cleaned": 0, "skipped": 0}
+    try:
+        return _cleanup_duplicate_strms_locked()
+    finally:
+        _maintenance_lock.release()
+
+
+def _cleanup_duplicate_strms_locked() -> dict:
+    root = Path(MEDIA_PATH) / "movies"
+    if not root.exists():
+        return {"scanned": 0, "cleaned": 0, "skipped": 0}
+
+    scanned = cleaned = skipped = 0
+
+    for movie_dir in root.iterdir():
+        if not movie_dir.is_dir():
+            continue
+        strms = list(movie_dir.glob("*.strm"))
+        if len(strms) <= 1:
+            continue
+
+        scanned += 1
+        canonical_stem = movie_dir.name
+
+        # Prefer the .strm whose stem matches the folder name
+        keep = next((s for s in strms if s.stem == canonical_stem), None)
+
+        # Fallback: prefer one whose token has imdb_id in DB
+        if keep is None:
+            for s in strms:
+                try:
+                    token = s.read_text(encoding="utf-8").strip().rstrip("/").split("/")[-1]
+                    item = db.get_virtual_item(token)
+                    if item and item.get("imdb_id"):
+                        keep = s
+                        break
+                except Exception:
+                    pass
+
+        # Last resort: keep alphabetically first
+        if keep is None:
+            keep = sorted(strms)[0]
+
+        # If keep doesn't have the canonical name, rename it and update DB
+        if keep.stem != canonical_stem:
+            new_path = keep.parent / (canonical_stem + ".strm")
+            if not new_path.exists():
+                try:
+                    keep.rename(new_path)
+                    db.update_virtual_strm_path_prefix(str(keep), str(new_path))
+                    nfo_old = keep.with_suffix(".nfo")
+                    nfo_new = new_path.with_suffix(".nfo")
+                    if nfo_old.exists() and not nfo_new.exists():
+                        nfo_old.rename(nfo_new)
+                    keep = new_path
+                except Exception as exc:
+                    log.warning("cleanup_duplicate_strms: could not rename %s: %s", keep, exc)
+                    skipped += 1
+                    continue
+
+        # Remove all other .strm files and their .nfo sidecars
+        for s in list(movie_dir.glob("*.strm")):
+            if s.resolve() == keep.resolve():
+                continue
+            nfo = s.with_suffix(".nfo")
+            if nfo.exists():
+                try:
+                    nfo.unlink()
+                except Exception as exc:
+                    log.warning("cleanup_duplicate_strms: could not remove %s: %s", nfo, exc)
+            try:
+                s.unlink()
+                log.info("cleanup_duplicate_strms: removed extra strm %s in %s", s.name, movie_dir.name)
+                cleaned += 1
+            except Exception as exc:
+                log.warning("cleanup_duplicate_strms: could not remove %s: %s", s, exc)
+
+    log.info("cleanup_duplicate_strms: scanned=%d cleaned=%d skipped=%d", scanned, cleaned, skipped)
+    return {"scanned": scanned, "cleaned": cleaned, "skipped": skipped}
 
 
 def _self_heal_sample(sample_size: int = 10) -> None:

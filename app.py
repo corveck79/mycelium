@@ -695,6 +695,14 @@ def ui_api_migrate_canonical():
     return jsonify(**result)
 
 
+@app.post("/ui/api/cleanup-duplicate-strms")
+@_csrf.exempt
+def ui_api_cleanup_duplicate_strms():
+    """Remove extra .strm files from folders that have more than one."""
+    result = strm_generator.cleanup_duplicate_strms()
+    return jsonify(**result)
+
+
 # ── New JSON APIs ─────────────────────────────────────────────────────────────
 
 @app.get("/ui/api/health")
