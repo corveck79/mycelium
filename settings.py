@@ -21,6 +21,7 @@ _BOOL_KEYS = {
     "ALLOW_4K",
     "EXCLUDE_REMUX",
     "EXCLUDE_CAM",
+    "STRICT_NO_CAM",
     "PREFER_WEBDL",
     "PREFER_HEVC",
     "ZILEAN_ENABLED",
@@ -92,6 +93,7 @@ HOT_RELOAD = {
     "ALLOW_4K",
     "EXCLUDE_REMUX",
     "EXCLUDE_CAM",
+    "STRICT_NO_CAM",
     "PREFER_WEBDL",
     "PREFER_HEVC",
     "MIN_SEEDERS",
@@ -146,7 +148,7 @@ SETTING_GROUPS = [
         "title": "Quality & filtering",
         "keys": [
             "QUALITY_PREFERENCE", "ALLOW_4K", "EXCLUDE_REMUX", "EXCLUDE_CAM",
-            "PREFER_WEBDL", "PREFER_HEVC", "MIN_SEEDERS", "MAX_SIZE_GB",
+            "PREFER_WEBDL", "PREFER_HEVC", "MIN_SEEDERS", "MAX_SIZE_GB", "STRICT_NO_CAM",
         ],
     },
     {

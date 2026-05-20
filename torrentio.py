@@ -186,6 +186,7 @@ def rank_streams(
     prefer_hevc = _settings.get("PREFER_HEVC", PREFER_HEVC) if override.get("prefer_hevc") is None else bool(override["prefer_hevc"])
     exclude_remux = _settings.get("EXCLUDE_REMUX", EXCLUDE_REMUX)
     exclude_cam = _settings.get("EXCLUDE_CAM", EXCLUDE_CAM)
+    strict_cam = _settings.get("STRICT_NO_CAM", False)
     prefer_webdl = _settings.get("PREFER_WEBDL", PREFER_WEBDL)
     min_seeders = _settings.get("MIN_SEEDERS", MIN_SEEDERS)
     max_size_gb = _settings.get("MAX_SIZE_GB", MAX_SIZE_GB)
@@ -207,6 +208,9 @@ def rank_streams(
         filtered = [s for s in candidates if not _CAM_RE.search(f"{s.name} {s.title}")]
         if filtered:
             candidates = filtered
+        elif strict_cam:
+            log.warning("Only cam/telesync candidates available and STRICT_NO_CAM is on — rejecting all")
+            return []
         else:
             log.warning("Only cam/telesync candidates available; allowing them")
 
