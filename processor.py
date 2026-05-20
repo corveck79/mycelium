@@ -182,17 +182,24 @@ def _process_movie(req: MediaRequest) -> tuple[bool, Optional[TorrentioStream]]:
         if winner:
             return True, winner
 
-    ok, winner = _add_best_from(candidates, req.title)
+    try:
+        ok, winner = _add_best_from(candidates, req.title)
+    except RateLimited:
+        # TorBox quota gone — try RealDebrid (no createtorrent limit) before
+        # giving up, so we can still serve the title right now.
+        log.info("TorBox rate limited for %s — trying RealDebrid fallback first", req.title)
+        fallback = _try_realdebrid_fallback(req.title, candidates)
+        if fallback:
+            return True, fallback
+        raise  # nothing on RD either — reschedule via retry queue
     if ok:
         return ok, winner
-    # TorBox failed. If MULTI_DEBRID is on and RealDebrid has any candidate
-    # cached, fall back to RD for movies (series via RD is not yet supported).
+    # TorBox add failed (not rate limit). Try RD cached fallback.
     fallback = _try_realdebrid_fallback(req.title, candidates)
     if fallback:
         return True, fallback
     _LAST_FAIL_REASON[req.imdb_id] = (
-        f"{len(candidates)} release(s) found but none could be added to TorBox "
-        f"(not cached / rate limited)"
+        f"{len(candidates)} release(s) found but none could be added to TorBox or RealDebrid"
     )
     return False, None
 
@@ -266,7 +273,16 @@ def _process_season(req: MediaRequest, season: int) -> tuple[bool, Optional[Torr
     if pack_candidates and pack_candidates[0].is_season_pack:
         log.info("Trying season pack(s) for %s S%02d", req.title, season)
         packs = [s for s in pack_candidates if s.is_season_pack]
-        ok, winner = _add_best_from(packs, f"{req.title} S{season:02d} pack")
+        try:
+            ok, winner = _add_best_from(packs, f"{req.title} S{season:02d} pack")
+        except RateLimited:
+            log.info("TorBox rate limited — trying RD pack fallback for %s S%02d", req.title, season)
+            rd_winner = _try_realdebrid_fallback(
+                f"{req.title} S{season:02d}", packs, media_type="series",
+            )
+            if rd_winner:
+                return True, rd_winner
+            raise
         if ok:
             return True, winner
         rd_winner = _try_realdebrid_fallback(
@@ -288,7 +304,21 @@ def _process_season(req: MediaRequest, season: int) -> tuple[bool, Optional[Torr
         if not candidates:
             log.info("No more episodes returned at S%02dE%02d", season, episode)
             break
-        ok, winner = _add_best_from(candidates, f"{req.title} S{season:02d}E{episode:02d}")
+        try:
+            ok, winner = _add_best_from(candidates, f"{req.title} S{season:02d}E{episode:02d}")
+        except RateLimited:
+            # TorBox quota gone mid-season — try RD for this episode, then stop
+            # adding more (leave the rest for the retry queue) to respect quota.
+            rd_winner = _try_realdebrid_fallback(
+                req.title, candidates,
+                media_type="episode", season=season, episode=episode,
+            )
+            if rd_winner:
+                added += 1
+                first_winner = first_winner or rd_winner
+            if added:
+                return True, first_winner
+            raise
         if not ok:
             rd_winner = _try_realdebrid_fallback(
                 req.title, candidates,
