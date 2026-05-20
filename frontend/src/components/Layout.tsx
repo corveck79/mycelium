@@ -9,6 +9,7 @@ const navItems = [
   { to: '/watchlist', label: 'Watchlist', icon: '★' },
   { to: '/search', label: 'Search', icon: '🔍' },
   { to: '/requests', label: 'My Requests', icon: '📋' },
+  { to: '/wanted', label: 'Wanted', icon: '⏳' },
 ];
 
 const adminItems = [
@@ -158,6 +159,7 @@ function Breadcrumb({ path }: { path: string }) {
     '/watchlist': 'Watchlist',
     '/search': 'Search',
     '/requests': 'My Requests',
+    '/wanted': 'Wanted',
     '/admin': 'Admin',
     '/settings': 'Settings',
     '/login': 'Sign in',

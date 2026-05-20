@@ -1279,6 +1279,11 @@ def ui_api_wanted_recheck():
     return jsonify(ok=True, message="wanted recheck started")
 
 
+@app.get("/ui/api/wanted-episodes")
+def ui_api_wanted_episodes():
+    return jsonify(items=db.get_all_wanted_episodes())
+
+
 @app.get("/ui/api/torbox-quota")
 def ui_api_torbox_quota():
     """createtorrent usage in the last hour, broken down by reason — explains

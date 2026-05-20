@@ -84,3 +84,27 @@ export interface SessionInfo {
   authenticated: boolean;
   user?: { id: number; username: string; role: string; auto_approve: boolean } | null;
 }
+
+export interface WantedMovie {
+  imdb_id: string;
+  tmdb_id: number | null;
+  title: string;
+  reason: string | null;
+  attempts: number;
+  added_at: string;
+  last_checked: string | null;
+}
+
+export interface WantedEpisode {
+  id: number;
+  imdb_id: string;
+  tmdb_id: number | null;
+  title: string;
+  season: number;
+  episode: number;
+  air_date: string | null;
+  status: string;
+  attempt_count: number;
+  first_attempted: string | null;
+  last_attempted: string | null;
+}

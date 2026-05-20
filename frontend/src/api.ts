@@ -7,6 +7,8 @@ import type {
   UserRequest,
   SessionInfo,
   MediaType,
+  WantedMovie,
+  WantedEpisode,
 } from './types';
 
 const csrfToken = (): string => {
@@ -162,6 +164,11 @@ export const api = {
 
   autoAddNow: () =>
     http<{ ok: boolean; message?: string }>('/ui/api/auto-add-now', { method: 'POST' }),
+
+  // Wanted lists
+  wantedMovies: () => http<{ items: WantedMovie[] }>('/ui/api/wanted-movies'),
+  wantedRecheck: () => http<{ ok: boolean; message?: string }>('/ui/api/wanted-recheck', { method: 'POST' }),
+  wantedEpisodes: () => http<{ items: WantedEpisode[] }>('/ui/api/wanted-episodes'),
 };
 
 // Image helpers — TMDB image CDN
