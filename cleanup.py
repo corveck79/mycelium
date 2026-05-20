@@ -378,6 +378,61 @@ def _series_clean_title(raw: str) -> str:
     return re.sub(r"[\[\(\{\s\-]+$", "", s).strip() or raw
 
 
+def remove_orphan_folders() -> int:
+    """Delete movie/series folders that no longer contain any .strm file.
+
+    After dedup/repair removes a .strm, leftover .nfo/poster files can keep an
+    otherwise media-less folder alive — Jellyfin then retains a ghost entry for
+    it. This sweep removes such folders entirely (and empty Season subfolders).
+    Returns the number of folders removed.
+    """
+    import shutil
+
+    media = Path(MEDIA_PATH)
+    removed = 0
+
+    movies_dir = media / "movies"
+    if movies_dir.is_dir():
+        for folder in movies_dir.iterdir():
+            if not folder.is_dir():
+                continue
+            if not any(folder.rglob("*.strm")):
+                try:
+                    shutil.rmtree(folder)
+                    log.info("Removed orphan movie folder (no .strm): %s", folder.name)
+                    removed += 1
+                except Exception as exc:
+                    log.warning("Could not remove orphan folder %s: %s", folder, exc)
+
+    series_dir = media / "series"
+    if series_dir.is_dir():
+        for folder in series_dir.iterdir():
+            if not folder.is_dir():
+                continue
+            if not any(folder.rglob("*.strm")):
+                try:
+                    shutil.rmtree(folder)
+                    log.info("Removed orphan series folder (no .strm): %s", folder.name)
+                    removed += 1
+                except Exception as exc:
+                    log.warning("Could not remove orphan folder %s: %s", folder, exc)
+                continue
+            # Series still has episodes — prune empty season subfolders
+            for sub in folder.iterdir():
+                if sub.is_dir() and not any(sub.rglob("*.strm")):
+                    try:
+                        shutil.rmtree(sub)
+                        log.info("Removed orphan season folder (no .strm): %s/%s",
+                                 folder.name, sub.name)
+                        removed += 1
+                    except Exception as exc:
+                        log.warning("Could not remove orphan season %s: %s", sub, exc)
+
+    if removed:
+        log.info("remove_orphan_folders: removed %d folder(s)", removed)
+    return removed
+
+
 def merge_series_duplicates() -> int:
     """Find series folders with the same IMDb ID and merge them into one canonical
     folder, moving all season/episode strm files across.  Returns number of
@@ -465,12 +520,17 @@ def run_cleanup() -> None:
     run_id = db.insert_cleanup_run()
     scanned = repaired = deleted = unfixable = 0
 
+    # 0. Sweep folders that have lost all their .strm files (leftover .nfo/posters)
+    orphan_removed = remove_orphan_folders()
+
     strm_files = _collect_strm_files()
     scanned = len(strm_files)
     log.info("Cleanup: found %d .strm files", scanned)
 
     if not strm_files:
         db.update_cleanup_run(run_id, 0, 0, 0, 0)
+        if orphan_removed:
+            strm_generator.run_and_refresh()
         return
 
     try:
@@ -515,7 +575,7 @@ def run_cleanup() -> None:
         elif result == "unfixable":
             unfixable += 1
 
-    if dup_removed or fixed_files:
+    if dup_removed or fixed_files or orphan_removed:
         changed = True
 
     db.update_cleanup_run(run_id, scanned, repaired, deleted, unfixable)
