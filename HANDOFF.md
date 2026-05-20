@@ -16,70 +16,89 @@ Docker container.
 - **App URLs:** dashboard `http://10.0.0.10:8088/ui`, SPA `/app/`.
   Jellyfin at `http://10.0.0.10:8096`.
 
-## The problem we were chasing
-Jellyfin shows ~200 movies but disk only has **79 movie folders / 79 .strm
-files** (verified with `find data/media/movies`). So the duplicates are NOT on
-disk — they are **ghost/duplicate entries inside Jellyfin's own database**.
+## Current state (end of session 2026-05-20)
 
-## ROOT CAUSE FOUND + FIXED IN CODE
-Every Jellyfin call returned **401** (`Jellyfin refresh failed: 401`). Cause was
-a **bug**: `jellyfin.py` read the URL/key from `config.JELLYFIN_*` (env-only,
-imported once at startup), but the wizard/Settings-UI saves them to the
-**settings DB**. With nothing in `.env`, the token was empty → 401. (TorBox
-worked because it uses `settings.get(...)`.)
+Movies are clean (~79). Series still show duplicates in Jellyfin (screenshot:
+87 entries with Cross ×4, The Curse of Oak Island ×3, Daredevil Rinascita ×5,
+Fallout ×5, etc.). Most posters are missing (blue placeholders).
 
-Fixed: `jellyfin.py` now reads `settings.get("JELLYFIN_URL")` /
-`settings.get("JELLYFIN_API_KEY")` at call time (commit on `main`).
+### Why series are still duplicated
+- Disk has many duplicate series folders: `www UIndex org    -    Tracker`,
+  `Tracker 2024`, `tracker 2024`, `[DEVIL-TORRENTS PL] Tracker`, all for the
+  same show.
+- `merge_series_duplicates()` was added to `cleanup.py` and wired into
+  `run_cleanup()`, but the NAS container had **not yet been rebuilt** with the
+  new code when the screenshot was taken.
+- A second bug was also fixed: `dup.rmdir()` failed when season subdirs
+  contained leftover `.nfo`/poster files → now uses `shutil.rmtree`.
 
-### Next action (after pulling the fix)
-1. On NAS: `git pull origin main && docker compose up -d --build`.
-2. App → Settings tab → set Jellyfin URL `http://10.0.0.10:8096` + the API key
-   created in Jellyfin (Dashboard → API Keys) → Save.
-3. Verify: `docker compose logs --tail=20 mycelium | grep -i jellyfin`
-   should show `library refresh accepted`, not `401`.
-4. Then run a full Jellyfin scan + let MergeVersions run. Ghost entries share
-   the same IMDb ID as the real 79 films, so merge-by-IMDb collapses the count
-   toward ~79.
+### What to do on the NAS right now
+1. `git pull origin main && docker compose up -d --build`
+2. Dashboard → **Run Cleanup** button
+3. Watch logs: `docker compose logs -f mycelium | grep -i "merge\|series\|removed"`
+   Should see: `Merging series [...] into canonical 'Tracker'` etc.
+4. After cleanup: Jellyfin → **Scan All Libraries** → series count should drop.
+5. Dashboard → **Generate NFOs** button → downloads poster.jpg + fanart.jpg +
+   episode stills from TMDB into every media folder (runs automatically on
+   startup too, 150 s delay).
 
-## Changes shipped this session (all on `main`)
-- `8b8f5ec` — MergeVersions groups Jellyfin movies by **IMDb/TMDB provider ID**
-  (was: by name), so 4K+HD and name-variants collapse into one entry.
-  Also: deleting a duplicate/unfixable `.strm` now removes its sibling `.nfo`.
-  Files: `jellyfin.py`, `cleanup.py`.
-- `9fe182d` — `cleanup.remove_orphan_folders()`: deletes movie/series folders
-  with no `.strm` left (leftover `.nfo`/posters), runs first in every cleanup
-  pass, then triggers a Jellyfin refresh. File: `cleanup.py`.
-- `f1f2aef` — scan-burst probe-guard in `catbox.materialize()`: when many
-  distinct tokens are requested in a short window (a library scan), skip the
-  TorBox re-add (was costing up to 45s per item × ~200). Real single-title
-  playback still re-adds on demand. Covers `/stream` and WebDAV.
-  File: `catbox.py`.
-- `e250dfb` — README: fixed stale clone URL (`myce` → `mycelium`).
+## All changes shipped this session (all on `main`)
 
-Verified: frontend builds clean (Vite → `static/app/`), all `.py` modules
-compile. Cleanup confirmed working in prod logs (`found 442 .strm files`,
-`removed 11 duplicate .strm file(s)`).
+### Previous session
+- `395da07` — Fix Jellyfin 401: `jellyfin.py` now reads URL/API key from
+  `settings.get()` (settings DB) instead of env-only `config.*`.
+- `8b8f5ec` — MergeVersions groups Jellyfin movies by IMDb/TMDB provider ID.
+  Deleting a `.strm` now also removes its sibling `.nfo`.
+- `9fe182d` — `cleanup.remove_orphan_folders()`: sweeps folders with no `.strm`.
+- `f1f2aef` — Catbox scan-burst probe-guard: skips TorBox re-add during library
+  scans (was 45 s × 200 items).
 
-## Known secondary issues (not yet fixed)
-- **Messy series folder names** create duplicate series folders, e.g.
-  `www UIndex org    -    FROM` vs `From`, and Cyrillic prefixes like
-  `Громовержцы  Thunderbolts`. The torrent-site/Cyrillic prefix stripping
-  (`strm_generator._clean_torrent_name`, `cleanup._series_clean_title`) misses
-  some of these for SERIES, so they land as separate folders. Movies are fine
-  (write-time fuzzy dedup works — see "Skipping duplicate strm" log lines).
-- DB vs disk drift: dashboard showed `STRM ∉ DB` and `DB ∉ STRM` counts; not
+### This session
+- `a66fa2a` — **Local image fetcher**: `nfo_generator.fetch_local_images()`
+  downloads `poster.jpg` + `fanart.jpg` (TMDB) for every movie/series folder,
+  and `{stem}-thumb.jpg` episode stills for every series episode. Hooked into
+  startup (150 s delay), `/ui/generate-nfos`, and library import.
+  Files: `tmdb.py`, `nfo_generator.py`, `app.py`.
+- `2795439` — `merge_series_duplicates()` in `cleanup.py`:
+  - Groups series folders by IMDb ID read from `tvshow.nfo` (primary) → DB →
+    TMDB lookup (fallback).
+  - Moves `.strm` files into canonical folder, deletes duplicates.
+  - Now called as step 0 in every `run_cleanup()` pass.
+- `e6bdbf6` — Fix `merge_series_duplicates`: use `shutil.rmtree` instead of
+  `rmdir` so duplicate folders with leftover `.nfo`/posters are fully removed.
+- `335cf40` — **EXCLUDE_LANGUAGES** setting: detects Russian torrents (keywords
+  + Cyrillic chars) and filters them out before quality sorting.
+  Set `ru` in Settings → Languages & subtitles to block Russian dubs.
+
+## Key files
+| File | Purpose |
+|------|---------|
+| `jellyfin.py` | Jellyfin API calls (refresh, MergeVersions, image refresh) |
+| `nfo_generator.py` | Write `.nfo` sidecars + fetch local images from TMDB |
+| `cleanup.py` | Dedup `.strm`, merge series folders, orphan sweep |
+| `torrentio.py` | Torrent candidate ranking + language filtering |
+| `tmdb.py` | TMDB API: search, images, episode stills |
+| `settings.py` | Runtime-editable settings (reads DB first, `.env` fallback) |
+| `catbox.py` | Lazy TorBox materialization for `/stream/<token>` |
+
+## Known remaining issues
+- **Series dedup not yet verified in prod** — needs rebuild + cleanup run.
+- **Jellyfin volume mount**: was changed from `/volume1/data/media` to
+  `/volume1/docker/jelly-stack/webhook/data/media` in
+  `/volume1/docker/jellyfin/docker-compose.yml`. Verify Jellyfin was restarted
+  after that change and is reading the right 79 movies.
+- **Poster download** may be slow on first run (~150 ms per item × all episodes).
+  Check logs for `fetch_local_images` progress.
+- **DB vs disk drift**: `STRM ∉ DB` / `DB ∉ STRM` counters on dashboard not
   addressed.
-- **SECURITY:** the user pasted a GitHub PAT (`ghp_...`) into chat earlier and
-  was told to revoke it. Confirm it was revoked.
 
 ## Workflow notes / gotchas
 - Work directly on `main` (user's preference). Develop, commit, push to `main`.
-- `data/` is gitignored (DB/media not tracked) — can't inspect media from a
-  cloud session; must ask the user to run `find`/`ls` on the NAS.
-- `/ui/run-cleanup` and other POST endpoints are CSRF-protected → can't `curl`
-  them; trigger via the dashboard buttons (Recovery wiz runs integrity +
-  cleanup + import + strm scan).
-- Single gunicorn worker, 8 threads → in-process state (e.g. catbox scan-burst
-  detector, mylist cache) is shared and safe.
-- Scheduler intervals (cleanup, MergeVersions, strm-gen) need a restart to
-  change; most other settings are hot-reloadable via Settings tab.
+- `data/` is gitignored — can't inspect media from a cloud session; ask user to
+  run `find`/`ls` on the NAS.
+- POST endpoints are CSRF-protected → trigger via dashboard buttons, not curl.
+- Single gunicorn worker, 8 threads → in-process state is shared and safe.
+- Scheduler intervals need a container restart to change; most settings are
+  hot-reloadable via Settings tab.
+- Jellyfin compose file: `/volume1/docker/jellyfin/docker-compose.yml`
+  (separate from the app compose at `/volume1/docker/jelly-stack/webhook/`).
