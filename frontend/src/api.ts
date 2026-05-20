@@ -169,6 +169,11 @@ export const api = {
   wantedMovies: () => http<{ items: WantedMovie[] }>('/ui/api/wanted-movies'),
   wantedRecheck: () => http<{ ok: boolean; message?: string }>('/ui/api/wanted-recheck', { method: 'POST' }),
   wantedEpisodes: () => http<{ items: WantedEpisode[] }>('/ui/api/wanted-episodes'),
+
+  // Failed processing requests
+  failedRequests: () => http<{ items: any[] }>('/ui/api/requests/failed'),
+  retryRequest: (id: number) =>
+    http<{ ok: boolean; title?: string }>(`/ui/api/requests/${id}/retry`, { method: 'POST' }),
 };
 
 // Image helpers — TMDB image CDN

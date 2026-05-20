@@ -1011,6 +1011,29 @@ def ui_api_retry_queue():
     return jsonify(items=db.get_pending_retries())
 
 
+@app.get("/ui/api/requests/failed")
+def ui_api_failed_requests():
+    rows = [r for r in db.get_recent(500) if r.get("status") == "failed"]
+    return jsonify(items=rows)
+
+
+@app.post("/ui/api/requests/<int:row_id>/retry")
+@_csrf.exempt
+def ui_api_retry_request(row_id: int):
+    rows = [r for r in db.get_recent(1000) if r["id"] == row_id]
+    if not rows:
+        return jsonify(error="not found"), 404
+    r = rows[0]
+    seasons = [int(s) for s in (r.get("seasons") or "").split(",") if s.strip().isdigit()]
+    media_request = MediaRequest(
+        title=r["title"], media_type=r["media_type"], imdb_id=r["imdb_id"], seasons=seasons,
+    )
+    db.update_request(row_id, "pending")
+    threading.Thread(target=processor.process, args=(media_request,),
+                     name=f"retry-{r['imdb_id']}", daemon=True).start()
+    return jsonify(ok=True, title=r["title"])
+
+
 @app.get("/ui/api/torbox-usage")
 def ui_api_torbox_usage():
     summary = torbox.get_usage_summary()
