@@ -776,6 +776,23 @@ def update_virtual_item_imdb(token: str, imdb_id: str) -> None:
         conn.commit()
 
 
+def update_virtual_strm_path_prefix(old_prefix: str, new_prefix: str) -> int:
+    """Update strm_path for all virtual_items whose path starts with old_prefix."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT token, strm_path FROM virtual_items WHERE strm_path LIKE ?",
+            (old_prefix + "%",),
+        ).fetchall()
+        count = 0
+        for row in rows:
+            new_path = new_prefix + row["strm_path"][len(old_prefix):]
+            conn.execute("UPDATE virtual_items SET strm_path=? WHERE token=?",
+                         (new_path, row["token"]))
+            count += 1
+        conn.commit()
+        return count
+
+
 def touch_virtual_item(token: str) -> None:
     with _connect() as conn:
         conn.execute(

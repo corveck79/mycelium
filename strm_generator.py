@@ -186,6 +186,41 @@ def _write_nfo(strm_path: Path, imdb_id: str | None, tmdb_id: int | None = None,
         log.warning("Could not write NFO %s: %s", nfo_path, exc)
 
 
+def _canonical_movie_folder(imdb_id: str, fallback_title: str | None = None,
+                             fallback_year: int | None = None) -> str:
+    """Return the canonical 'Title (Year)' folder name from TMDB for this imdb_id.
+    Falls back to fallback_title/year if TMDB lookup fails."""
+    try:
+        import tmdb as _tmdb
+        results = _tmdb._get(f"/find/{imdb_id}",
+                             params={"external_source": "imdb_id"}) or {}
+        hits = results.get("movie_results") or []
+        if hits:
+            title = hits[0].get("title") or ""
+            year = (hits[0].get("release_date") or "")[:4]
+            if title:
+                safe = _safe(title)
+                return f"{safe} ({year})" if year else safe
+    except Exception as exc:
+        log.debug("_canonical_movie_folder TMDB lookup failed for %s: %s", imdb_id, exc)
+    if fallback_title:
+        safe = _safe(fallback_title)
+        return f"{safe} ({fallback_year})" if fallback_year else safe
+    return ""
+
+
+def _find_movie_folder_by_imdb(imdb_id: str) -> Path | None:
+    """Return an existing movie folder for this imdb_id via virtual_items DB, or None."""
+    items = db.get_virtual_items_by_imdb(imdb_id, media_type="movie")
+    for item in items:
+        strm_path = item.get("strm_path")
+        if strm_path:
+            p = Path(strm_path).parent
+            if p.exists():
+                return p
+    return None
+
+
 def create_lazy_movie_strm(info_hash: str, magnet: str, title: str,
                             year: int | None, imdb_id: str | None = None,
                             tmdb_id: int | None = None, quality: str | None = None,
@@ -195,7 +230,18 @@ def create_lazy_movie_strm(info_hash: str, magnet: str, title: str,
     Atomically writes .nfo, poster.jpg, fanart.jpg, and requests subtitles.
     Returns True if a new .strm was written."""
     import catbox
-    folder = _safe(f"{title} ({year})") if year else _safe(title)
+
+    # imdb_id is leading: check if a folder already exists for this movie.
+    if imdb_id:
+        existing = _find_movie_folder_by_imdb(imdb_id)
+        if existing:
+            log.info("create_lazy_movie_strm: folder for %s already exists (%s) — skipping",
+                     imdb_id, existing.name)
+            return False
+        folder = _canonical_movie_folder(imdb_id, fallback_title=title, fallback_year=year)
+    else:
+        folder = _safe(f"{title} ({year})") if year else _safe(title)
+
     if not folder:
         return False
     path = Path(MEDIA_PATH) / "movies" / folder / f"{folder}.strm"
@@ -549,6 +595,148 @@ def run_and_refresh() -> None:
         _self_heal_sample()
     except Exception as exc:
         log.debug("Self-heal sample failed: %s", exc)
+
+
+def migrate_to_canonical_names() -> dict:
+    """One-time migration: rename all movie folders to TMDB canonical names
+    and merge duplicate folders that share the same imdb_id.
+
+    Rules:
+    - imdb_id is the key (read from .nfo files)
+    - Canonical name = TMDB title + year; falls back to current name if TMDB fails
+    - Multiple folders for same imdb_id → keep the one with .strm (or most files),
+      delete the rest
+    - Updates virtual_items.strm_path in DB for any renamed/merged folders
+
+    Returns: {scanned, renamed, merged, skipped, errors, no_imdb}
+    """
+    import re as _re
+    import shutil
+
+    root = Path(MEDIA_PATH) / "movies"
+    if not root.exists():
+        return {"scanned": 0, "renamed": 0, "merged": 0, "skipped": 0, "errors": 0, "no_imdb": 0}
+
+    def _read_imdb(folder: Path) -> str | None:
+        for nfo in folder.glob("*.nfo"):
+            try:
+                text = nfo.read_text(encoding="utf-8", errors="ignore")
+                m = _re.search(
+                    r"<imdbid>(tt\d+)</imdbid>"
+                    r"|<uniqueid[^>]*type=['\"]imdb['\"][^>]*>(tt\d+)</uniqueid>"
+                    r"|(tt\d{7,})",
+                    text,
+                )
+                if m:
+                    return next(g for g in m.groups() if g)
+            except Exception:
+                pass
+        return None
+
+    def _do_rename(old: Path, new: Path) -> bool:
+        try:
+            old.rename(new)
+            # Update DB strm_path: any virtual_item pointing into old folder
+            db.update_virtual_strm_path_prefix(str(old), str(new))
+            log.info("migrate: renamed '%s' → '%s'", old.name, new.name)
+            return True
+        except Exception as exc:
+            log.error("migrate: rename failed %s → %s: %s", old.name, new.name, exc)
+            return False
+
+    def _do_delete(folder: Path) -> None:
+        try:
+            shutil.rmtree(folder)
+            log.info("migrate: deleted duplicate '%s'", folder.name)
+        except Exception as exc:
+            log.error("migrate: delete failed %s: %s", folder.name, exc)
+
+    # Build map: imdb_id → list of folders
+    by_imdb: dict[str, list[Path]] = {}
+    no_imdb_count = 0
+    for folder in root.iterdir():
+        if not folder.is_dir():
+            continue
+        imdb_id = _read_imdb(folder)
+        if imdb_id:
+            by_imdb.setdefault(imdb_id.lower(), []).append(folder)
+        else:
+            no_imdb_count += 1
+
+    scanned = sum(len(v) for v in by_imdb.values()) + no_imdb_count
+    renamed = merged = skipped = errors = 0
+
+    for imdb_id, folders in by_imdb.items():
+        try:
+            canonical = _canonical_movie_folder(imdb_id)
+            if not canonical:
+                log.debug("migrate: no canonical name for %s — skipping", imdb_id)
+                skipped += len(folders)
+                continue
+
+            canonical_path = root / canonical
+
+            if len(folders) == 1:
+                folder = folders[0]
+                if folder.resolve() == canonical_path.resolve():
+                    skipped += 1
+                    continue
+                if canonical_path.exists():
+                    log.warning("migrate: target '%s' already exists for %s — skipping",
+                                canonical, imdb_id)
+                    skipped += 1
+                    continue
+                if _do_rename(folder, canonical_path):
+                    renamed += 1
+                else:
+                    errors += 1
+            else:
+                # Multiple folders → pick best (has .strm > most files), delete rest
+                def _score(f: Path) -> int:
+                    return int(any(f.glob("*.strm"))) * 1000 + len(list(f.iterdir()))
+
+                ordered = sorted(folders, key=_score, reverse=True)
+                keep = ordered[0]
+
+                # Rename best folder to canonical if needed
+                if keep.resolve() != canonical_path.resolve():
+                    if canonical_path.exists():
+                        # canonical already exists — it might be one of the others
+                        if canonical_path in ordered:
+                            keep = canonical_path
+                        else:
+                            log.warning("migrate: canonical '%s' exists but isn't in group — skipping",
+                                        canonical)
+                            skipped += len(folders)
+                            continue
+                    else:
+                        if not _do_rename(keep, canonical_path):
+                            errors += 1
+                            continue
+                        keep = canonical_path
+                        renamed += 1
+
+                # Delete duplicates
+                for dup in ordered[1:]:
+                    if dup.resolve() == keep.resolve():
+                        continue
+                    _do_delete(dup)
+                    merged += 1
+
+        except Exception as exc:
+            log.error("migrate: error processing %s: %s", imdb_id, exc)
+            errors += 1
+
+    log.info("migrate_to_canonical_names: scanned=%d renamed=%d merged=%d skipped=%d errors=%d no_imdb=%d",
+             scanned, renamed, merged, skipped, errors, no_imdb_count)
+    return {
+        "scanned": scanned,
+        "renamed": renamed,
+        "merged": merged,
+        "skipped": skipped,
+        "errors": errors,
+        "no_imdb": no_imdb_count,
+    }
 
 
 def repair_expired_strms(media_type: str = "movie") -> dict:

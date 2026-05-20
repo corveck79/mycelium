@@ -687,6 +687,14 @@ def ui_api_repair_strms():
     return jsonify(**result)
 
 
+@app.post("/ui/api/migrate-canonical")
+@_csrf.exempt
+def ui_api_migrate_canonical():
+    """Rename all movie folders to TMDB canonical names and merge duplicates."""
+    result = strm_generator.migrate_to_canonical_names()
+    return jsonify(**result)
+
+
 # ── New JSON APIs ─────────────────────────────────────────────────────────────
 
 @app.get("/ui/api/health")

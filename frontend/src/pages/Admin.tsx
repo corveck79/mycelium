@@ -323,11 +323,49 @@ function MaintenancePanel() {
     }
   };
 
+  const migrateCanonical = async () => {
+    if (!confirm('This renames movie folders to TMDB canonical names and removes duplicates. Jellyfin needs a full rescan afterwards. Continue?')) return;
+    setBusy(true);
+    setResult('Migrating to canonical names…');
+    try {
+      const r = await fetch('/ui/api/migrate-canonical', { method: 'POST' });
+      const data = await r.json();
+      const parts = [
+        `scanned: ${data.scanned}`,
+        `renamed: ${data.renamed}`,
+        `duplicates removed: ${data.merged}`,
+        `skipped: ${data.skipped}`,
+        `no imdb_id: ${data.no_imdb}`,
+        ...(data.errors ? [`errors: ${data.errors}`] : []),
+      ];
+      setResult('Done — ' + parts.join(', ') + ' — do a full Jellyfin library rescan now');
+    } catch (e: any) {
+      setResult(`Error: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section>
       <h2 className="text-lg font-bold mb-3">Maintenance</h2>
-      <div className="bg-card rounded-lg border border-border p-4 space-y-3">
+      <div className="bg-card rounded-lg border border-border p-4 space-y-4">
         <div>
+          <p className="text-sm font-medium mb-1">Migrate to canonical names</p>
+          <p className="text-muted text-xs mb-2">
+            Renames all movie folders to TMDB canonical names (imdb_id is leading).
+            Merges duplicates (e.g. Cyrillic + English for same film). Run once, then do a
+            full Jellyfin library rescan.
+          </p>
+          <button
+            onClick={migrateCanonical}
+            disabled={busy}
+            className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50"
+          >
+            {busy ? 'Migrating…' : 'Migrate to canonical names'}
+          </button>
+        </div>
+        <div className="border-t border-border pt-3">
           <p className="text-sm font-medium mb-1">Repair broken .strm links</p>
           <p className="text-muted text-xs mb-2">
             Scans movie .strm files for expired direct TorBox CDN URLs. Re-links them to a
@@ -338,7 +376,7 @@ function MaintenancePanel() {
             disabled={busy}
             className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50"
           >
-            {busy ? 'Scanning…' : '🔧 Repair broken strm files'}
+            {busy ? 'Scanning…' : 'Repair broken strm files'}
           </button>
         </div>
         {result && <div className="font-mono text-xs text-muted border-t border-border pt-2">{result}</div>}
