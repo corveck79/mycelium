@@ -497,6 +497,7 @@ def merge_series_duplicates() -> int:
         for dup in folders:
             if dup == canonical:
                 continue
+            # Move .strm files into canonical season folders
             for item in list(dup.iterdir()):
                 if item.is_dir() and _SEASON_DIR_RE.match(item.name):
                     dest_season = canonical / item.name
@@ -516,17 +517,13 @@ def merge_series_duplicates() -> int:
                                 log.warning("Could not copy strm %s: %s", strm, exc)
                                 continue
                         strm.unlink(missing_ok=True)
-                    try:
-                        item.rmdir()
-                    except OSError:
-                        pass
-                elif item.is_file():
-                    item.unlink(missing_ok=True)
+            # Remove entire duplicate folder (including leftover .nfo, posters, etc.)
             try:
-                dup.rmdir()
+                import shutil as _shutil
+                _shutil.rmtree(dup)
                 log.info("Removed duplicate series folder: %s", dup.name)
                 removed += 1
-            except OSError as exc:
+            except Exception as exc:
                 log.warning("Could not remove %s: %s", dup, exc)
 
     log.info("merge_series_duplicates: removed %d duplicate folder(s)", removed)
