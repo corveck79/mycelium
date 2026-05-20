@@ -163,6 +163,9 @@ def current_user_record() -> dict | None:
 
 
 def is_admin() -> bool:
+    # Auth disabled → single-user mode, full admin access.
+    if not is_enabled():
+        return True
     rec = current_user_record()
     return bool(rec and rec.get("role") == "admin")
 
