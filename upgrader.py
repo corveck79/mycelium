@@ -169,3 +169,48 @@ def run_pack_consolidation() -> int:
         jellyfin.refresh_library()
         log.info("Season-pack consolidation: %d season(s) consolidated", consolidated)
     return consolidated
+
+
+def recheck_wanted() -> int:
+    """Re-search every wanted movie; add it the moment an acceptable-quality
+    release becomes available. Quota-aware: stops once the TorBox createtorrent
+    budget is low (RealDebrid fallback inside processor still applies)."""
+    import processor
+    wanted = db.get_wanted_movies()
+    if not wanted:
+        return 0
+    log.info("Wanted: rechecking %d movie(s) for an acceptable release", len(wanted))
+    added = 0
+    for w in wanted:
+        usage = torbox.createtorrent_usage()
+        if usage["count"] >= torbox._CREATETORRENT_LIMIT - 2:
+            log.info("Wanted: createtorrent budget low (%d/%d) — pausing recheck",
+                     usage["count"], torbox._CREATETORRENT_LIMIT)
+            break
+        req = MediaRequest(title=w["title"], media_type="movie",
+                            imdb_id=w["imdb_id"], seasons=[])
+        try:
+            ok, winner = processor._process_movie(req)
+        except processor.RateLimited:
+            log.info("Wanted: rate limited — pausing recheck")
+            break
+        except Exception as exc:
+            log.warning("Wanted recheck failed for %s: %s", w["title"], exc)
+            db.touch_wanted_movie(w["imdb_id"])
+            continue
+        if ok:
+            db.remove_wanted_movie(w["imdb_id"])
+            processor._WANTED.pop(w["imdb_id"], None)
+            db.log_activity("found", w["title"],
+                            f"acceptable release found ({winner.quality if winner else '?'})", True)
+            log.info("Wanted: %s is now available — added", w["title"])
+            added += 1
+        else:
+            # Still nothing acceptable; clear the transient wanted flag set by
+            # _process_movie so it doesn't leak, and bump the attempt counter.
+            processor._WANTED.pop(w["imdb_id"], None)
+            db.touch_wanted_movie(w["imdb_id"])
+    if added:
+        jellyfin.refresh_library()
+        log.info("Wanted: %d movie(s) became available and were added", added)
+    return added

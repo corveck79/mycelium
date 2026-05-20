@@ -237,6 +237,14 @@ def _start_scheduler() -> BackgroundScheduler:
         )
         log.info("Scheduled season-pack consolidation every %dh", SEASON_PACK_CHECK_INTERVAL_HOURS)
 
+    if getattr(cfg, "WANTED_RECHECK_INTERVAL_HOURS", 0) > 0:
+        scheduler.add_job(
+            upgrader.recheck_wanted,
+            trigger="interval", hours=cfg.WANTED_RECHECK_INTERVAL_HOURS,
+            id="wanted_recheck", next_run_time=None,
+        )
+        log.info("Scheduled wanted-movie recheck every %dh", cfg.WANTED_RECHECK_INTERVAL_HOURS)
+
     _auto_add_total = (
         TRENDING_PRECACHE_COUNT
         + getattr(cfg, "TRENDING_TV_COUNT", 0)
@@ -1242,6 +1250,18 @@ def ui_api_user_request_deny(req_id: int):
 
 
 # ── User management (admin) ──────────────────────────────────────────────────
+
+@app.get("/ui/api/wanted-movies")
+def ui_api_wanted_movies():
+    return jsonify(items=db.get_wanted_movies())
+
+
+@app.post("/ui/api/wanted-recheck")
+def ui_api_wanted_recheck():
+    threading.Thread(target=upgrader.recheck_wanted, name="wanted-recheck-manual",
+                     daemon=True).start()
+    return jsonify(ok=True, message="wanted recheck started")
+
 
 @app.get("/ui/api/torbox-quota")
 def ui_api_torbox_quota():

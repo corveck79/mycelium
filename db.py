@@ -261,6 +261,16 @@ CREATE INDEX IF NOT EXISTS idx_users_username             ON users(username);
 CREATE INDEX IF NOT EXISTS idx_watchlist_user             ON watchlist(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_requests_user_status  ON user_requests(user_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_user_requests_status       ON user_requests(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS wanted_movies (
+    imdb_id      TEXT    PRIMARY KEY,
+    tmdb_id      INTEGER,
+    title        TEXT    NOT NULL,
+    reason       TEXT,
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    added_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    last_checked TEXT
+);
 """
 
 
@@ -1085,3 +1095,41 @@ def count_user_requests_this_month(user_id: int) -> int:
             (user_id,),
         ).fetchone()
         return row["n"] if row else 0
+
+
+# ── wanted_movies (waiting for an acceptable-quality release) ──────────────────
+
+def upsert_wanted_movie(imdb_id: str, tmdb_id: int | None, title: str,
+                        reason: str | None = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO wanted_movies (imdb_id, tmdb_id, title, reason)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(imdb_id) DO UPDATE SET
+                 title=excluded.title, reason=excluded.reason""",
+            (imdb_id, tmdb_id, title, reason),
+        )
+
+
+def get_wanted_movies() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM wanted_movies ORDER BY added_at"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def remove_wanted_movie(imdb_id: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM wanted_movies WHERE imdb_id=?", (imdb_id,))
+
+
+def touch_wanted_movie(imdb_id: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """UPDATE wanted_movies
+               SET attempts = attempts + 1,
+                   last_checked = strftime('%Y-%m-%d %H:%M:%S','now')
+               WHERE imdb_id=?""",
+            (imdb_id,),
+        )

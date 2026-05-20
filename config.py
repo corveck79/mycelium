@@ -123,6 +123,9 @@ RETRY_QUEUE_INTERVAL_MINUTES = _env_int("RETRY_QUEUE_INTERVAL_MINUTES", 15)
 AUTO_UPGRADE_ENABLED = _env("AUTO_UPGRADE_ENABLED", "true").lower() in ("1", "true", "yes")
 AUTO_UPGRADE_INTERVAL_HOURS = _env_int("AUTO_UPGRADE_INTERVAL_HOURS", 24)
 
+# Re-search "wanted" movies (no acceptable release found yet) on this interval.
+WANTED_RECHECK_INTERVAL_HOURS = _env_int("WANTED_RECHECK_INTERVAL_HOURS", 12)
+
 # ── Season pack consolidation ─────────────────────────────────────────────────
 # When a season is complete, try to swap N per-episode torrents for 1 season pack.
 SEASON_PACK_CONSOLIDATION_ENABLED = _env("SEASON_PACK_CONSOLIDATION_ENABLED", "true").lower() in ("1","true","yes")

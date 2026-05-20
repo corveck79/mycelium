@@ -23,6 +23,11 @@ log = logging.getLogger(__name__)
 # into the requests.error column so the UI can show why something failed.
 _LAST_FAIL_REASON: dict[str, str] = {}
 
+# imdb_ids that failed because no acceptable-quality release exists yet — these
+# go to the wanted_movies list and are rechecked periodically rather than
+# being marked permanently failed.
+_WANTED: dict[str, str] = {}
+
 
 class RateLimited(Exception):
     """Raised when TorBox returns 429 and the short in-call retry is exhausted.
@@ -171,8 +176,13 @@ def _lazy_register_movie(req: MediaRequest, candidates: list) -> Optional[Torren
 def _process_movie(req: MediaRequest) -> tuple[bool, Optional[TorrentioStream]]:
     candidates = _fetch_movie_candidates(req)
     if not candidates:
-        log.error("No suitable stream for movie %s (%s)", req.title, req.imdb_id)
-        _LAST_FAIL_REASON[req.imdb_id] = "no releases found on Zilean/Torrentio"
+        # No usable release yet (nothing found, or only cam rejected by
+        # STRICT_NO_CAM). Mark "wanted" so we keep watching for an acceptable
+        # release instead of failing permanently.
+        reason = "no acceptable-quality release yet — watching for one"
+        log.info("No usable stream for movie %s (%s) — marking wanted", req.title, req.imdb_id)
+        _LAST_FAIL_REASON[req.imdb_id] = reason
+        _WANTED[req.imdb_id] = reason
         return False, None
     log.info("Trying %d candidate(s) for %s", len(candidates), req.title)
 
@@ -389,6 +399,8 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
         return False
 
     if success:
+        _WANTED.pop(req.imdb_id, None)
+        db.remove_wanted_movie(req.imdb_id)
         db.update_request(
             row_id, "success",
             quality=winner.quality if winner else None,
@@ -437,6 +449,18 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
                 metrics_prom.source_wins_total.labels(source=source).inc()
             except Exception as exc:
                 log.debug("metrics_prom (quality) failed: %s", exc)
+    elif req.imdb_id in _WANTED:
+        reason = _WANTED.pop(req.imdb_id)
+        _LAST_FAIL_REASON.pop(req.imdb_id, None)
+        db.update_request(row_id, "wanted", error=reason)
+        try:
+            import tmdb
+            tmdb_id = tmdb.find_by_imdb(req.imdb_id, kind="movie")
+        except Exception:
+            tmdb_id = None
+        db.upsert_wanted_movie(req.imdb_id, tmdb_id, req.title, reason)
+        log.info("Marked %s as wanted — will recheck for an acceptable release", req.title)
+        db.log_activity("wanted", req.title, f"{reason} ({req.imdb_id})", False)
     else:
         reason = _LAST_FAIL_REASON.pop(req.imdb_id, None) or "no suitable stream found"
         db.update_request(row_id, "failed", error=reason)
