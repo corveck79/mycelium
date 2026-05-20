@@ -39,16 +39,23 @@ export default function Layout() {
         `}
       >
         <div className="px-5 py-5 flex items-center gap-3 border-b border-border">
-          <svg width="32" height="32" viewBox="0 0 40 40" fill="none">
-            <path d="M20 4 C30 4 36 14 36 22 C36 30 30 36 20 36 C10 36 4 30 4 22 C4 14 10 4 20 4 Z"
-                  stroke="#22d3ee" strokeWidth="2" fill="rgba(34,211,238,.08)"/>
-            <circle cx="10" cy="20" r="3" fill="#0d9488"/>
-            <circle cx="30" cy="10" r="2.5" fill="#22d3ee"/>
-            <circle cx="30" cy="30" r="2.5" fill="#22d3ee"/>
-            <circle cx="20" cy="5" r="2" fill="#5eead4"/>
-            <circle cx="20" cy="35" r="2" fill="#5eead4"/>
+          <svg width="28" height="28" viewBox="0 0 40 40" aria-hidden="true">
+            <g stroke="#22d3ee" strokeWidth="1.5" opacity="0.7">
+              <line x1="10" y1="20" x2="30" y2="10"/>
+              <line x1="10" y1="20" x2="30" y2="30"/>
+              <line x1="30" y1="10" x2="30" y2="30"/>
+              <line x1="20" y1="5"  x2="10" y2="20"/>
+              <line x1="20" y1="35" x2="10" y2="20"/>
+            </g>
+            <circle cx="10" cy="20" r="3.5" fill="#0d9488"/>
+            <circle cx="30" cy="10" r="3"   fill="#22d3ee"/>
+            <circle cx="30" cy="30" r="3"   fill="#22d3ee"/>
+            <circle cx="20" cy="5"  r="2.2" fill="#5eead4"/>
+            <circle cx="20" cy="35" r="2.2" fill="#5eead4"/>
           </svg>
-          <span className="font-mono font-bold tracking-wide text-lg">mycelium</span>
+          <span className="font-mono font-bold tracking-wide text-lg">
+            myc<span className="text-accent">3</span>l<span className="text-accent">1</span>um
+          </span>
         </div>
         <nav className="py-3">
           <SidebarSection title="Browse" items={navItems} onClick={() => setDrawerOpen(false)} />
