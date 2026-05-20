@@ -24,13 +24,12 @@ def check_cached_multi(hashes: list[str]) -> dict[str, set[str]]:
     if not hashes:
         return out
     out["torbox"] = torbox.check_cached(hashes)
-    if _settings.get("MULTI_DEBRID_ENABLED", False):
-        try:
-            import realdebrid
-            if realdebrid.is_configured():
-                out["realdebrid"] = realdebrid.check_cached(hashes)
-        except Exception as exc:
-            log.warning("RealDebrid check failed: %s", exc)
+    try:
+        import realdebrid
+        if realdebrid.is_configured():
+            out["realdebrid"] = realdebrid.check_cached(hashes)
+    except Exception as exc:
+        log.warning("RealDebrid check failed: %s", exc)
     return out
 
 

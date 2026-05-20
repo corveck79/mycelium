@@ -306,6 +306,8 @@ def _migrate() -> None:
             ("season", "INTEGER"),
             ("episode", "INTEGER"),
             ("year", "INTEGER"),
+            ("debrid_provider", "TEXT DEFAULT 'torbox'"),
+            ("rd_id", "TEXT"),
         ]:
             if col not in vi_cols:
                 conn.execute(f"ALTER TABLE virtual_items ADD COLUMN {col} {typedef}")
@@ -773,6 +775,18 @@ def update_virtual_file_id(token: str, file_id: int) -> None:
 def update_virtual_item_imdb(token: str, imdb_id: str) -> None:
     with _connect() as conn:
         conn.execute("UPDATE virtual_items SET imdb_id=? WHERE token=?", (imdb_id, token))
+        conn.commit()
+
+
+def update_virtual_debrid_provider(token: str, provider: str) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE virtual_items SET debrid_provider=? WHERE token=?", (provider, token))
+        conn.commit()
+
+
+def update_virtual_rd_id(token: str, rd_id: str | None) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE virtual_items SET rd_id=? WHERE token=?", (rd_id, token))
         conn.commit()
 
 

@@ -168,19 +168,103 @@ def materialize(token: str, allow_readd: bool | None = None) -> str | None:
         return url
 
 
+def _rd_get_url(item: dict, rd_id: str) -> str | None:
+    """Get a playable URL from RealDebrid for this virtual item."""
+    import re as _re
+    import realdebrid as _rd
+    if item["media_type"] == "movie":
+        return _rd.get_main_video_url(rd_id)
+    # Episode: match SxxExx in filename
+    pairs = _rd.get_video_files_with_urls(rd_id)
+    if not pairs:
+        return None
+    s_num, e_num = item.get("season"), item.get("episode")
+    if s_num and e_num:
+        ep_re = _re.compile(rf'[Ss]0?{s_num}[Ee]0?{e_num}\b', _re.IGNORECASE)
+        matched = [(f, u) for f, u in pairs if ep_re.search(f.get("path") or f.get("name") or "")]
+        if matched:
+            return matched[0][1]
+    return max(pairs, key=lambda fu: fu[0].get("bytes") or 0)[1]
+
+
 def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
     item = db.get_virtual_item(token)
     if not item:
         log.warning("Catbox: unknown token %s", token)
-        try:
-            import metrics_prom
-            metrics_prom.catbox_stream_total.labels(result="failed").inc()
-        except Exception:
-            pass
+        _metrics_inc("failed")
         return None
 
-    torbox_id = item["torbox_id"]
+    debrid_provider = (item.get("debrid_provider") or "torbox").lower()
     rematerialized = False
+
+    # ── RealDebrid path ───────────────────────────────────────────────────────
+    if debrid_provider == "realdebrid":
+        import realdebrid as _rd
+        rd_id = item.get("rd_id")
+
+        # Fast path: rd_id still live in RD library
+        if rd_id:
+            info = _rd.get_info(rd_id)
+            if info and info.get("status") == "downloaded":
+                url = _rd_get_url(item, rd_id)
+                if url:
+                    db.touch_virtual_item(token)
+                    _metrics_inc("ok" if not rematerialized else "rematerialized")
+                    return url
+            log.info("Catbox/RD: %s no longer in RD library — will re-add", item["title"])
+            db.update_virtual_rd_id(token, None)
+            rd_id = None
+            rematerialized = True
+
+        if not allow_readd:
+            log.debug("Catbox/RD: skipping re-add for %s during scan-burst probe", item["title"])
+            return None
+
+        rematerialized = True
+        log.info("Catbox/RD: searching cached release for %s", item["title"])
+        fresh = _search_best_cached_release(item)
+        if fresh is _SEARCH_UNAVAILABLE:
+            _fail_put(token, _FAIL_COOLDOWN_SEC)
+            return None
+        if not fresh:
+            log.error("Catbox/RD: no cached release for %s — removing from library", item["title"])
+            _fail_put(token, _FAIL_COOLDOWN_SEC)
+            _remove_strm(item)
+            return None
+
+        new_hash, new_magnet, provider = fresh
+        db.update_virtual_item_upgrade(token, new_hash, new_magnet, None, None)
+        db.update_virtual_debrid_provider(token, provider)
+        if provider == "torbox":
+            # Search found TorBox — fall through to TorBox block below
+            debrid_provider = "torbox"
+            item["debrid_provider"] = "torbox"
+            item["info_hash"] = new_hash
+            item["file_id"] = None
+        else:
+            try:
+                result = _rd.add_magnet(new_magnet)
+                rd_id = result["id"]
+                rd_info = _rd.wait_until_ready(rd_id)
+                if not rd_info:
+                    log.error("Catbox/RD: wait_until_ready timed out for %s", item["title"])
+                    _fail_put(token, _FAIL_COOLDOWN_SEC)
+                    _remove_strm(item)
+                    return None
+                db.update_virtual_rd_id(token, rd_id)
+                url = _rd_get_url(item, rd_id)
+                if url:
+                    db.touch_virtual_item(token)
+                    _metrics_inc("rematerialized")
+                return url
+            except Exception as exc:
+                is_429 = "429" in str(exc)
+                log.error("Catbox/RD: add_magnet failed for %s: %s", item["title"], exc)
+                _fail_put(token, _FAIL_COOLDOWN_429_SEC if is_429 else _FAIL_COOLDOWN_SEC)
+                return None
+
+    # ── TorBox path ───────────────────────────────────────────────────────────
+    torbox_id = item["torbox_id"]
 
     # Fast path: cached torbox_id still live in TorBox.
     if torbox_id:
@@ -189,8 +273,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
             torbox_id = None
             rematerialized = True
 
-    # Second chance: torrent may still be in TorBox library under its hash
-    # even if the stored torbox_id was evicted (TorBox retains ~30 days).
+    # Second chance: torrent may still be in TorBox library under its hash.
     if not torbox_id and item.get("info_hash"):
         existing = torbox.find_by_hash(item["info_hash"])
         if existing and torbox._is_ready(existing):
@@ -203,15 +286,11 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
         log.debug("Catbox: skipping re-add for %s during scan-burst probe", item["title"])
         return None
 
-    # Not in TorBox: search Torrentio fresh for the best currently-cached release.
-    # We never blindly re-add the stored magnet — if it left TorBox's cache the
-    # hash is likely dead. A live Torrentio search always finds something playable.
     if not torbox_id:
         rematerialized = True
         log.info("Catbox: searching fresh cached release for %s", item["title"])
         fresh = _search_best_cached_release(item)
         if fresh is _SEARCH_UNAVAILABLE:
-            # Could not search (no imdb_id or network error) — keep .strm, retry later.
             _fail_put(token, _FAIL_COOLDOWN_SEC)
             return None
         if not fresh:
@@ -221,9 +300,35 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
             _remove_strm(item)
             return None
 
-        new_hash, new_magnet = fresh
+        new_hash, new_magnet, provider = fresh
+        db.update_virtual_debrid_provider(token, provider)
+        if provider == "realdebrid":
+            # Search found RD — switch provider and handle via RD
+            import realdebrid as _rd
+            db.update_virtual_item_upgrade(token, new_hash, new_magnet, None, None)
+            try:
+                result = _rd.add_magnet(new_magnet)
+                rd_id = result["id"]
+                rd_info = _rd.wait_until_ready(rd_id)
+                if not rd_info:
+                    _fail_put(token, _FAIL_COOLDOWN_SEC)
+                    _remove_strm(item)
+                    return None
+                db.update_virtual_rd_id(token, rd_id)
+                item["rd_id"] = rd_id
+                url = _rd_get_url(item, rd_id)
+                if url:
+                    db.touch_virtual_item(token)
+                    _metrics_inc("rematerialized")
+                return url
+            except Exception as exc:
+                is_429 = "429" in str(exc)
+                log.error("Catbox: RD add_magnet failed for %s: %s", item["title"], exc)
+                _fail_put(token, _FAIL_COOLDOWN_429_SEC if is_429 else _FAIL_COOLDOWN_SEC)
+                return None
+
         if new_hash != (item.get("info_hash") or "").lower():
-            log.info("Catbox: swapping %s → %s", item["title"], new_hash)
+            log.info("Catbox: swapping hash %s → %s", item["title"], new_hash)
             db.update_virtual_item_upgrade(token, new_hash, new_magnet, None, None)
             item["info_hash"] = new_hash
             item["file_id"] = None
@@ -280,20 +385,18 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
     url = strm_generator._get_stream_url(torbox_id, file_id)
     if url:
         db.touch_virtual_item(token)
-        try:
-            import metrics_prom
-            metrics_prom.catbox_stream_total.labels(
-                result="rematerialized" if rematerialized else "ok",
-            ).inc()
-        except Exception:
-            pass
+        _metrics_inc("rematerialized" if rematerialized else "ok")
     else:
-        try:
-            import metrics_prom
-            metrics_prom.catbox_stream_total.labels(result="failed").inc()
-        except Exception:
-            pass
+        _metrics_inc("failed")
     return url
+
+
+def _metrics_inc(result: str) -> None:
+    try:
+        import metrics_prom
+        metrics_prom.catbox_stream_total.labels(result=result).inc()
+    except Exception:
+        pass
 
 
 def _remove_strm(item: dict) -> None:
@@ -366,12 +469,19 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
                  len(ranked), item.get("title"))
         if not ranked:
             return None
-        cached = debrid.check_cached_multi([s.info_hash for s in ranked]).get("torbox", set())
-        log.info("Catbox search: %d/%d candidate(s) cached on TorBox for %s",
-                 len(cached), len(ranked), item.get("title"))
+        hashes = [s.info_hash for s in ranked]
+        cache_results = debrid.check_cached_multi(hashes)
+        rd_cached = cache_results.get("realdebrid", set())
+        tb_cached = cache_results.get("torbox", set())
+        log.info("Catbox search: RD=%d TB=%d cached out of %d for %s",
+                 len(rd_cached), len(tb_cached), len(ranked), item.get("title"))
+        # RD first, TorBox fallback
         for s in ranked:
-            if s.info_hash in cached:
-                return s.info_hash.lower(), s.magnet
+            if s.info_hash in rd_cached:
+                return s.info_hash.lower(), s.magnet, "realdebrid"
+        for s in ranked:
+            if s.info_hash in tb_cached:
+                return s.info_hash.lower(), s.magnet, "torbox"
         return None
     except Exception as exc:
         log.warning("Catbox search: failed for %s: %s — keeping .strm", item["title"], exc)
