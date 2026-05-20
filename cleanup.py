@@ -172,6 +172,7 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
         log.warning("Could not resolve IMDB ID for '%s'; marking unfixable", title)
         try:
             path.unlink()
+            path.with_suffix(".nfo").unlink(missing_ok=True)
         except Exception:
             pass
         db.insert_repair_item(run_id, str(path), title, media_type, torrent_id, None,
@@ -183,6 +184,7 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
         log.warning("No replacement candidates for '%s' (%s); deleting strm", title, imdb_id)
         try:
             path.unlink()
+            path.with_suffix(".nfo").unlink(missing_ok=True)
         except Exception:
             pass
         db.insert_repair_item(run_id, str(path), title, media_type, torrent_id, None,
@@ -214,6 +216,7 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
     if winner:
         try:
             path.unlink()
+            path.with_suffix(".nfo").unlink(missing_ok=True)
         except Exception:
             pass
         log.info("Repaired '%s': deleted strm, added new torrent %s", title, winner.info_hash)
@@ -290,6 +293,10 @@ def _remove_duplicates(strm_files: list[Path], run_id: int) -> tuple[int, list[P
                 continue
             try:
                 dup.unlink()
+                # Remove the sibling NFO sidecar so the folder can be emptied —
+                # otherwise the leftover .nfo keeps the (now media-less) folder
+                # alive and Jellyfin may retain a ghost entry for it.
+                dup.with_suffix(".nfo").unlink(missing_ok=True)
                 log.info("Duplicate removed: %s (kept %s)", dup, keeper_names)
                 try:
                     dup.parent.rmdir()

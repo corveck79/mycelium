@@ -54,12 +54,22 @@ def merge_duplicate_versions(timeout: int = 60) -> bool:
         log.error("Jellyfin MergeVersions: could not fetch movies: %s", exc)
         return False
 
-    # Group by normalised name (lowercase, strip year suffixes)
+    # Group by IMDb/TMDB provider ID when available (most reliable — collapses
+    # name variants, year mismatches, and 4K-vs-HD folders into one entry).
+    # Fall back to normalised name only when an item carries no provider ID.
     import re as _re
     groups: dict[str, list[str]] = {}
     for item in items:
-        name = _re.sub(r"\s*\(\d{4}\)\s*$", "", item.get("Name") or "").strip().lower()
-        groups.setdefault(name, []).append(item["Id"])
+        provider = item.get("ProviderIds") or {}
+        imdb = provider.get("Imdb") or provider.get("imdb")
+        tmdb = provider.get("Tmdb") or provider.get("tmdb")
+        if imdb:
+            key = f"imdb:{imdb}"
+        elif tmdb:
+            key = f"tmdb:{tmdb}"
+        else:
+            key = "name:" + _re.sub(r"\s*\(\d{4}\)\s*$", "", item.get("Name") or "").strip().lower()
+        groups.setdefault(key, []).append(item["Id"])
 
     merged = 0
     for name, ids in groups.items():
