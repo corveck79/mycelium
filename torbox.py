@@ -100,14 +100,12 @@ def add_magnet(magnet: str, timeout: int = 30, reason: str = "unknown") -> dict:
     _record_createtorrent(reason)
     log.info("createtorrent [%s] (%d/60h, %d/10m): %s",
              reason, usage_hour["count"] + 1, usage_min["count"] + 1, magnet[:80])
-    for _attempt in range(3):
-        resp = requests.post(url, headers=_headers(), data={"magnet": magnet}, timeout=timeout)
-        if resp.status_code != 429:
-            break
-        retry_after = int(resp.headers.get("Retry-After", 5))
-        log.warning("createtorrent [%s] got 429 — retrying in %ds (attempt %d/3)",
-                    reason, retry_after, _attempt + 1)
-        time.sleep(retry_after)
+    resp = requests.post(url, headers=_headers(), data={"magnet": magnet}, timeout=timeout)
+    if resp.status_code == 429:
+        retry_after = int(resp.headers.get("Retry-After", 60))
+        log.warning("createtorrent [%s] got 429 from TorBox (Retry-After=%ds) — raising RateLimited",
+                    reason, retry_after)
+        raise RateLimited()
     resp.raise_for_status()
     payload = resp.json() or {}
     if not payload.get("success", False):
