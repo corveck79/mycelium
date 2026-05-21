@@ -136,8 +136,8 @@ def _matches_hash(item: dict, info_hash: str) -> bool:
     return candidate == info_hash.lower()
 
 
-def find_by_hash(info_hash: str) -> dict | None:
-    for item in list_torrents():
+def find_by_hash(info_hash: str, force_refresh: bool = False) -> dict | None:
+    for item in list_torrents(force_refresh=force_refresh):
         if _matches_hash(item, info_hash):
             return item
     return None

@@ -323,7 +323,29 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
             log.info("Catbox: %s still in library (id=%s) — no re-add needed",
                      item["title"], torbox_id)
 
-    # Third chance: known hash may be cached on RD even if TorBox doesn't have it.
+    # Third chance: item had a torbox_id before but wasn't found in the mylist (TorBox
+    # caps the list at 1000). Re-add the stored magnet directly — TorBox recognises
+    # cached hashes instantly and returns the existing entry without counting against
+    # the createtorrent quota (cached adds are free).
+    if not torbox_id and item.get("torbox_id") and item.get("magnet") and allow_readd:
+        try:
+            log.info("Catbox: %s not in mylist top-1000, re-adding stored magnet", item["title"])
+            torbox.add_magnet(item["magnet"], reason="catbox-readd")
+            existing = torbox.find_by_hash(item["info_hash"], force_refresh=True)
+            if existing and torbox._is_ready(existing):
+                torbox_id = existing["id"]
+                db.update_virtual_torbox_id(token, torbox_id)
+                log.info("Catbox: %s re-added via stored magnet (id=%s)", item["title"], torbox_id)
+        except Exception as exc:
+            is_429 = "429" in str(exc)
+            log.warning("Catbox: stored-magnet re-add failed for %s: %s", item["title"], exc)
+            if is_429:
+                _fail_put(token, _FAIL_COOLDOWN_429_SEC)
+                if ckey:
+                    db.update_playability_fail(ckey, REASON_TB_429)
+                return None
+
+    # Fourth chance: known hash may be cached on RD even if TorBox doesn't have it.
     # This avoids a full Torrentio search for items where Torrentio returns 0 results.
     if not torbox_id and item.get("info_hash") and allow_readd:
         try:
