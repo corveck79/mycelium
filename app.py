@@ -924,6 +924,13 @@ def ui_api_playability_state():
     return jsonify(items=items)
 
 
+@app.get("/ui/api/integrity")
+def ui_api_integrity():
+    """Read-only data-integrity scan: surfaces empty/malformed imdb_id,
+    missing hashes, duplicate content and orphan playability rows."""
+    return jsonify(db.integrity_report())
+
+
 @app.post("/ui/catbox-gc")
 def ui_catbox_gc():
     n = catbox.release_idle()

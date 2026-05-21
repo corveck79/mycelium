@@ -1362,3 +1362,65 @@ def get_degraded_items(min_failures: int = 3) -> list[dict]:
             (min_failures,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ── integrity report ──────────────────────────────────────────────────────────
+
+def _valid_imdb(imdb_id: str | None) -> bool:
+    """A well-formed IMDb id: 'tt' followed by digits."""
+    if not imdb_id:
+        return False
+    imdb_id = imdb_id.strip()
+    return imdb_id.startswith("tt") and imdb_id[2:].isdigit() and len(imdb_id) > 3
+
+
+def integrity_report() -> dict:
+    """Read-only scan for data-integrity problems that silently break playback.
+
+    Wrong/empty imdb_id is the leading cause of 'cache exists but no play':
+    without a usable imdb_id the on-play search has nothing to look up. This
+    surfaces those (and other mapping issues) before a user hits Play.
+    """
+    report: dict[str, list[dict]] = {
+        "missing_imdb": [],        # NULL / empty / malformed imdb_id
+        "missing_hash": [],        # empty info_hash or magnet
+        "missing_strm_path": [],   # no .strm path recorded
+        "duplicate_content": [],   # >1 token for the same imdb_id+season+episode
+        "orphan_playability": [],  # playability_state row with no virtual_item
+    }
+    with _connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT token, title, media_type, imdb_id, info_hash, magnet, "
+            "strm_path, season, episode FROM virtual_items"
+        ).fetchall()]
+
+        seen: dict[tuple, str] = {}
+        for r in rows:
+            brief = {"token": r["token"], "title": r["title"],
+                     "imdb_id": r["imdb_id"]}
+            if not _valid_imdb(r["imdb_id"]):
+                report["missing_imdb"].append(brief)
+            if not (r["info_hash"] or "").strip() or not (r["magnet"] or "").strip():
+                report["missing_hash"].append(brief)
+            if not (r["strm_path"] or "").strip():
+                report["missing_strm_path"].append(brief)
+            if _valid_imdb(r["imdb_id"]):
+                key = (r["imdb_id"], r["season"], r["episode"])
+                if key in seen:
+                    report["duplicate_content"].append(
+                        {**brief, "season": r["season"], "episode": r["episode"],
+                         "other_token": seen[key]})
+                else:
+                    seen[key] = r["token"]
+
+        ps_keys = [r["content_key"] for r in conn.execute(
+            "SELECT content_key FROM playability_state").fetchall()]
+        known_imdb = {r["imdb_id"] for r in rows if r["imdb_id"]}
+        for ck in ps_keys:
+            base = ck.split(":", 1)[0]
+            if base not in known_imdb:
+                report["orphan_playability"].append({"content_key": ck})
+
+    report["counts"] = {k: len(v) for k, v in report.items()}
+    report["clean"] = all(not v for k, v in report.items() if k != "counts")
+    return report
