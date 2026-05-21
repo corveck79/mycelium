@@ -25,17 +25,38 @@ def _headers() -> dict[str, str]:
 # exactly what is consuming the quota.
 _CREATETORRENT_LOG: deque = deque(maxlen=200)
 _CREATETORRENT_LOCK = threading.Lock()
+_CREATETORRENT_LOADED = False
+
+
+def _load_createtorrent_from_db() -> None:
+    """Populate in-memory log from DB on startup so counter survives restarts."""
+    try:
+        import db as _db
+        since = time.time() - 3600
+        for ts, reason in _db.get_createtorrent_log(since):
+            _CREATETORRENT_LOG.append((ts, reason))
+    except Exception as exc:
+        log.debug("Could not load createtorrent log from DB: %s", exc)
 
 
 def _record_createtorrent(reason: str) -> None:
     now = time.time()
     with _CREATETORRENT_LOCK:
         _CREATETORRENT_LOG.append((now, reason))
+    try:
+        import db as _db
+        _db.log_createtorrent(now, reason)
+    except Exception as exc:
+        log.debug("Could not persist createtorrent log: %s", exc)
 
 
 def createtorrent_usage(window_sec: int = 3600) -> dict:
     """Return how many createtorrent calls happened in the last `window_sec`,
     broken down by reason. Used by the UI to explain rate-limit hits."""
+    global _CREATETORRENT_LOADED
+    if not _CREATETORRENT_LOADED:
+        _CREATETORRENT_LOADED = True
+        _load_createtorrent_from_db()
     cutoff = time.time() - window_sec
     with _CREATETORRENT_LOCK:
         recent = [(ts, reason) for ts, reason in _CREATETORRENT_LOG if ts >= cutoff]

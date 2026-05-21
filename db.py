@@ -283,6 +283,14 @@ CREATE TABLE IF NOT EXISTS playability_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_playability_status ON playability_state(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS createtorrent_log (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts        REAL    NOT NULL,
+    reason    TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_createtorrent_ts ON createtorrent_log(ts);
 """
 
 
@@ -1424,3 +1432,23 @@ def integrity_report() -> dict:
     report["counts"] = {k: len(v) for k, v in report.items()}
     report["clean"] = all(not v for k, v in report.items() if k != "counts")
     return report
+
+
+def log_createtorrent(ts: float, reason: str) -> None:
+    """Persist a createtorrent call so the quota counter survives restarts."""
+    with _connect() as conn:
+        conn.execute("INSERT INTO createtorrent_log (ts, reason) VALUES (?, ?)", (ts, reason))
+        conn.commit()
+        # Prune entries older than 2 hours to keep the table small.
+        conn.execute("DELETE FROM createtorrent_log WHERE ts < ?", (ts - 7200,))
+        conn.commit()
+
+
+def get_createtorrent_log(since_ts: float) -> list[tuple[float, str]]:
+    """Return all createtorrent entries after since_ts as (ts, reason) tuples."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT ts, reason FROM createtorrent_log WHERE ts >= ? ORDER BY ts",
+            (since_ts,),
+        ).fetchall()
+    return [(r["ts"], r["reason"]) for r in rows]
