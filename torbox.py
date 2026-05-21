@@ -165,11 +165,7 @@ def find_by_id(torrent_id: int, timeout: int = 15) -> dict | None:
                 if item.get("id") == torrent_id:
                     return item
     except requests.RequestException as exc:
-        log.warning("TorBox find_by_id(%s) failed: %s — falling back to mylist", torrent_id, exc)
-    # Fallback: search cached mylist (covers the case where the API returns unexpected shape)
-    for item in list_torrents():
-        if item.get("id") == torrent_id:
-            return item
+        log.warning("TorBox find_by_id(%s) failed: %s", torrent_id, exc)
     return None
 
 
