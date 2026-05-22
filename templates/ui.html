@@ -190,6 +190,27 @@
     .health-pill .dot.down { background: var(--red); }
     .health-pill .dot.disabled { background: var(--dim); }
 
+    .maint-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 700px) { .maint-grid { grid-template-columns: 1fr; } }
+    .maint-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+                   background: var(--panel2); border-radius: 6px; }
+    .maint-item form { flex-shrink: 0; }
+    .maint-item .dim { font-size: 12px; line-height: 1.3; }
+
+    .pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                   padding: 10px 0; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+    .pagination .page-btns { display: flex; gap: 2px; align-items: center; }
+    .pagination .page-btn { background: none; border: 1px solid var(--border); color: var(--muted);
+                             padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+    .pagination .page-btn:hover { color: var(--text-bright); border-color: var(--accent); }
+    .pagination .page-btn.active { background: var(--accent-bg); color: #fff; border-color: var(--accent-bg); }
+    .pagination .page-btn:disabled { opacity: 0.4; cursor: default; }
+    .pagination .page-size-btns { display: flex; gap: 4px; align-items: center; }
+    .pagination .page-size-btn { background: none; border: none; color: var(--muted); cursor: pointer;
+                                  font-size: 12px; padding: 2px 6px; border-radius: 3px; }
+    .pagination .page-size-btn:hover { color: var(--text-bright); }
+    .pagination .page-size-btn.active { color: var(--accent); font-weight: 700; }
+
     .candidates-list { display: flex; flex-direction: column; gap: 6px; max-height: 500px; overflow-y: auto; }
     .candidate { display: flex; gap: 12px; align-items: center; padding: 10px 12px; background: var(--panel);
                  border: 1px solid var(--border); border-radius: 6px; }
@@ -339,7 +360,7 @@
     <button class="tab-btn" data-tab="overview">Overview</button>
     <button class="tab-btn" data-tab="requests">Requests</button>
     <button class="tab-btn" data-tab="blacklist">Blacklist</button>
-    <button class="tab-btn" data-tab="repair">Repair</button>
+    <button class="tab-btn" data-tab="maintenance">Maintenance</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
     <button class="tab-btn" data-tab="logs">Logs</button>
   </div>
@@ -360,41 +381,6 @@
     <div id="quota-breakdown" class="card" style="display:none;margin-bottom:16px">
       <div class="card-title">⚠ TorBox createtorrent usage (60/hour limit)</div>
       <div id="quota-breakdown-body" class="dim" style="font-size:12px;font-family:monospace"></div>
-    </div>
-
-    <div class="section-hdr" style="margin-bottom:12px">
-      <span class="section-title">Maintenance Actions</span>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <form method="post" action="/ui/auto-upgrade" style="display:inline">
-          <button class="btn btn-secondary btn-sm">⬆ Auto-upgrade</button>
-        </form>
-        <form method="post" action="/ui/pack-consolidate" style="display:inline">
-          <button class="btn btn-secondary btn-sm">📦 Consolidate packs</button>
-        </form>
-        <form method="post" action="/ui/trending-now" style="display:inline">
-          <button class="btn btn-secondary btn-sm">🔥 Pre-cache trending</button>
-        </form>
-        <form method="post" action="/ui/continue-watching" style="display:inline">
-          <button class="btn btn-secondary btn-sm">▶ Continue watching</button>
-        </form>
-        <form method="post" action="/ui/quota-check" style="display:inline">
-          <button class="btn btn-secondary btn-sm">📊 Check quota</button>
-        </form>
-        <form method="post" action="/ui/sync-movies" style="display:inline">
-          <button class="btn btn-secondary btn-sm">↻ Sync Seerr</button>
-        </form>
-        <form method="post" action="/ui/library-import" style="display:inline">
-          <button class="btn btn-secondary btn-sm">📚 Import library</button>
-        </form>
-        <form method="post" action="/ui/db-vacuum" style="display:inline"
-              onsubmit="return confirm('Run VACUUM on the DB? Reads are blocked briefly.')">
-          <button class="btn btn-secondary btn-sm">🧹 Vacuum DB</button>
-        </form>
-        <form method="post" action="/ui/recovery" style="display:inline"
-              onsubmit="return confirm('Run the full recovery pipeline? Integrity check + cleanup + library import + strm scan. Safe but takes a minute or two.')">
-          <button class="btn btn-primary btn-sm">🚑 Recovery wizard</button>
-        </form>
-      </div>
     </div>
 
     <div class="grid-2">
@@ -483,6 +469,7 @@
         <tbody id="requests-body"><tr><td colspan="6" class="empty">Loading...</td></tr></tbody>
       </table>
     </div>
+    <div id="requests-table-pagination"></div>
   </div>
 
   <!-- ── Blacklist ── -->
@@ -501,31 +488,89 @@
         <tbody id="blacklist-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
+    <div id="blacklist-table-pagination"></div>
   </div>
 
-  <!-- ── Repair ── -->
-  <div id="tab-repair" class="tab-pane">
-    <div class="section-hdr">
-      <span class="section-title">Cleanup &amp; Repair</span>
-      <div style="display:flex;gap:8px">
-        <form method="post" action="/ui/run-cleanup" style="display:inline">
-          <button class="btn btn-secondary btn-sm">▶ Run Now</button>
-        </form>
-        <form method="post" action="/ui/repair-all" style="display:inline">
-          <button class="btn btn-primary btn-sm">↺ Repair All</button>
-        </form>
-        <form method="post" action="/ui/refresh-images" style="display:inline">
-          <button class="btn btn-secondary btn-sm" title="Fetch missing posters from Jellyfin metadata">🖼 Fix Covers</button>
-        </form>
-        <form method="post" action="/ui/generate-nfos" style="display:inline">
-          <button class="btn btn-secondary btn-sm" title="Write NFO sidecar files with IMDb IDs for Jellyfin">📄 Gen NFOs</button>
-        </form>
-        <form method="post" action="/ui/merge-series" style="display:inline"
-              onsubmit="return confirm('Merge duplicate series folders? Episodes will be moved to the canonical folder and duplicates removed.')">
-          <button class="btn btn-secondary btn-sm" title="Consolidate duplicate series folders into one">🔀 Merge Series</button>
-        </form>
+  <!-- ── Maintenance ── -->
+  <div id="tab-maintenance" class="tab-pane">
+    <div class="grid-2" style="margin-bottom:20px">
+      <div class="card">
+        <div class="card-title">Library</div>
+        <div class="maint-grid">
+          <div class="maint-item">
+            <form method="post" action="/ui/repair-all"><button class="btn btn-primary btn-sm">Repair strm files</button></form>
+            <span class="dim">Fix broken or expired strm files</span>
+          </div>
+          <div class="maint-item">
+            <form method="post" action="/ui/run-cleanup"><button class="btn btn-secondary btn-sm">Run cleanup</button></form>
+            <span class="dim">Remove dead or duplicate strm files</span>
+          </div>
+          <div class="maint-item">
+            <form method="post" action="/ui/auto-upgrade"><button class="btn btn-secondary btn-sm">Auto-upgrade</button></form>
+            <span class="dim">Find better quality for existing items</span>
+          </div>
+          <div class="maint-item">
+            <form method="post" action="/ui/pack-consolidate"><button class="btn btn-secondary btn-sm">Consolidate packs</button></form>
+            <span class="dim">Replace loose episodes with season packs</span>
+          </div>
+          <div class="maint-item">
+            <form method="post" action="/ui/merge-series"
+                  onsubmit="return confirm('Merge duplicate series folders? Episodes will be moved to the canonical folder and duplicates removed.')">
+              <button class="btn btn-secondary btn-sm">Merge series</button>
+            </form>
+            <span class="dim">Combine duplicate series folders</span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Import &amp; Sync</div>
+        <div class="maint-grid">
+          <div class="maint-item">
+            <form method="post" action="/ui/sync-movies"><button class="btn btn-secondary btn-sm">Sync Seerr</button></form>
+            <span class="dim">Pull pending requests from Seerr</span>
+          </div>
+          <div class="maint-item">
+            <form method="post" action="/ui/library-import"><button class="btn btn-secondary btn-sm">Import TorBox library</button></form>
+            <span class="dim">Import existing TorBox torrents</span>
+          </div>
+        </div>
       </div>
     </div>
+    <div class="grid-2" style="margin-bottom:20px">
+      <div class="card">
+        <div class="card-title">Jellyfin</div>
+        <div class="maint-grid">
+          <div class="maint-item">
+            <form method="post" action="/ui/refresh-images"><button class="btn btn-secondary btn-sm">Fix covers</button></form>
+            <span class="dim">Fetch missing posters from Jellyfin</span>
+          </div>
+          <div class="maint-item">
+            <form method="post" action="/ui/generate-nfos"><button class="btn btn-secondary btn-sm">Generate NFOs</button></form>
+            <span class="dim">Write NFO files for Jellyfin matching</span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">System</div>
+        <div class="maint-grid">
+          <div class="maint-item">
+            <form method="post" action="/ui/db-vacuum"
+                  onsubmit="return confirm('Run VACUUM on the DB? Reads are blocked briefly.')">
+              <button class="btn btn-secondary btn-sm">Vacuum DB</button>
+            </form>
+            <span class="dim">Compact the SQLite database</span>
+          </div>
+          <div class="maint-item">
+            <form method="post" action="/ui/recovery"
+                  onsubmit="return confirm('Run the full recovery pipeline? Integrity check + cleanup + library import + strm scan. Safe but takes a minute or two.')">
+              <button class="btn btn-primary btn-sm">Recovery wizard</button>
+            </form>
+            <span class="dim">Full pipeline: integrity + cleanup + import + scan</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     {% if last_cleanup %}
     <div class="stats" style="margin-bottom:16px">
       <div class="stat"><div class="stat-val">{{ last_cleanup.scanned }}</div><div class="stat-lbl">Scanned</div></div>
@@ -535,21 +580,21 @@
       <div class="stat" style="min-width:160px"><div class="stat-val" style="font-size:13px;margin-top:4px">{{ last_cleanup.ran_at[:16] }}</div><div class="stat-lbl">Last Run</div></div>
     </div>
     {% else %}
-    <p class="dim" style="margin-bottom:16px;font-size:13px">No cleanup run yet — click Run Now.</p>
+    <p class="dim" style="margin-bottom:16px;font-size:13px">No cleanup run yet.</p>
     {% endif %}
-    <input type="text" class="search-bar" placeholder="Search repairs…" data-filter="repair-table">
+    <input type="text" class="search-bar" placeholder="Search repairs..." data-filter="repair-table">
     <div class="table-wrap">
       <table id="repair-table">
         <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Old ID</th><th>New Hash</th><th>Reason</th><th>Time</th></tr></thead>
-        <tbody>
+        <tbody id="repair-body">
           {% for item in repair_items %}
           <tr>
             <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ item.path }}">{{ item.title or item.path }}</td>
-            <td class="dim">{{ item.media_type or '—' }}</td>
+            <td class="dim">{{ item.media_type or '---' }}</td>
             <td><span class="badge badge-{{ item.status }}">{{ item.status }}</span></td>
-            <td class="mono dim">{{ item.old_torrent_id or '—' }}</td>
-            <td class="mono dim" style="font-size:10px">{{ (item.new_info_hash or '—')[:16] }}{% if item.new_info_hash %}…{% endif %}</td>
-            <td class="dim" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ item.reason or '—' }}</td>
+            <td class="mono dim">{{ item.old_torrent_id or '---' }}</td>
+            <td class="mono dim" style="font-size:10px">{{ (item.new_info_hash or '---')[:16] }}{% if item.new_info_hash %}...{% endif %}</td>
+            <td class="dim" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ item.reason or '---' }}</td>
             <td class="dim">{{ (item.created_at or '')[:16] }}</td>
           </tr>
           {% else %}<tr><td colspan="7" class="empty">No repair history yet</td></tr>
@@ -557,6 +602,7 @@
         </tbody>
       </table>
     </div>
+    <div id="repair-table-pagination"></div>
   </div>
 
   <!-- ── Settings ── -->
@@ -650,6 +696,78 @@
   document.addEventListener('click', () => userIdleSince = Date.now());
   document.addEventListener('keydown', () => userIdleSince = Date.now());
 
+  // ── Pagination ──
+  const _paginationState = {};
+  function paginateTable(tableId, allRows, pageSize = 25) {
+    const tbody = document.getElementById(tableId.replace('-table', '-body') ) || document.querySelector('#' + tableId + ' tbody');
+    if (!tbody) return;
+    const containerId = tableId + '-pagination';
+    const container = document.getElementById(containerId);
+    if (!allRows || !allRows.length) {
+      if (container) container.innerHTML = '';
+      return;
+    }
+    const state = _paginationState[tableId] || { page: 1, size: pageSize };
+    if (!_paginationState[tableId]) _paginationState[tableId] = state;
+    state.size = state.size || pageSize;
+    const totalPages = Math.ceil(allRows.length / state.size);
+    if (state.page > totalPages) state.page = totalPages;
+    if (state.page < 1) state.page = 1;
+    const start = (state.page - 1) * state.size;
+    const pageRows = allRows.slice(start, start + state.size);
+    // render visible rows
+    tbody.innerHTML = pageRows.join('');
+    // render pagination controls
+    if (!container) return;
+    if (totalPages <= 1 && allRows.length <= 25) { container.innerHTML = ''; return; }
+    let btns = '';
+    btns += `<button class="page-btn" ${state.page <= 1 ? 'disabled' : ''} onclick="_pgGo('${tableId}',${state.page - 1})">&lt;</button>`;
+    const pages = _pgRange(state.page, totalPages);
+    pages.forEach(p => {
+      if (p === '...') { btns += '<span style="padding:0 4px">...</span>'; }
+      else { btns += `<button class="page-btn ${p === state.page ? 'active' : ''}" onclick="_pgGo('${tableId}',${p})">${p}</button>`; }
+    });
+    btns += `<button class="page-btn" ${state.page >= totalPages ? 'disabled' : ''} onclick="_pgGo('${tableId}',${state.page + 1})">&gt;</button>`;
+    let sizes = '';
+    [25, 50, 100, 250].forEach(s => {
+      sizes += `<button class="page-size-btn ${state.size === s ? 'active' : ''}" onclick="_pgSize('${tableId}',${s})">${s}</button>`;
+    });
+    container.innerHTML = `<div class="pagination">
+      <div class="page-btns">${btns}</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="dim">${allRows.length} rows</span>
+        <span class="dim">|</span>
+        <span class="dim">Show:</span>
+        <div class="page-size-btns">${sizes}</div>
+      </div>
+    </div>`;
+  }
+  function _pgRange(cur, total) {
+    if (total <= 7) return Array.from({length: total}, (_, i) => i + 1);
+    const pages = [];
+    pages.push(1);
+    if (cur > 3) pages.push('...');
+    for (let i = Math.max(2, cur - 1); i <= Math.min(total - 1, cur + 1); i++) pages.push(i);
+    if (cur < total - 2) pages.push('...');
+    pages.push(total);
+    return pages;
+  }
+  function _pgGo(tableId, page) {
+    const s = _paginationState[tableId]; if (!s) return;
+    s.page = page;
+    paginateTable(tableId, s._rows, s.size);
+  }
+  function _pgSize(tableId, size) {
+    const s = _paginationState[tableId]; if (!s) return;
+    s.size = size; s.page = 1;
+    paginateTable(tableId, s._rows, s.size);
+  }
+  function storePaginatedRows(tableId, rows, pageSize) {
+    if (!_paginationState[tableId]) _paginationState[tableId] = { page: 1, size: pageSize || 25 };
+    _paginationState[tableId]._rows = rows;
+    paginateTable(tableId, rows, _paginationState[tableId].size);
+  }
+
   // ── Theme ──
   function applyTheme(t) {
     document.documentElement.setAttribute('data-theme', t);
@@ -671,23 +789,35 @@
     if (name === 'overview') refreshOverview();
     if (name === 'requests') refreshRequests();
     if (name === 'blacklist') refreshBlacklist();
+    if (name === 'maintenance') initRepairPagination();
     if (name === 'settings') refreshSettings();
   }
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => showTab(btn.dataset.tab));
   });
-  showTab(location.hash.replace('#', '') || 'overview');
+  const _hashTab = location.hash.replace('#', '') || 'overview';
+  showTab(_hashTab === 'repair' ? 'maintenance' : _hashTab);
 
-  // ── Search filter ──
+  // ── Search filter (pagination-aware) ──
   document.querySelectorAll('[data-filter]').forEach(input => {
     input.addEventListener('input', () => {
-      const tbl = document.getElementById(input.dataset.filter);
-      if (!tbl) return;
-      const q = input.value.toLowerCase();
-      tbl.querySelectorAll('tbody tr').forEach(row => {
-        if (row.querySelector('.empty')) return;
-        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
-      });
+      const tableId = input.dataset.filter;
+      const state = _paginationState[tableId];
+      if (state && state._allRows) {
+        const q = input.value.toLowerCase();
+        const filtered = q ? state._allRows.filter(r => r.toLowerCase().includes(q)) : state._allRows;
+        state._rows = filtered;
+        state.page = 1;
+        paginateTable(tableId, filtered, state.size);
+      } else {
+        const tbl = document.getElementById(tableId);
+        if (!tbl) return;
+        const q = input.value.toLowerCase();
+        tbl.querySelectorAll('tbody tr').forEach(row => {
+          if (row.querySelector('.empty')) return;
+          row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+        });
+      }
     });
   });
 
@@ -1129,14 +1259,13 @@
     try {
       const r = await fetch('/ui/api/requests/all');
       const d = await r.json();
-      body.innerHTML = '';
       const statusCls = {success:'color:var(--green)', wanted:'color:var(--amber)', upcoming:'color:var(--indigo)', failed:'color:var(--red)', pending:'color:var(--muted)'};
-      d.items.forEach(i => {
+      const rows = d.items.map(i => {
         const st = i.status || 'pending';
-        body.innerHTML += `<tr>
-          <td>${i.title||'—'}</td>
-          <td class="mono" style="font-size:11px">${i.imdb_id||'—'}</td>
-          <td class="dim">${i.media_type||'—'}</td>
+        return `<tr>
+          <td>${i.title||'---'}</td>
+          <td class="mono" style="font-size:11px">${i.imdb_id||'---'}</td>
+          <td class="dim">${i.media_type||'---'}</td>
           <td style="${statusCls[st]||''};font-weight:600;text-transform:capitalize">${st.replace('_',' ')}</td>
           <td class="dim">${(i.created_at||'').slice(0,16)}</td>
           <td>
@@ -1145,7 +1274,12 @@
           </td>
         </tr>`;
       });
-      if (!d.items.length) body.innerHTML = '<tr><td colspan="6" class="empty">No requests</td></tr>';
+      if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="empty">No requests</td></tr>'; return; }
+      _paginationState['requests-table'] = _paginationState['requests-table'] || { page: 1, size: 25 };
+      _paginationState['requests-table']._allRows = rows;
+      _paginationState['requests-table']._rows = rows;
+      _paginationState['requests-table'].page = 1;
+      paginateTable('requests-table', rows, _paginationState['requests-table'].size);
     } catch(e) {
       body.innerHTML = `<tr><td colspan="6" class="empty" style="color:var(--red)">${e.message}</td></tr>`;
     }
@@ -1161,16 +1295,14 @@
   // ── Blacklist ──
   async function refreshBlacklist() {
     const body = document.getElementById('blacklist-body');
-    body.innerHTML = '<tr><td colspan="5" class="empty">Loading…</td></tr>';
+    body.innerHTML = '<tr><td colspan="5" class="empty">Loading...</td></tr>';
     try {
       const r = await fetch('/ui/api/blacklist');
       const d = await r.json();
-      body.innerHTML = '';
-      d.items.forEach(i => {
-        body.innerHTML += `<tr>
+      const rows = d.items.map(i => `<tr>
           <td class="mono" style="font-size:11px">${i.info_hash}</td>
           <td class="mono">${i.fail_count}</td>
-          <td class="dim" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.last_error||'—'}</td>
+          <td class="dim" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.last_error||'---'}</td>
           <td class="dim">${(i.last_attempt||'').slice(0,16)}</td>
           <td>
             <form method="post" action="/ui/blacklist-clear/${i.info_hash}" style="display:inline"
@@ -1178,12 +1310,32 @@
               <button class="btn btn-sm btn-secondary">Clear</button>
             </form>
           </td>
-        </tr>`;
-      });
-      if (!d.items.length) body.innerHTML = '<tr><td colspan="5" class="empty">No blacklisted hashes</td></tr>';
+        </tr>`);
+      if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="empty">No blacklisted hashes</td></tr>'; return; }
+      _paginationState['blacklist-table'] = _paginationState['blacklist-table'] || { page: 1, size: 25 };
+      _paginationState['blacklist-table']._allRows = rows;
+      _paginationState['blacklist-table']._rows = rows;
+      _paginationState['blacklist-table'].page = 1;
+      paginateTable('blacklist-table', rows, _paginationState['blacklist-table'].size);
     } catch(e) {
       body.innerHTML = `<tr><td colspan="5" class="empty" style="color:var(--red)">${e.message}</td></tr>`;
     }
+  }
+
+  // ── Repair table pagination (Jinja-rendered rows) ──
+  let _repairPaginationDone = false;
+  function initRepairPagination() {
+    if (_repairPaginationDone) return;
+    _repairPaginationDone = true;
+    const tbody = document.getElementById('repair-body');
+    if (!tbody) return;
+    const trs = Array.from(tbody.querySelectorAll('tr'));
+    if (trs.length <= 1 && trs[0]?.querySelector('.empty')) return;
+    const rows = trs.map(tr => tr.outerHTML);
+    _paginationState['repair-table'] = { page: 1, size: 25 };
+    _paginationState['repair-table']._allRows = rows;
+    _paginationState['repair-table']._rows = rows;
+    paginateTable('repair-table', rows, 25);
   }
 
   // ── Manual search ──
