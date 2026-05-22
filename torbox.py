@@ -275,6 +275,13 @@ def check_cached(hashes: list[str], timeout: int = 15) -> set[str]:
     """Return the subset of hashes that TorBox has cached (instant download available)."""
     if not hashes:
         return set()
+    _BATCH = 100
+    if len(hashes) > _BATCH:
+        cached: set[str] = set()
+        for i in range(0, len(hashes), _BATCH):
+            cached |= check_cached(hashes[i:i + _BATCH], timeout=timeout)
+        log.info("TorBox cache check: %d/%d hashes cached (batched)", len(cached), len(hashes))
+        return cached
     url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/checkcached"
     params = {"hash": ",".join(hashes), "format": "object"}
     try:

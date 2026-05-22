@@ -1441,8 +1441,11 @@ def ui_api_wanted_movies():
 @_csrf.exempt
 def ui_api_wanted_recheck():
     def _run():
-        upgrader.recheck_wanted()
-        monitor.run_series_check()
+        try:
+            upgrader.recheck_wanted()
+            monitor.run_series_check()
+        except Exception as exc:
+            logging.getLogger(__name__).error("wanted-recheck-manual failed: %s", exc)
     threading.Thread(target=_run, name="wanted-recheck-manual", daemon=True).start()
     return jsonify(ok=True, message="wanted recheck started")
 
@@ -1793,6 +1796,13 @@ def app_catchall(subpath: str):
 @app.get("/assets/<path:filename>")
 def root_assets(filename: str):
     return _send(_SPA_ASSET_DIR, filename)
+
+
+_DOCS_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "docs")
+
+@app.get("/docs/<path:filename>")
+def docs_file(filename: str):
+    return _send(_DOCS_DIR, filename)
 
 
 @app.get("/<path:subpath>")
