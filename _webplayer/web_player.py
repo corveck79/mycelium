@@ -7,21 +7,11 @@ To activate, in app.py:
     # Register routes (copy from ROUTES section at bottom of this file)
     # Add scheduler job: scheduler.add_job(web_player.cleanup_idle_sessions, 'interval', minutes=15)
 
-DB additions needed (add to db.py migrations list):
-    "ALTER TABLE virtual_items ADD COLUMN player_source TEXT DEFAULT 'jellyfin'"
-
-    '''CREATE TABLE IF NOT EXISTS playback_sessions (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id    INTEGER NOT NULL,
-        token      TEXT    NOT NULL,
-        position_s REAL    NOT NULL DEFAULT 0,
-        duration_s REAL,
-        updated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')),
-        UNIQUE(user_id, token)
-    )'''
-
-New db.py functions needed: get_web_player_token(), save_playback_position(), get_playback_position()
-(stubs at the bottom of this file)
+No DB migrations needed.
+Uses existing virtual_items columns:
+    source     = 'web_player'   (distinguishes browser tokens from jellyfin tokens)
+    strm_path  = NULL           (no .strm file written for browser tokens)
+    imdb_id / season / episode  (already present)
 """
 
 import json
@@ -418,24 +408,21 @@ def proxy_range(cdn_url: str, range_header: str | None):
     return req_lib.get(cdn_url, headers=headers, stream=True, timeout=30)
 
 
-# ── DB stubs (implement in db.py) ─────────────────────────────────────────────
+# ── DB lookup — no migration needed ───────────────────────────────────────────
+# Uses existing virtual_items.source column ('web_player') and
+# strm_path IS NULL (browser tokens never write a .strm file).
 
 def _db_get_web_player_token(imdb_id: str,
                               season: int | None,
                               episode: int | None) -> dict | None:
     with db._conn() as c:
-        if season is not None:
-            return c.execute(
-                "SELECT * FROM virtual_items "
-                "WHERE imdb_id=? AND season=? AND episode=? "
-                "  AND player_source='web_player' LIMIT 1",
-                (imdb_id, season, episode),
-            ).fetchone()
         return c.execute(
             "SELECT * FROM virtual_items "
-            "WHERE imdb_id=? AND season IS NULL "
-            "  AND player_source='web_player' LIMIT 1",
-            (imdb_id,),
+            "WHERE imdb_id=? AND source='web_player' "
+            "  AND (season IS ? OR season=?) "
+            "  AND (episode IS ? OR episode=?) "
+            "LIMIT 1",
+            (imdb_id, season, season, episode, episode),
         ).fetchone()
 
 
