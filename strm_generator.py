@@ -11,6 +11,7 @@ import db
 import jellyfin
 import settings
 import torbox as torbox_mod
+import config as cfg
 from config import MEDIA_PATH, TORBOX_BASE_URL
 
 log = logging.getLogger(__name__)
@@ -224,6 +225,69 @@ def _find_movie_folder_by_imdb(imdb_id: str) -> Path | None:
     return None
 
 
+_preload_in_flight: set[str] = set()
+_preload_lock = threading.Lock()
+
+
+def _cache_cdn_url(info_hash: str, ready_item: dict, title: str) -> None:
+    """Fetch CDN URL for a ready TorBox item and store in catbox URL cache.
+    Uses _pick_main_movie_file to select the correct file."""
+    try:
+        torrent_id = ready_item.get("id")
+        files = ready_item.get("files") or []
+        if not files or not torrent_id:
+            # TorBox sometimes omits the files list; force a fresh lookup
+            fresh = torbox_mod.find_by_hash(info_hash, force_refresh=True)
+            if fresh:
+                files = fresh.get("files") or []
+                torrent_id = fresh.get("id") or torrent_id
+        if not files or not torrent_id:
+            log.debug("Preload: no files for %s, CDN cache skipped", title)
+            return
+        main = _pick_main_movie_file(files)
+        file_id = (main or files[0]).get("id")
+        cdn_url = _get_stream_url(torrent_id, file_id)
+        if not cdn_url:
+            return
+        vi = db.get_virtual_item_by_hash(info_hash)
+        token = vi["token"] if vi else None
+        if token:
+            import catbox as _catbox
+            _catbox.cache_url(token, cdn_url)
+            log.info("Preload: %s CDN URL cached", title)
+    except Exception as exc:
+        log.debug("Preload: CDN cache skipped for %s: %s", title, exc)
+
+
+def _preload_torrent(info_hash: str, magnet: str, title: str) -> None:
+    """Add torrent to TorBox in the background, wait until ready, then
+    fetch and cache the CDN URL so first play is instant.
+    Deduplicates: only one thread per info_hash runs at a time."""
+    with _preload_lock:
+        if info_hash in _preload_in_flight:
+            log.debug("Preload: %s already in flight, skipping", title)
+            return
+        _preload_in_flight.add(info_hash)
+    try:
+        existing = torbox_mod.find_by_hash(info_hash)
+        if existing and torbox_mod._is_ready(existing):
+            log.debug("Preload: %s already ready in TorBox", title)
+            ready = existing
+        else:
+            if not existing:
+                torbox_mod.add_magnet(magnet, reason="preload")
+            ready = torbox_mod.wait_until_ready(info_hash, timeout=60)
+        if not ready:
+            log.debug("Preload: %s not ready within timeout", title)
+            return
+        _cache_cdn_url(info_hash, ready, title)
+    except Exception as exc:
+        log.debug("Preload: skipped %s: %s", title, exc)
+    finally:
+        with _preload_lock:
+            _preload_in_flight.discard(info_hash)
+
+
 def create_lazy_movie_strm(info_hash: str, magnet: str, title: str,
                             year: int | None, imdb_id: str | None = None,
                             tmdb_id: int | None = None, quality: str | None = None,
@@ -285,6 +349,12 @@ def create_lazy_movie_strm(info_hash: str, magnet: str, title: str,
                 subtitles.fetch_for(path, imdb_id, "movie")
             except Exception as exc:
                 log.debug("Subtitle fetch skipped for %s: %s", folder, exc)
+        if settings.get("CATBOX_PRELOAD", cfg.CATBOX_PRELOAD) and info_hash and magnet:
+            threading.Thread(
+                target=_preload_torrent,
+                args=(info_hash, magnet, folder),
+                daemon=True,
+            ).start()
     return written
 
 
@@ -324,16 +394,23 @@ def create_lazy_episode_strm(info_hash: str, magnet: str, title: str,
         episode=episode,
     )
     written = _write_strm(path, catbox.proxy_url(token))
-    if written and imdb_id:
-        series_root = path.parent.parent
-        tvshow_nfo = series_root / "tvshow.nfo"
-        if not tvshow_nfo.exists():
-            _write_nfo(path, imdb_id, nfo_path=tvshow_nfo, media_type="series")
-        try:
-            import nfo_generator
-            nfo_generator.fetch_images_for_folder(series_root, imdb_id, "tv")
-        except Exception as exc:
-            log.debug("Image fetch skipped for %s: %s", safe_title, exc)
+    if written:
+        if imdb_id:
+            series_root = path.parent.parent
+            tvshow_nfo = series_root / "tvshow.nfo"
+            if not tvshow_nfo.exists():
+                _write_nfo(path, imdb_id, nfo_path=tvshow_nfo, media_type="series")
+            try:
+                import nfo_generator
+                nfo_generator.fetch_images_for_folder(series_root, imdb_id, "tv")
+            except Exception as exc:
+                log.debug("Image fetch skipped for %s: %s", safe_title, exc)
+        if settings.get("CATBOX_PRELOAD", cfg.CATBOX_PRELOAD) and info_hash and magnet:
+            threading.Thread(
+                target=_preload_torrent,
+                args=(info_hash, magnet, ep_name),
+                daemon=True,
+            ).start()
     return written
 
 

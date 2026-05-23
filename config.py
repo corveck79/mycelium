@@ -121,6 +121,10 @@ CATBOX_GC_INTERVAL_MINUTES = _env_int("CATBOX_GC_INTERVAL_MINUTES", 10)
 # register a virtual .strm — defer createtorrent to first playback. Massively
 # reduces createtorrent (60/hour) usage for large libraries. Movies only for now.
 CATBOX_LAZY_ADD = _env("CATBOX_LAZY_ADD", "false").lower() in ("1", "true", "yes")
+# Pre-add the torrent to TorBox in the background when a .strm is created,
+# so first playback is instant instead of waiting for createtorrent.
+# Only fires for cached torrents (no slot cost). Falls back to catbox on failure.
+CATBOX_PRELOAD = _env("CATBOX_PRELOAD", "true").lower() in ("1", "true", "yes")
 
 # ── DB backup ─────────────────────────────────────────────────────────────────
 BACKUP_INTERVAL_HOURS = _env_int("BACKUP_INTERVAL_HOURS", 24)

@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 # Type hints per key — drives parsing of stored strings.
 _BOOL_KEYS = {
     "CATBOX_MODE",
+    "CATBOX_PRELOAD",
     "ALLOW_4K",
     "EXCLUDE_REMUX",
     "EXCLUDE_BLURAY",
@@ -28,6 +29,7 @@ _BOOL_KEYS = {
     "ZILEAN_ENABLED",
     "CATCHUP_ENABLED",
     "CATBOX_LAZY_ADD",
+    "CATBOX_PRELOAD",
     "AUTO_UPGRADE_ENABLED",
     "SEASON_PACK_CONSOLIDATION_ENABLED",
     "NOTIFY_ON_SUCCESS",
@@ -145,7 +147,7 @@ SETTING_GROUPS = [
     {
         "id": "catbox",
         "title": "Catbox (lazy materialization)",
-        "keys": ["CATBOX_MODE", "CATBOX_LAZY_ADD", "CATBOX_HOST", "CATBOX_IDLE_MINUTES", "CATBOX_GC_INTERVAL_MINUTES"],
+        "keys": ["CATBOX_MODE", "CATBOX_LAZY_ADD", "CATBOX_PRELOAD", "CATBOX_HOST", "CATBOX_IDLE_MINUTES", "CATBOX_GC_INTERVAL_MINUTES"],
     },
     {
         "id": "quality",

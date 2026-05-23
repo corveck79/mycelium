@@ -27,7 +27,7 @@ from config import CATBOX_HOST, CATBOX_IDLE_MINUTES
 log = logging.getLogger(__name__)
 
 
-_URL_CACHE_TTL_SEC = 1800  # 30 minutes — well within TorBox CDN URL validity
+_URL_CACHE_TTL_SEC = 82800  # 23 hours — within TorBox CDN URL 24h validity
 ON_PLAY_READY_TIMEOUT_SEC = 45  # max wait on-play before giving up (cached = seconds)
 _url_cache: dict[str, tuple[str, float]] = {}
 _url_cache_lock = threading.Lock()
@@ -133,6 +133,11 @@ def _cache_get(token: str) -> str | None:
 def _cache_put(token: str, url: str) -> None:
     with _url_cache_lock:
         _url_cache[token] = (url, time.monotonic() + _URL_CACHE_TTL_SEC)
+
+
+def cache_url(token: str, url: str) -> None:
+    """Store a CDN URL in the in-memory cache (used by preload)."""
+    _cache_put(token, url)
 
 
 def invalidate_url_cache(token: str | None = None) -> None:

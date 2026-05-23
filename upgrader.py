@@ -135,6 +135,7 @@ def run_auto_upgrade() -> int:
                               source=better.name.split()[0], info_hash=better.info_hash)
             db.log_activity("upgraded", row["title"],
                             f"{row.get('quality')} → {better.quality}", True)
+            strm_generator._cache_cdn_url(better.info_hash, item, row["title"])
             upgraded += 1
         except Exception as exc:
             log.warning("Upgrade failed for %s: %s", row["title"], exc)
