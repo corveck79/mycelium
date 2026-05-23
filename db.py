@@ -899,6 +899,16 @@ def get_virtual_items_by_imdb(imdb_id: str, media_type: str | None = None) -> li
         return [dict(r) for r in rows]
 
 
+def get_virtual_item_by_episode(imdb_id: str, season: int, episode: int) -> dict | None:
+    """Return the virtual_item for a specific series episode, or None if not registered."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM virtual_items WHERE imdb_id=? AND season=? AND episode=? LIMIT 1",
+            (imdb_id, season, episode),
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def update_virtual_torbox_id(token: str, torbox_id: int | None) -> None:
     with _connect() as conn:
         conn.execute("UPDATE virtual_items SET torbox_id=? WHERE token=?", (torbox_id, token))

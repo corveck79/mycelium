@@ -333,6 +333,7 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
         log.info("Lazy: cached season pack for %s S%02d (%d ep), registering %d episode(s)",
                  req.title, season, ep_count, ep_count)
         written = 0
+        preload_done = False
         for ep in range(1, ep_count + 1):
             if strm_generator.create_lazy_episode_strm(
                 pack.info_hash, pack.magnet, req.title, season, ep,
@@ -340,8 +341,10 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
                 quality=pack.quality,
                 source=pack.source,
                 size_gb=pack.size_gb,
+                preload_first=not preload_done,
             ):
                 written += 1
+                preload_done = True
         if written:
             log.info("Lazy season pack: %d .strm(s) registered for %s S%02d", written, req.title, season)
             return True, pack
@@ -352,6 +355,7 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
     log.info("Lazy: no cached season pack for %s S%02d — trying per-episode", req.title, season)
     added = 0
     first_winner: Optional[TorrentioStream] = None
+    preload_done = False
     episode = 1
     while True:
         if episode == 1:
@@ -377,9 +381,11 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
             quality=winner.quality,
             source=winner.source,
             size_gb=winner.size_gb,
+            preload_first=not preload_done,
         ):
             added += 1
             first_winner = first_winner or winner
+            preload_done = True
 
         episode += 1
         if episode > 50:

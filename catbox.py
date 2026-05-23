@@ -204,6 +204,7 @@ def materialize(token: str, allow_readd: bool | None = None) -> str | None:
         url = _materialize_locked(token, allow_readd=allow_readd)
         if url:
             _cache_put(token, url)
+            _schedule_next_episode_preload(token)
         else:
             _fail_put(token)
         return url
@@ -681,6 +682,49 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
     except Exception as exc:
         log.warning("Catbox search: failed for %s: %s — keeping .strm", item["title"], exc)
         return _SEARCH_UNAVAILABLE
+
+
+def _schedule_next_episode_preload(token: str) -> None:
+    """After a series episode materializes successfully, preload the next episode
+    in background so it is instant when the user gets there.
+
+    Lookup order: same season episode+1, then season+1 episode 1.
+    Only fires if CATBOX_PRELOAD is enabled and the next episode has a
+    registered virtual_item with info_hash + magnet."""
+    try:
+        import settings as _s
+        import config as _cfg
+        if not _s.get("CATBOX_PRELOAD", _cfg.CATBOX_PRELOAD):
+            return
+        item = db.get_virtual_item(token)
+        if not item or item.get("media_type") != "series":
+            return
+        imdb_id = item.get("imdb_id")
+        season = item.get("season")
+        episode = item.get("episode")
+        if not (imdb_id and season and episode):
+            return
+        # Try next episode in same season, then first episode of the next season
+        nxt = db.get_virtual_item_by_episode(imdb_id, season, episode + 1)
+        if not nxt:
+            nxt = db.get_virtual_item_by_episode(imdb_id, season + 1, 1)
+        if not nxt:
+            return
+        next_hash = nxt.get("info_hash")
+        next_magnet = nxt.get("magnet")
+        next_title = nxt.get("title") or ""
+        if not (next_hash and next_magnet):
+            return
+        import strm_generator as _sg
+        import threading as _t
+        _t.Thread(
+            target=_sg._preload_torrent,
+            args=(next_hash, next_magnet, next_title),
+            daemon=True,
+        ).start()
+        log.debug("Catbox: scheduled preload for next episode %s", next_title)
+    except Exception as exc:
+        log.debug("Catbox: next-episode preload scheduling failed: %s", exc)
 
 
 def release_idle() -> int:

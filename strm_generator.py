@@ -1,6 +1,7 @@
 import logging
 import re
 import threading
+import time
 from pathlib import Path
 
 import requests as req_lib
@@ -225,8 +226,12 @@ def _find_movie_folder_by_imdb(imdb_id: str) -> Path | None:
     return None
 
 
+_preload_semaphore = threading.Semaphore(3)   # max 3 concurrent preload threads
 _preload_in_flight: set[str] = set()
 _preload_lock = threading.Lock()
+_preload_add_lock = threading.Lock()          # gate around add_magnet to respect rate limit
+_preload_state = {"last_add": 0.0}            # mutable so no global keyword needed
+_PRELOAD_MIN_INTERVAL = 7.0                   # seconds between add_magnet calls (~8/min, limit is 10/min)
 
 
 def _cache_cdn_url(info_hash: str, ready_item: dict, title: str) -> None:
@@ -262,30 +267,43 @@ def _cache_cdn_url(info_hash: str, ready_item: dict, title: str) -> None:
 def _preload_torrent(info_hash: str, magnet: str, title: str) -> None:
     """Add torrent to TorBox in the background, wait until ready, then
     fetch and cache the CDN URL so first play is instant.
-    Deduplicates: only one thread per info_hash runs at a time."""
+
+    Deduplication: only one thread per info_hash runs at a time.
+    Concurrency cap: at most 3 preloads run simultaneously (_preload_semaphore).
+    Rate gate: at least _PRELOAD_MIN_INTERVAL seconds between consecutive
+    add_magnet calls so we stay well under TorBox's 10/min limit. This is
+    critical when adding a series without season packs -- 20 episodes spawn
+    20 threads but they drip-feed add_magnet one at a time."""
     with _preload_lock:
         if info_hash in _preload_in_flight:
             log.debug("Preload: %s already in flight, skipping", title)
             return
         _preload_in_flight.add(info_hash)
-    try:
-        existing = torbox_mod.find_by_hash(info_hash)
-        if existing and torbox_mod._is_ready(existing):
-            log.debug("Preload: %s already ready in TorBox", title)
-            ready = existing
-        else:
-            if not existing:
-                torbox_mod.add_magnet(magnet, reason="preload")
-            ready = torbox_mod.wait_until_ready(info_hash, timeout=60)
-        if not ready:
-            log.debug("Preload: %s not ready within timeout", title)
-            return
-        _cache_cdn_url(info_hash, ready, title)
-    except Exception as exc:
-        log.debug("Preload: skipped %s: %s", title, exc)
-    finally:
-        with _preload_lock:
-            _preload_in_flight.discard(info_hash)
+    with _preload_semaphore:
+        try:
+            existing = torbox_mod.find_by_hash(info_hash)
+            if existing and torbox_mod._is_ready(existing):
+                log.debug("Preload: %s already ready in TorBox", title)
+                ready = existing
+            else:
+                if not existing:
+                    # Rate gate: enforce minimum interval between add_magnet calls
+                    with _preload_add_lock:
+                        elapsed = time.time() - _preload_state["last_add"]
+                        if elapsed < _PRELOAD_MIN_INTERVAL:
+                            time.sleep(_PRELOAD_MIN_INTERVAL - elapsed)
+                        _preload_state["last_add"] = time.time()
+                    torbox_mod.add_magnet(magnet, reason="preload")
+                ready = torbox_mod.wait_until_ready(info_hash, timeout=600)
+            if not ready:
+                log.debug("Preload: %s not ready within timeout", title)
+                return
+            _cache_cdn_url(info_hash, ready, title)
+        except Exception as exc:
+            log.debug("Preload: skipped %s: %s", title, exc)
+        finally:
+            with _preload_lock:
+                _preload_in_flight.discard(info_hash)
 
 
 def create_lazy_movie_strm(info_hash: str, magnet: str, title: str,
@@ -363,7 +381,8 @@ def create_lazy_episode_strm(info_hash: str, magnet: str, title: str,
                                imdb_id: str | None = None,
                                quality: str | None = None,
                                source: str | None = None,
-                               size_gb: float | None = None) -> bool:
+                               size_gb: float | None = None,
+                               preload_first: bool = False) -> bool:
     """Write a Catbox virtual episode .strm WITHOUT adding to TorBox.
     For season packs: multiple episodes share the same info_hash/magnet;
     catbox.materialize picks the right file by SxxExx at playback time.
@@ -405,7 +424,7 @@ def create_lazy_episode_strm(info_hash: str, magnet: str, title: str,
                 nfo_generator.fetch_images_for_folder(series_root, imdb_id, "tv")
             except Exception as exc:
                 log.debug("Image fetch skipped for %s: %s", safe_title, exc)
-        if settings.get("CATBOX_PRELOAD", cfg.CATBOX_PRELOAD) and info_hash and magnet:
+        if preload_first and settings.get("CATBOX_PRELOAD", cfg.CATBOX_PRELOAD) and info_hash and magnet:
             threading.Thread(
                 target=_preload_torrent,
                 args=(info_hash, magnet, ep_name),
