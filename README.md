@@ -14,9 +14,10 @@
 
 <p>
   Self-hosted automation that turns watchlist clicks into Jellyfin-ready streams via
-  <a href="https://torbox.app">TorBox</a> in about 30 seconds, with zero local storage.
-  Uses <strong><a href="https://docs.elfhosted.com/app/catbox/">Catbox</a> lazy materialization</strong> by default: torrents are only added to
-  TorBox when you press play, and released after idle time. Library size is effectively
+  <a href="https://torbox.app">TorBox</a> — typically under 30 seconds for cached releases,
+  with zero local storage.
+  Uses <strong><a href="https://docs.elfhosted.com/app/catbox/">Catbox</a> lazy materialization</strong> (opt-in): torrents are pre-warmed in the
+  background when you add something, and released after idle time. Library size is effectively
   unlimited. Comes with a built-in <strong>discovery + request UI</strong> (no Seerr needed,
   but Seerr/Jellyseerr webhooks still work if you want them).
 </p>
@@ -114,15 +115,15 @@ The existing debrid-to-media-server toolchain kept breaking: Real-Debrid purged 
 <details>
 <summary><b>📥 Auto-add + bulk import</b></summary>
 
-- **Auto-add categories**: trending (day/week), popular, top-rated, per-service top lists (Netflix NL Top 10, Prime NL, Disney NL), configurable count per category, min rating, min votes
+- **Auto-precache**: trending (day/week), popular, top-rated, per-service top lists (Netflix NL Top 10, Prime NL, Disney NL) — only adds items already cached on TorBox, configurable count per category, min rating, min votes
 - **Radarr / Sonarr bulk import**: point at an existing Radarr/Sonarr instance, pull all monitored movies/series in one click with live progress bar (added/skipped/errors)
 
 </details>
 
 <details>
-<summary><b>🪤 Catbox mode (lazy materialization) -- recommended, enabled by default</b></summary>
+<summary><b>🪤 Catbox mode (lazy materialization) -- recommended, opt-in</b></summary>
 
-Inspired by [elfhosted's CatBox](https://docs.elfhosted.com/app/catbox/). Each `.strm` file contains a proxy URL (`/stream/<token>`) instead of a direct CDN link. The torrent is only added to TorBox when you actually press play, and automatically released after `CATBOX_IDLE_MINUTES` of idle time. This means your Jellyfin library can be effectively unlimited without hitting TorBox storage limits.
+Inspired by [elfhosted's CatBox](https://docs.elfhosted.com/app/catbox/). Each `.strm` file contains a proxy URL (`/stream/<token>`) instead of a direct CDN link. When `CATBOX_PRELOAD=true` (default), the torrent is pre-warmed in TorBox in the background as soon as you add something — so first play is instant. The torrent is automatically released after `CATBOX_IDLE_MINUTES` of idle time (default 30 days). This means your Jellyfin library can be effectively unlimited without hitting TorBox storage limits.
 
 ```mermaid
 sequenceDiagram
@@ -294,9 +295,10 @@ The full reference lives in [`.env.example`](.env.example). Key knobs:
 | Variable | Default | Purpose |
 |---|---|---|
 | `TORBOX_API_KEY` | *(set via wizard)* | From [torbox.app](https://torbox.app) → Settings → API |
-| `CATBOX_MODE` | `true` | Lazy materialization (recommended) |
+| `CATBOX_MODE` | `false` | Lazy materialization via proxy URLs (opt-in, recommended) |
+| `CATBOX_PRELOAD` | `true` | Pre-warm torrent in TorBox on add for instant first play |
 | `CATBOX_HOST` | *(set via wizard)* | Externally reachable URL for proxy strm URLs |
-| `CATBOX_IDLE_MINUTES` | `60` | Idle time before a torrent is released from TorBox |
+| `CATBOX_IDLE_MINUTES` | `43200` | Idle time before a torrent is released from TorBox (30 days) |
 | `QUALITY_PREFERENCE` | `1080p,2160p,720p` | Comma-separated preference order |
 | `ALLOW_4K` | `true` | Allow 2160p releases |
 | `EXCLUDE_REMUX` | `true` | Skip remux releases unless no alternatives |
@@ -405,7 +407,7 @@ TorBox enforces two rate limits on `POST /torrents/createtorrent`, both **per IP
 
 All other endpoints are limited to **5 requests/second per IP**.
 
-**Important:** the limits are per IP, so all apps on the same machine (Decypharr, Radarr, Sonarr, TorBox Media Center, etc.) share the same quota. If you run other TorBox-connected services, stop them or account for their usage.
+**Important:** the limits are per IP, so all apps on the same machine share the same quota. If you run other TorBox-connected services, account for their usage.
 
 In **Catbox mode** (default), `createtorrent` is only called on first playback, not at add-time. Subsequent plays use the cached torrent ID directly, so normal single-user usage stays well within the limits.
 
@@ -442,9 +444,9 @@ Plex doesn't support `.strm` natively, but the optional WebDAV server (see above
 
 In **fixed strm** mode, each `.strm` contains a direct TorBox CDN URL. Simple, works even when Mycelium is down, but URLs expire after about 24 hours.
 
-In **Catbox mode** (default, `CATBOX_MODE=true`), each `.strm` contains a proxy URL (`/stream/<token>`). On playback Mycelium fetches a fresh CDN URL on demand, re-adding the torrent to TorBox if needed. No URL rot, library size effectively unlimited, but playback requires Mycelium to be running.
+In **Catbox mode** (`CATBOX_MODE=true`), each `.strm` contains a proxy URL (`/stream/<token>`). With `CATBOX_PRELOAD=true` the torrent is pre-warmed in TorBox in the background at add-time, so first play is instant. On playback Mycelium fetches a fresh CDN URL on demand, re-adding the torrent if needed. No URL rot, library size effectively unlimited, but playback requires Mycelium to be running.
 
-Catbox mode is the recommended and default mode.
+Catbox mode is the recommended mode. Enable it via the Settings tab or setup wizard.
 </details>
 
 <details>
