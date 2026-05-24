@@ -183,7 +183,7 @@ function SeriesPanel() {
                                 })}
                                 className="text-xs px-2 py-0.5 rounded bg-accent/20 text-accent
                                            hover:bg-indigo-600 hover:text-white transition-colors"
-                                title="Afspelen in browser"
+                                title="Play in browser"
                               >
                                 ▶ E{String(ep).padStart(2, '0')}
                               </button>

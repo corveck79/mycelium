@@ -255,7 +255,7 @@ export default function DetailModal({
                       className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500
                                  text-white font-semibold text-sm transition-colors"
                     >
-                      ▶ Afspelen
+                      ▶ Play
                     </button>
                   )}
                   <button

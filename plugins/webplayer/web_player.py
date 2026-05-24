@@ -126,7 +126,7 @@ def get_job(job_id: str) -> PrepareJob | None:
 def _run_job(job: PrepareJob) -> None:
     try:
         job.status  = JobStatus.SEARCHING
-        job.message = "Zoeken naar web-compatibele versie…"
+        job.message = "Looking for a web-compatible version…"
 
         existing = _db_get_web_player_token(job.imdb_id, job.season, job.episode)
         if existing:
@@ -137,7 +137,7 @@ def _run_job(job: PrepareJob) -> None:
             )
             if not candidates:
                 job.status = JobStatus.ERROR
-                job.error  = "Geen web-compatibele versie gevonden. Gebruik Jellyfin."
+                job.error  = "No web-compatible version found. Use Jellyfin."
                 return
 
             best = candidates[0]
@@ -160,22 +160,22 @@ def _run_job(job: PrepareJob) -> None:
         job.token = token
 
         job.status  = JobStatus.MATERIALIZING
-        job.message = "Ophalen via TorBox…"
+        job.message = "Fetching via TorBox…"
 
         cdn_url = catbox.materialize(token, allow_readd=True)
         if not cdn_url:
             job.status = JobStatus.ERROR
-            job.error  = "TorBox kon het bestand niet ophalen."
+            job.error  = "TorBox could not fetch the file."
             return
 
         job.status  = JobStatus.PROBING
-        job.message = "Bestandsinfo ophalen…"
+        job.message = "Reading file info…"
 
         file_info = _probe(cdn_url)
         job.file_info = file_info
 
         job.status  = JobStatus.PREPARING
-        job.message = "Voorbereiden voor afspelen…"
+        job.message = "Preparing for playback…"
 
         tmp_dir = PLAYER_TMP_DIR / token
         tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -185,7 +185,7 @@ def _run_job(job: PrepareJob) -> None:
         if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
             session.proc.terminate()
             job.status = JobStatus.ERROR
-            job.error  = "Timeout: FFmpeg genereerde geen segmenten."
+            job.error  = "Timeout: FFmpeg produced no segments."
             return
 
         threading.Thread(
@@ -195,13 +195,13 @@ def _run_job(job: PrepareJob) -> None:
         ).start()
 
         job.status     = JobStatus.READY
-        job.message    = "Klaar"
+        job.message    = "Ready"
         job.stream_url = f"/stream/{token}/hls/playlist.m3u8"
 
     except Exception:
         log.exception("web_player: prepare job %s crashed", job.job_id)
         job.status = JobStatus.ERROR
-        job.error  = "Interne fout — zie server logs."
+        job.error  = "Internal error — check server logs."
 
 
 # ── FFprobe ────────────────────────────────────────────────────────────────────

@@ -5,11 +5,11 @@ import SubtitlePicker from './SubtitlePicker'
 import { api } from '../api'
 
 const STEP_LABELS: Record<string, string> = {
-  searching:     'Zoeken naar web-compatibele versie…',
-  materializing: 'Ophalen via TorBox…',
-  probing:       'Bestandsinfo ophalen…',
-  preparing:     'Voorbereiden voor afspelen…',
-  ready:         'Klaar',
+  searching:     'Looking for a web-compatible version…',
+  materializing: 'Fetching via TorBox…',
+  probing:       'Reading file info…',
+  preparing:     'Preparing for playback…',
+  ready:         'Ready',
 }
 
 const STEPS = ['searching', 'materializing', 'probing', 'preparing'] as const
@@ -120,10 +120,10 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
     if (!videoRef.current || !subtitleUrl) return
     const track = document.createElement('track')
     track.kind    = 'subtitles'
-    track.label   = 'extern'
+    track.label   = 'external'
     track.src     = subtitleUrl
     track.default = true
-    Array.from(videoRef.current.querySelectorAll('track[label="extern"]'))
+    Array.from(videoRef.current.querySelectorAll('track[label="external"]'))
       .forEach(t => t.remove())
     videoRef.current.appendChild(track)
   }, [subtitleUrl])
@@ -141,7 +141,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
           onClick={onClose}
           className="absolute -top-8 right-0 text-white/60 hover:text-white text-sm"
         >
-          ✕ Sluiten
+          ✕ Close
         </button>
 
         {/* Loading */}
@@ -169,13 +169,13 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
           <div className="bg-zinc-900 rounded-xl p-10 text-center space-y-3">
             <p className="text-red-400 font-medium">{status.error}</p>
             <p className="text-zinc-500 text-sm">
-              Gebruik Jellyfin voor volledige codec-ondersteuning.
+              Use Jellyfin for full codec support.
             </p>
             <button
               onClick={onClose}
               className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white text-sm rounded-lg"
             >
-              Sluiten
+              Close
             </button>
           </div>
         )}
