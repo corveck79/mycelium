@@ -29,6 +29,7 @@ SESSION_IDLE_CLEANUP = 1800
 
 _BROWSER_AUDIO_OK    = {"aac"}   # vorbis/opus not reliable in mpegts HLS
 _NO_BROWSER_VIDEO_RE = re.compile(r"\b(av1|vp9|vp8)\b", re.IGNORECASE)
+_HDR_NAME_RE         = re.compile(r"\b(hdr10?\+?|hlg|pq10)\b", re.IGNORECASE)
 _AAC_SAMPLE_RATE     = "48000"   # browsers require consistent sample rate in TS
 _TEXT_SUB_CODECS  = {"subrip", "ass", "ssa", "webvtt", "mov_text", "srt"}
 
@@ -40,6 +41,7 @@ def _web_score(stream: torrentio.TorrentioStream) -> int:
     if stream.quality == "2160p":           return -1  # 4K: too large for streaming
     if torrentio._DV_RE.search(blob):      return -1  # Dolby Vision: browser-incompatible
     if _NO_BROWSER_VIDEO_RE.search(blob):  return -1  # AV1/VP9/VP8: no browser HLS support
+    if _HDR_NAME_RE.search(blob):          return -1  # HDR10/HLG: needs heavy tone mapping
 
     max_gb = _settings.get("WEB_PLAYER_MAX_SIZE_GB", 15) or 15
     if 0 < stream.size_gb > max_gb:
@@ -49,6 +51,7 @@ def _web_score(stream: torrentio.TorrentioStream) -> int:
     if stream.quality == "1080p":                     score += 100
     elif stream.quality == "720p":                    score += 50
     if torrentio._WEBDL_RE.search(blob):              score += 40
+    if torrentio._HEVC_RE.search(blob):               score += 20  # smaller file, same quality
     if stream.seeders > 10:                           score += 10
 
     # Smaller = faster initial buffering.
