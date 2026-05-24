@@ -15,6 +15,7 @@ import catbox
 import db
 import health_cache
 import settings as _settings
+import subtitles as _subtitles
 import torrentio
 import zilean
 
@@ -194,8 +195,9 @@ def _run_job(job: PrepareJob) -> None:
                 return
 
         threading.Thread(
-            target=_extract_subtitles,
-            args=(cdn_url, file_info["subtitle_tracks"], token, tmp_dir),
+            target=_subtitles_task,
+            args=(cdn_url, file_info, job.imdb_id, job.media_type,
+                  job.season, job.episode, token, tmp_dir),
             daemon=True,
         ).start()
 
@@ -428,15 +430,97 @@ def _extract_subtitles(cdn_url: str, sub_tracks: list,
             log.warning("web_player: sub extract failed track=%d", track["index"])
 
 
+def _subtitles_task(cdn_url: str, file_info: dict,
+                    imdb_id: str, media_type: str,
+                    season: int | None, episode: int | None,
+                    token: str, tmp_dir: Path) -> None:
+    """Extract embedded subs; fall back to OpenSubtitles when none found."""
+    _extract_subtitles(cdn_url, file_info["subtitle_tracks"], token, tmp_dir)
+
+    # If embedded extraction produced at least one VTT, we're done.
+    if list(tmp_dir.glob("sub_*.vtt")):
+        return
+
+    _fetch_external_subtitles(imdb_id, media_type, season, episode, tmp_dir)
+
+
+def _fetch_external_subtitles(imdb_id: str, media_type: str,
+                               season: int | None, episode: int | None,
+                               tmp_dir: Path) -> None:
+    """Download subtitles from OpenSubtitles and convert to WebVTT."""
+    api_key = _settings.get("OPENSUBTITLES_API_KEY", "")
+    if not api_key:
+        return
+
+    langs = _settings.get("OPENSUBTITLES_LANGUAGES") or []
+    if isinstance(langs, str):
+        langs = [l.strip() for l in langs.split(",") if l.strip()]
+    if not langs:
+        langs = ["en"]
+
+    for lang in langs:
+        vtt_path = tmp_dir / f"sub_ext_{lang}.vtt"
+        if vtt_path.exists():
+            continue
+
+        results = _subtitles._search(imdb_id, season, episode, lang)
+        if not results:
+            log.info("web_player: no external subtitles for %s lang=%s", imdb_id, lang)
+            continue
+
+        top   = results[0]
+        files = (top.get("attributes") or {}).get("files") or []
+        if not files:
+            continue
+        file_id = files[0].get("file_id")
+        if not file_id:
+            continue
+
+        url = _subtitles._request_download_url(file_id)
+        if not url:
+            continue
+
+        try:
+            resp = req_lib.get(url, timeout=30)
+            resp.raise_for_status()
+        except Exception as exc:
+            log.warning("web_player: subtitle download failed lang=%s: %s", lang, exc)
+            continue
+
+        # Write raw file, then let ffmpeg normalise to WebVTT.
+        raw_path = tmp_dir / f"sub_ext_{lang}.raw"
+        raw_path.write_bytes(resp.content)
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", str(raw_path), str(vtt_path)],
+                capture_output=True, timeout=30,
+            )
+            if result.returncode == 0:
+                log.info("web_player: external subtitle saved lang=%s token=%s", lang, tmp_dir.name)
+            else:
+                log.warning("web_player: ffmpeg vtt conversion failed lang=%s: %s",
+                            lang, result.stderr[-300:])
+        except Exception as exc:
+            log.warning("web_player: vtt conversion error lang=%s: %s", lang, exc)
+        finally:
+            raw_path.unlink(missing_ok=True)
+
+
 def list_subtitles(token: str) -> list[dict]:
     s = get_session(token)
     if not s:
         return []
-    return [
-        {"language": p.stem.split("_")[-1], "label": p.stem,
-         "url": f"/stream/{token}/subtitles/{p.name}"}
-        for p in sorted(s.tmp_dir.glob("sub_*.vtt"))
-    ]
+    out = []
+    for p in sorted(s.tmp_dir.glob("sub_*.vtt")):
+        parts = p.stem.split("_")   # sub_0_eng  or  sub_ext_nl
+        lang  = parts[-1]
+        source = "External" if "ext" in parts else "Embedded"
+        out.append({
+            "language": lang,
+            "label":    source,
+            "url":      f"/stream/{token}/subtitles/{p.name}",
+        })
+    return out
 
 
 # ── Cleanup ────────────────────────────────────────────────────────────────────
