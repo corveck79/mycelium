@@ -117,25 +117,6 @@ def trakt_watched():
     return jsonify(imdb_ids=trakt_api.get_watched_imdb_ids(user_id))
 
 
-@bp.get("/ui/api/trakt/debug-watched-shows")
-def trakt_debug_watched_shows():
-    """Temporary debug: returns raw Trakt API response for first 2 shows."""
-    rec = _require_user()
-    user_id = rec.get("id")
-    if not user_id:
-        abort(401)
-    tok = trakt_api.get_token(user_id)
-    if not tok:
-        return jsonify(error="not connected"), 400
-    tok = trakt_api.refresh_if_needed(tok)
-    raw = trakt_api._fetch_watched(tok["access_token"], "shows")
-    sample = raw[:2] if raw else []
-    return jsonify(
-        total=len(raw),
-        sample=sample,
-        episodes_in_db=trakt_api.get_watched_episodes(user_id),
-    )
-
 
 @bp.get("/ui/api/trakt/watched-episodes")
 def trakt_watched_episodes():

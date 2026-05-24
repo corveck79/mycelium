@@ -74,10 +74,11 @@ def session_fields(user_record: dict) -> dict:
 
 
 def user_fields() -> list[str]:
-    """All user-table columns added by loaded plugins."""
+    """All user-table columns added by loaded plugins (user_fields + admin_fields)."""
     fields: list[str] = []
     for p in _loaded.values():
         fields.extend(p["meta"].get("user_fields", []))
+        fields.extend(p["meta"].get("admin_fields", []))
     return fields
 
 
