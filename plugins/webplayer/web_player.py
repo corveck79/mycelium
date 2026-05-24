@@ -314,7 +314,17 @@ def _run_job(job: PrepareJob) -> None:
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
         multi_audio = len(file_info["audio_tracks"]) > 1
-        session     = _start_hls(session_key, cdn_url, file_info, tmp_dir)
+
+        # Start subtitle fetch in parallel with FFmpeg so they finish together.
+        sub_thread = threading.Thread(
+            target=_subtitles_task,
+            args=(cdn_url, file_info, job.imdb_id, job.media_type,
+                  job.season, job.episode, session_key, tmp_dir),
+            daemon=True,
+        )
+        sub_thread.start()
+
+        session = _start_hls(session_key, cdn_url, file_info, tmp_dir)
 
         if not multi_audio:
             if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
@@ -323,12 +333,8 @@ def _run_job(job: PrepareJob) -> None:
                 job.error  = "Timeout: FFmpeg produced no segments."
                 return
 
-        threading.Thread(
-            target=_subtitles_task,
-            args=(cdn_url, file_info, job.imdb_id, job.media_type,
-                  job.season, job.episode, session_key, tmp_dir),
-            daemon=True,
-        ).start()
+        # Wait for subtitles (max 15s) — usually done by the time FFmpeg is ready.
+        sub_thread.join(timeout=15)
 
         job.status     = JobStatus.READY
         job.message    = "Ready"
