@@ -6,10 +6,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { PluginMeta, PluginSettingsUi } from '../hooks/usePlugins'
+import { api } from '../api'
 
 export default function PluginSettingsCard({ plugin }: { plugin: PluginMeta }) {
   const ui = plugin.settings_ui!
   const qc = useQueryClient()
+
+  const { data: session } = useQuery({ queryKey: ['session'], queryFn: api.session })
+  const isAdmin = session?.user?.role === 'admin'
 
   const { data: status, refetch: refetchStatus } = useQuery<Record<string, any>>({
     queryKey: ['plugin-status', plugin.name],
@@ -37,11 +41,17 @@ export default function PluginSettingsCard({ plugin }: { plugin: PluginMeta }) {
       </div>
 
       {ui.config_gate && !configured && status !== undefined && (
-        <ConfigGateAlert
-          message={ui.config_gate.message}
-          link={ui.config_gate.link}
-          linkLabel={ui.config_gate.link_label}
-        />
+        isAdmin ? (
+          <ConfigGateAlert
+            message={ui.config_gate.message}
+            link={ui.config_gate.link}
+            linkLabel={ui.config_gate.link_label}
+          />
+        ) : (
+          <ConfigGateAlert
+            message={`${plugin.label} is not configured yet. Ask your admin to enable it.`}
+          />
+        )
       )}
 
       {oAuth && (
