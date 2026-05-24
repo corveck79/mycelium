@@ -1139,8 +1139,15 @@
             input = `<input type="text" name="setting_${it.key}" value="${val}" placeholder="comma,separated" style="width:280px">`;
           } else {
             const isSecret = /KEY|TOKEN|SECRET|PASSWORD/.test(it.key);
-            const type = isSecret ? 'password' : 'text';
-            input = `<input type="${type}" name="setting_${it.key}" value="${val}" style="width:340px">`;
+            if (isSecret) {
+              // Never pre-fill secret fields — prevents browser password manager from
+              // overwriting real values with saved site passwords.
+              // Empty = "keep existing"; type something to replace it.
+              const placeholder = it.value ? '(already set — type to replace)' : '(not set)';
+              input = `<input type="password" name="setting_${it.key}" value="" placeholder="${placeholder}" autocomplete="new-password" style="width:340px">`;
+            } else {
+              input = `<input type="text" name="setting_${it.key}" value="${val}" style="width:340px">`;
+            }
           }
           body += `<tr style="border-bottom:1px solid var(--panel2)">
             <td style="padding:8px 8px 8px 0;width:280px"><code style="font-size:11px">${it.key}</code> ${badges}</td>
@@ -1153,6 +1160,14 @@
       });
       // Live banner: show when a restart-required field changes from initial
       const form = document.getElementById('settings-form');
+      // Before submit: remove empty secret fields so they are not sent at all.
+      // An empty secret = "keep existing value", not "clear it".
+      // To explicitly clear a secret, use the reset (✕) button next to the field.
+      form.addEventListener('submit', () => {
+        form.querySelectorAll('input[type="password"][name^="setting_"]').forEach(el => {
+          if (!el.value) el.disabled = true;
+        });
+      });
       form.addEventListener('input', () => {
         let dirty = false;
         for (const [key, initial] of restartRequiredInitial) {
