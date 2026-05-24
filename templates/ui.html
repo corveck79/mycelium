@@ -702,8 +702,8 @@
       <div class="card-title">All users</div>
       <div class="table-wrap">
         <table id="users-table">
-          <thead><tr><th>Username</th><th>Role</th><th>Auto-approve</th><th>Enabled</th><th>Last login</th><th>Actions</th></tr></thead>
-          <tbody><tr><td colspan="6" class="dim">Loading...</td></tr></tbody>
+          <thead><tr><th>Username</th><th>Role</th><th>Auto-approve</th><th>Enabled</th><th>Plugins</th><th>Last login</th><th>Actions</th></tr></thead>
+          <tbody><tr><td colspan="7" class="dim">Loading...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -1789,10 +1789,12 @@
     reqTbody.innerHTML = '<tr><td colspan="6" class="dim">Loading…</td></tr>';
 
     try {
-      const [reqs, users] = await Promise.all([
+      const [reqs, users, pluginsResp] = await Promise.all([
         fetch('/ui/api/user-requests?status=pending').then(r => r.json()),
         fetch('/ui/api/users').then(r => r.json()),
+        fetch('/ui/api/plugins').then(r => r.json()).catch(() => ({ plugins: [] })),
       ]);
+      const allPlugins = pluginsResp.plugins || [];
       if (users.error) {
         reqTbody.innerHTML = `<tr><td colspan="6" class="dim">${users.error}</td></tr>`;
         return;
@@ -1811,23 +1813,43 @@
               <button class="btn btn-secondary btn-sm" onclick="denyReq(${r.id})">✗ Deny</button>
             </td>
           </tr>`).join('');
-      usersTbody.innerHTML = (users.users || []).map(u => `
+      usersTbody.innerHTML = (users.users || []).map(u => {
+        const pluginCells = allPlugins.flatMap(p => (p.user_fields || []).map(field => {
+          const label = (p.user_field_labels || {})[field] || field;
+          const active = !!u[field];
+          return `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}"
+            onclick="togglePluginField(${u.id}, '${field}', ${active ? 0 : 1})"
+            title="${htmlEsc(p.label)}">${htmlEsc(label)}: ${active ? 'ON' : 'OFF'}</button>`;
+        })).join(' ');
+        return `
         <tr>
           <td>${htmlEsc(u.username)}</td>
           <td>${htmlEsc(u.role)}</td>
           <td>${u.auto_approve ? '✓' : '—'}</td>
           <td>${u.enabled ? '✓' : '✗'}</td>
+          <td style="font-size:11px">${pluginCells || '<span class="dim">—</span>'}</td>
           <td>${htmlEsc(u.last_login || '—')}</td>
           <td>
             <button class="btn btn-secondary btn-sm" onclick="toggleAutoApprove(${u.id}, ${u.auto_approve ? 0 : 1})">${u.auto_approve ? 'Disable auto' : 'Enable auto'}</button>
             <button class="btn btn-secondary btn-sm" onclick="toggleEnabled(${u.id}, ${u.enabled ? 0 : 1})">${u.enabled ? 'Disable' : 'Enable'}</button>
             <button class="btn btn-secondary btn-sm" onclick='deleteUser(${u.id}, ${jsAttr(u.username)})'>Delete</button>
           </td>
-        </tr>`).join('');
+        </tr>`;
+      }).join('');
       dscUsersInitialized = true;
     } catch (e) {
       reqTbody.innerHTML = `<tr><td colspan="6" class="dim">Error: ${e.message}</td></tr>`;
     }
+  }
+
+  async function togglePluginField(id, field, val) {
+    const body = {};
+    body[field] = !!val;
+    await fetch(`/ui/api/users/${id}/update`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    loadUsersTab();
   }
 
   async function approveReq(id) {

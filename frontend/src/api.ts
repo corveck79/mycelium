@@ -141,6 +141,13 @@ export const api = {
       body: JSON.stringify({ current, password }),
     }),
 
+  // Plugin user fields (self-service toggle)
+  setPluginFields: (fields: Record<string, boolean>) =>
+    http<{ ok: boolean }>('/ui/api/me/plugin-fields', {
+      method: 'POST',
+      body: JSON.stringify(fields),
+    }),
+
   // Region
   setRegion: (region: string) =>
     http<{ ok: boolean; region: string }>('/ui/api/me/region', {

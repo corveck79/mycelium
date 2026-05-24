@@ -1864,6 +1864,22 @@ def ui_api_users_update(user_id: int):
     return jsonify(ok=True)
 
 
+@app.post("/ui/api/me/plugin-fields")
+@auth.require_auth
+def ui_api_me_plugin_fields():
+    """Let users toggle their own plugin user_fields (e.g. webplayer_enabled)."""
+    rec = auth.current_user_record()
+    if not rec:
+        return jsonify(error="not authenticated"), 401
+    p = request.get_json(silent=True) or {}
+    allowed = set(plugin_loader.user_fields())
+    fields = {k: (1 if v else 0) for k, v in p.items() if k in allowed}
+    if not fields:
+        return jsonify(error="no valid fields"), 400
+    db.update_user(rec["id"], **fields)
+    return jsonify(ok=True)
+
+
 @app.post("/ui/api/me/region")
 @auth.require_auth
 def ui_api_me_region():
