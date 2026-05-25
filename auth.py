@@ -43,8 +43,6 @@ _PUBLIC_PATHS = (
     "/login/oidc",
     "/oidc/callback",
     "/logout",
-    "/setup",
-    "/setup/",
     "/stream/",
     "/assets",
     "/static",

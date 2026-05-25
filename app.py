@@ -571,6 +571,12 @@ def ui_redirect():
 @app.get("/setup")
 def setup_wizard():
     import settings as _settings
+    # First run: no users yet - always allow
+    if db.user_count() == 0:
+        return render_template("setup.html")
+    # After first run: require admin login
+    if not auth.is_admin():
+        return redirect(url_for("login_view", next="/setup?rerun=1"))
     if _settings.get("SETUP_COMPLETE", False) and request.args.get("rerun") != "1":
         return redirect(url_for("ui_dashboard"))
     return render_template("setup.html")
@@ -579,6 +585,8 @@ def setup_wizard():
 @app.post("/setup/skip")
 @limiter.limit("10 per minute")
 def setup_skip():
+    if db.user_count() > 0 and not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
     import settings as _settings
     _settings.set("SETUP_COMPLETE", True)
     return jsonify(ok=True)
@@ -587,6 +595,8 @@ def setup_skip():
 @app.post("/setup/save")
 @limiter.limit("10 per minute")
 def setup_save():
+    if db.user_count() > 0 and not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
     import settings as _settings
     saved = 0
     for key, value in request.form.items():
@@ -607,6 +617,8 @@ def setup_save():
 @limiter.limit("20 per minute")
 def setup_test(kind: str):
     """Test a single integration using values posted from the wizard form."""
+    if db.user_count() > 0 and not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
     f = request.form
     try:
         if kind == "torbox":
