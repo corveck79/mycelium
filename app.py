@@ -1197,41 +1197,96 @@ def spore_stream_proxy(token: str):
 
     info = mp4_faststart.load(token)
 
-    if info is None:
-        cdn_url_snap = url
-        tok_snap     = token
+    cdn_url = url
 
-        def _build_then_probe(cdn_url: str, tok: str) -> None:
-            ok = mp4_faststart.build_and_cache(cdn_url, tok)
-            if not ok:
+    def _build_then_probe(cdn_url_: str, tok: str) -> None:
+        ok = mp4_faststart.build_and_cache(cdn_url_, tok)
+        if not ok:
+            return
+        import json as _json, subprocess as _sp
+        try:
+            res = _sp.run(
+                ["ffprobe", "-v", "quiet", "-print_format", "json",
+                 "-show_streams", cdn_url_],
+                capture_output=True, timeout=60,
+            )
+            if res.returncode != 0:
                 return
-            # Probe real stream layout so stub can be updated with actual tracks.
-            import json as _json, subprocess as _sp
-            try:
-                res = _sp.run(
-                    ["ffprobe", "-v", "quiet", "-print_format", "json",
-                     "-show_streams", cdn_url],
-                    capture_output=True, timeout=60,
-                )
-                if res.returncode != 0:
-                    return
-                streams = _json.loads(res.stdout).get("streams", [])
-                audio = [s for s in streams if s.get("codec_type") == "audio"]
-                subs  = [s for s in streams if s.get("codec_type") == "subtitle"]
-                if audio or subs:
-                    import strm_generator as _sg
-                    _sg.update_stub_from_probe(tok, audio, subs)
-            except Exception as exc:
-                log.warning("spore-stream: post-build probe failed for %s: %s", tok, exc)
+            streams = _json.loads(res.stdout).get("streams", [])
+            audio = [s for s in streams if s.get("codec_type") == "audio"]
+            subs  = [s for s in streams if s.get("codec_type") == "subtitle"]
+            if audio or subs:
+                import strm_generator as _sg
+                _sg.update_stub_from_probe(tok, audio, subs)
+        except Exception as exc:
+            log.warning("spore-stream: post-build probe failed for %s: %s", tok, exc)
 
+    if info is None:
+        # Cache not built yet: start building in the background and immediately
+        # serve as a pass-through Range proxy to the CDN. This avoids the 302
+        # redirect which caused FFmpeg to open a moov-at-end CDN URL and seek
+        # 15 GB before finding codec info (timeout → black screen on first play).
         threading.Thread(
             target=_build_then_probe,
-            args=(cdn_url_snap, tok_snap),
+            args=(cdn_url, token),
             daemon=True,
             name=f"fsh-{token[:8]}",
         ).start()
-        log.info("spore-stream: token=%s → 302 (building cache) ua=%r", token, ua)
-        return redirect(url, code=302)
+
+        # HEAD the CDN to get file size so we can respond to Range requests.
+        import requests as _req
+        try:
+            head = _req.head(cdn_url, timeout=10, allow_redirects=True)
+            file_size = int(head.headers.get("Content-Length", 0))
+        except Exception as exc:
+            log.warning("spore-stream: HEAD failed for cold token=%s: %s", token, exc)
+            abort(502)
+
+        range_hdr = request.headers.get("Range")
+        if range_hdr:
+            try:
+                _, ranges_str = range_hdr.split("=", 1)
+                r_start_s, r_end_s = ranges_str.split("-", 1)
+                r_start = int(r_start_s) if r_start_s else 0
+                r_end   = int(r_end_s)   if r_end_s   else file_size - 1
+            except Exception:
+                abort(416)
+            r_end  = min(r_end, file_size - 1)
+            status = 206
+        else:
+            r_start, r_end, status = 0, file_size - 1, 200
+
+        length = r_end - r_start + 1
+
+        def _gen_passthrough():
+            CHUNK = 2 << 20
+            pos = r_start
+            while pos <= r_end:
+                end = min(pos + CHUNK - 1, r_end)
+                hdrs = {"Range": f"bytes={pos}-{end}"}
+                try:
+                    resp = _req.get(cdn_url, headers=hdrs, timeout=(10, 60), stream=True)
+                    for chunk in resp.iter_content(65536):
+                        yield chunk
+                    pos += end - pos + 1
+                except Exception as exc:
+                    log.warning("spore-stream cold proxy: error pos=%d token=%s: %s",
+                                pos, token, exc)
+                    break
+
+        resp = Response(
+            stream_with_context(_gen_passthrough()),
+            status=status,
+            mimetype="video/mp4",
+            direct_passthrough=True,
+        )
+        resp.headers["Accept-Ranges"]  = "bytes"
+        resp.headers["Content-Length"] = str(length)
+        if status == 206:
+            resp.headers["Content-Range"] = f"bytes {r_start}-{r_end}/{file_size}"
+        log.info("spore-stream: token=%s cold-proxy bytes=%d-%d/%d ua=%r",
+                 token, r_start, r_end, file_size, ua)
+        return resp
 
     file_size = info["cdn_size"]
     range_hdr = request.headers.get("Range")
@@ -1249,8 +1304,7 @@ def spore_stream_proxy(token: str):
     else:
         v_start, v_end, status = 0, file_size - 1, 200
 
-    length  = v_end - v_start + 1
-    cdn_url = url
+    length = v_end - v_start + 1
 
     def _generate():
         CHUNK = 2 << 20
