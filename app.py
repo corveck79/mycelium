@@ -1173,9 +1173,9 @@ def stream_redirect(token: str):
     return redirect(url, code=302)
 
 
-@app.get("/fstream/<token>")
-def fstream_proxy(token: str):
-    """Plex fast-start proxy: serves moov-first MP4 with Range support.
+@app.get("/spore-stream/<token>")
+def spore_stream_proxy(token: str):
+    """Plex Spore proxy: serves moov-first MP4 with Range support.
 
     On first request the moov cache is empty → falls back to 302 and builds
     the cache in a background thread. Subsequent requests serve the virtual
@@ -1191,7 +1191,7 @@ def fstream_proxy(token: str):
 
     url = catbox.materialize(token)
     if not url:
-        log.warning("fstream: materialize FAILED token=%s ua=%r range=%s (%.1fs)",
+        log.warning("spore-stream: materialize FAILED token=%s ua=%r range=%s (%.1fs)",
                     token, ua, rng, _t.monotonic() - started)
         abort(404)
 
@@ -1206,7 +1206,7 @@ def fstream_proxy(token: str):
             daemon=True,
             name=f"fsh-{token[:8]}",
         ).start()
-        log.info("fstream: token=%s → 302 (building cache) ua=%r", token, ua)
+        log.info("spore-stream: token=%s → 302 (building cache) ua=%r", token, ua)
         return redirect(url, code=302)
 
     file_size = info["cdn_size"]
@@ -1236,7 +1236,7 @@ def fstream_proxy(token: str):
             try:
                 data = mp4_faststart.serve_bytes(info, cdn_url, pos, end)
             except Exception as exc:
-                log.warning("fstream proxy: error v=%d token=%s: %s", pos, token, exc)
+                log.warning("spore-stream proxy: error v=%d token=%s: %s", pos, token, exc)
                 break
             if not data:
                 break
@@ -1253,7 +1253,7 @@ def fstream_proxy(token: str):
     resp.headers["Content-Length"] = str(length)
     if status == 206:
         resp.headers["Content-Range"] = f"bytes {v_start}-{v_end}/{file_size}"
-    log.info("fstream: token=%s bytes=%d-%d/%d (%.1fs) ua=%r",
+    log.info("spore-stream: token=%s bytes=%d-%d/%d (%.1fs) ua=%r",
              token, v_start, v_end, file_size, _t.monotonic() - started, ua)
     return resp
 
