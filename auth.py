@@ -44,6 +44,7 @@ _PUBLIC_PATHS = (
     "/oidc/callback",
     "/logout",
     "/stream/",
+    "/spore-stream/",
     "/assets",
     "/static",
 )
