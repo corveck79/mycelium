@@ -1173,14 +1173,15 @@ def stream_redirect(token: str):
     return redirect(url, code=302)
 
 
+_spore_cold_sizes: dict = {}  # token -> file_size, avoids repeated HEAD on CDN
+
+
 @app.get("/spore-stream/<token>")
 def spore_stream_proxy(token: str):
     """Plex Spore proxy: serves moov-first MP4 with Range support.
 
-    On first request the moov cache is empty → falls back to 302 and builds
-    the cache in a background thread. Subsequent requests serve the virtual
-    fast-start layout so Plex/FFmpeg see the moov immediately without seeking
-    15 GB into the file.
+    Cold cache: pass-through Range proxy to CDN while building .fsh in background.
+    Warm cache: serve virtual moov-first layout so FFmpeg never seeks 15GB.
     """
     import time as _t
     import mp4_faststart
@@ -1222,25 +1223,80 @@ def spore_stream_proxy(token: str):
             log.warning("spore-stream: post-build probe failed for %s: %s", tok, exc)
 
     if info is None:
-        # Cache not built yet: build synchronously so FFmpeg gets a moov-first
-        # MP4 immediately. Pass-through proxy caused Plex web/Android TV to spin
-        # forever because HLS requires the first segment within seconds, but
-        # FFmpeg was stuck seeking through a 15GB mdat-first file via proxy.
-        log.info("spore-stream: cold cache for token=%s, building fast-start synchronously", token)
-        ok = mp4_faststart.build_and_cache(cdn_url, token)
-        if ok:
+        # Cold cache: build .fsh in background, immediately proxy Range requests
+        # to CDN so FFmpeg doesn't stall. _spore_cold_sizes caches file_size so
+        # repeated Range requests (FFmpeg seeks) skip the HEAD round-trip.
+        if token not in _spore_cold_sizes:
             threading.Thread(
                 target=_build_then_probe,
                 args=(cdn_url, token),
                 daemon=True,
-                name=f"probe-{token[:8]}",
+                name=f"fsh-{token[:8]}",
             ).start()
-            info = mp4_faststart.load(token)
-        if not ok or info is None:
-            log.warning("spore-stream: fast-start build failed for token=%s, aborting", token)
+            import requests as _req
+            try:
+                head = _req.head(cdn_url, timeout=10, allow_redirects=True)
+                _spore_cold_sizes[token] = int(head.headers.get("Content-Length", 0))
+            except Exception as exc:
+                log.warning("spore-stream: HEAD failed for cold token=%s: %s", token, exc)
+                abort(502)
+
+        file_size = _spore_cold_sizes.get(token, 0)
+        if not file_size:
             abort(502)
-        log.info("spore-stream: token=%s fast-start built (%.1fs), serving warm",
-                 token, _t.monotonic() - started)
+
+        range_hdr = request.headers.get("Range")
+        if range_hdr:
+            try:
+                _, ranges_str = range_hdr.split("=", 1)
+                r_start_s, r_end_s = ranges_str.split("-", 1)
+                r_start = int(r_start_s) if r_start_s else 0
+                r_end   = int(r_end_s)   if r_end_s   else file_size - 1
+            except Exception:
+                abort(416)
+            r_end  = min(r_end, file_size - 1)
+            status = 206
+        else:
+            r_start, r_end, status = 0, file_size - 1, 200
+
+        length = r_end - r_start + 1
+
+        import requests as _req
+
+        def _gen_passthrough():
+            CHUNK = 2 << 20
+            pos = r_start
+            while pos <= r_end:
+                end = min(pos + CHUNK - 1, r_end)
+                hdrs = {"Range": f"bytes={pos}-{end}"}
+                try:
+                    resp = _req.get(cdn_url, headers=hdrs, timeout=(10, 60), stream=True)
+                    for chunk in resp.iter_content(65536):
+                        yield chunk
+                    pos = end + 1
+                except Exception as exc:
+                    log.warning("spore-stream cold proxy: error pos=%d token=%s: %s",
+                                pos, token, exc)
+                    break
+
+        resp = Response(
+            stream_with_context(_gen_passthrough()),
+            status=status,
+            mimetype="video/mp4",
+            direct_passthrough=True,
+        )
+        resp.headers["Accept-Ranges"]  = "bytes"
+        resp.headers["Content-Length"] = str(length)
+        if status == 206:
+            resp.headers["Content-Range"] = f"bytes {r_start}-{r_end}/{file_size}"
+        log.info("spore-stream: token=%s cold-proxy bytes=%d-%d/%d ua=%r",
+                 token, r_start, r_end, file_size, ua)
+
+        # Remove cold size once .fsh is ready so next request uses warm path
+        if mp4_faststart.load(token) is not None:
+            _spore_cold_sizes.pop(token, None)
+
+        return resp
 
     file_size = info["cdn_size"]
     range_hdr = request.headers.get("Range")
