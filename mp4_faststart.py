@@ -132,9 +132,33 @@ def _get(url: str, start: int, end: int) -> bytes:
     return bytes(data)
 
 
+def _locate_moov(cdn_url: str, cdn_size: int) -> tuple[int, int] | None:
+    """
+    Scan top-level box headers to find moov offset and size.
+    Reads only 16 bytes per box header, so it's cheap even for 17 GB files.
+    Returns (moov_offset, moov_size) or None.
+    """
+    pos = 0
+    while pos < cdn_size - 8:
+        raw = _get(cdn_url, pos, pos + 15)
+        if len(raw) < 8:
+            break
+        try:
+            typ, size, _ = _box_header(raw, 0)
+        except ValueError:
+            break
+        if typ == b"moov":
+            return pos, size
+        if size == 0 or size > cdn_size - pos:
+            break
+        pos += size
+    return None
+
+
 def build_and_cache(cdn_url: str, token: str) -> bool:
     """
     Fetch ftyp + moov from CDN, build fast-start header, write to .fsh cache.
+    Scans box headers sequentially so moov is found regardless of its position.
     Returns True on success.
     """
     path = _cache_path(token)
@@ -143,51 +167,44 @@ def build_and_cache(cdn_url: str, token: str) -> bool:
             return True
 
         try:
-            # File size
             head = req_lib.head(cdn_url, timeout=_CONNECT_TIMEOUT, allow_redirects=True)
             cdn_size = int(head.headers["Content-Length"])
 
-            # ftyp (first 64 bytes is always enough)
+            # ftyp: first box (always small)
             ftyp_raw = _get(cdn_url, 0, 63)
             _, ftyp_size, _ = _box_header(ftyp_raw, 0)
             ftyp = ftyp_raw[:ftyp_size]
 
-            # moov: scan last _MOOV_FETCH_MB of the file
-            tail_bytes = min(_MOOV_FETCH_MB * 1 << 20, cdn_size - ftyp_size)
-            tail_start = cdn_size - tail_bytes
-            tail = _get(cdn_url, tail_start, cdn_size - 1)
-
-            moov_in_tail = _find_box_in(tail, b"moov")
-            if moov_in_tail < 0:
-                # moov not at end - check if file is already fast-start (moov near beginning)
-                head_bytes = min(_MOOV_FETCH_MB * 1 << 20, cdn_size)
-                head_data = _get(cdn_url, 0, head_bytes - 1)
-                moov_in_head = _find_box_in(head_data, b"moov")
-                if moov_in_head >= 0:
-                    # Already fast-start: write sentinel .fsh with moov_size=0
-                    meta = struct.pack(">QQQ", 0, 0, cdn_size)
-                    path.write_bytes(meta)
-                    log.info("FastStart: CDN already fast-start for token=%s, stored sentinel", token)
-                    return True
-                log.warning("FastStart: no moov found anywhere for token %s", token)
+            # Locate moov by scanning box headers
+            result = _locate_moov(cdn_url, cdn_size)
+            if result is None:
+                log.warning("FastStart: moov not found for token %s", token)
                 return False
 
-            _, moov_size, _ = _box_header(tail, moov_in_tail)
-            moov = bytearray(tail[moov_in_tail : moov_in_tail + moov_size])
+            moov_offset, moov_size = result
 
-            # Rewrite chunk offsets: delta = moov_size
-            # (mdat shifts right by moov_size in the virtual fast-start file)
+            if moov_offset == ftyp_size:
+                # Already fast-start: sentinel with moov_size=0 signals direct CDN redirect
+                meta = struct.pack(">QQQQ", ftyp_size, 0, cdn_size, moov_offset)
+                path.write_bytes(meta)
+                log.info("FastStart: already fast-start for token=%s, stored sentinel", token)
+                return True
+
+            # Fetch and rewrite moov
+            moov = bytearray(_get(cdn_url, moov_offset, moov_offset + moov_size - 1))
+
+            # Chunk offsets delta = moov_size: mdat1 shifts right by moov_size in virtual layout
             _rewrite_offsets(moov, moov_size)
 
             header = ftyp + bytes(moov)
 
-            # Store: [8 bytes: ftyp_size][8 bytes: moov_size][8 bytes: cdn_size][header bytes]
-            meta = struct.pack(">QQQ", ftyp_size, moov_size, cdn_size)
+            # .fsh: [8B ftyp_size][8B moov_size][8B cdn_size][8B moov_offset][header...]
+            meta = struct.pack(">QQQQ", ftyp_size, moov_size, cdn_size, moov_offset)
             path.write_bytes(meta + header)
 
             log.info(
-                "FastStart: cached token=%s ftyp=%d moov=%d cdn_size=%d",
-                token, ftyp_size, moov_size, cdn_size,
+                "FastStart: cached token=%s ftyp=%d moov=%d moov_offset=%d cdn_size=%d",
+                token, ftyp_size, moov_size, moov_offset, cdn_size,
             )
             return True
 
@@ -207,15 +224,22 @@ def load(token: str) -> dict | None:
         return None
     try:
         raw = path.read_bytes()
-        ftyp_size, moov_size, cdn_size = struct.unpack_from(">QQQ", raw, 0)
-        header = raw[24:]
+        if len(raw) < 32:
+            # Legacy .fsh without moov_offset field (3-field header)
+            ftyp_size, moov_size, cdn_size = struct.unpack_from(">QQQ", raw, 0)
+            moov_offset = ftyp_size if moov_size == 0 else cdn_size - moov_size
+            header = raw[24:]
+        else:
+            ftyp_size, moov_size, cdn_size, moov_offset = struct.unpack_from(">QQQQ", raw, 0)
+            header = raw[32:]
         return {
             "ftyp_size":    ftyp_size,
             "moov_size":    moov_size,
+            "moov_offset":  moov_offset,
             "cdn_size":     cdn_size,
             "header":       header,
             "header_size":  len(header),
-            "already_fast": moov_size == 0,  # sentinel: CDN already moov-first
+            "already_fast": moov_size == 0,
         }
     except Exception as exc:
         log.warning("FastStart: load failed for %s: %s", token, exc)
@@ -237,25 +261,39 @@ def virtual_to_cdn(virtual_offset: int, info: dict) -> int | None:
 def serve_bytes(info: dict, cdn_url: str, v_start: int, v_end: int) -> bytes:
     """
     Return bytes [v_start, v_end] from the virtual fast-start file.
-    Stitches header bytes and CDN proxied bytes as needed.
+
+    Virtual layout: [ftyp][moov_rewritten][mdat1][mdat2]
+    CDN layout:     [ftyp][mdat1][moov][mdat2]
+
+    Offset mapping for CDN data regions:
+      mdat1: virtual [hdr_size, moov_offset+moov_size) → CDN [ftyp_size, moov_offset)
+             i.e. cdn = virtual - moov_size
+      mdat2: virtual [moov_offset+moov_size, cdn_size) → CDN [moov_offset+moov_size, cdn_size)
+             i.e. cdn = virtual  (unchanged)
     """
-    header     = info["header"]
-    hdr_size   = info["header_size"]
-    moov_size  = info["moov_size"]
+    header      = info["header"]
+    hdr_size    = info["header_size"]
+    moov_size   = info["moov_size"]
+    moov_offset = info["moov_offset"]
+    mdat2_start = moov_offset + moov_size  # virtual == CDN for mdat2
 
     out = bytearray()
     pos = v_start
 
-    # Part 1: from cached header
+    # Region 1: cached header (ftyp + rewritten moov)
     if pos < hdr_size:
         chunk_end = min(v_end, hdr_size - 1)
         out += header[pos : chunk_end + 1]
         pos = chunk_end + 1
 
-    # Part 2: from CDN (mapped offset)
+    # Region 2: mdat1 (before moov in CDN) — cdn = virtual - moov_size
+    if pos <= v_end and pos < mdat2_start:
+        chunk_end = min(v_end, mdat2_start - 1)
+        out += _get(cdn_url, pos - moov_size, chunk_end - moov_size)
+        pos = chunk_end + 1
+
+    # Region 3: mdat2 (after moov in CDN) — cdn = virtual
     if pos <= v_end:
-        cdn_s = pos - moov_size
-        cdn_e = v_end - moov_size
-        out += _get(cdn_url, cdn_s, cdn_e)
+        out += _get(cdn_url, pos, v_end)
 
     return bytes(out)
