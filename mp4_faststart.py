@@ -178,8 +178,12 @@ def build_and_cache(cdn_url: str, token: str) -> bool:
             # Locate moov by scanning box headers
             result = _locate_moov(cdn_url, cdn_size)
             if result is None:
-                log.warning("FastStart: moov not found for token %s", token)
-                return False
+                # Not an MP4 (likely MKV): write redirect sentinel so spore-stream
+                # issues a 302 to CDN directly. FFmpeg reads MKV from byte 0, no seeking.
+                meta = struct.pack(">QQQQ", 0, 0, cdn_size, 0)
+                path.write_bytes(meta)
+                log.info("FastStart: non-MP4 CDN for token=%s, stored redirect sentinel", token)
+                return True
 
             moov_offset, moov_size = result
 
