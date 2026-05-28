@@ -638,11 +638,29 @@ def make_stub_mkv(title: str, quality: str | None = None,
     info_el = _ebml_el(b'\x15\x49\xA9\x66', info_data)
 
     # Video track
+    # For 4K content, declare HDR10 Colour metadata so Plex applies tone-mapping
+    # for clients that don't support HDR10, instead of sending raw PQ frames that
+    # display as black on SDR screens.
+    is_4k = (width >= 3840)
+    if is_4k:
+        # MKV Colour element with BT.2020 + SMPTE ST 2084 PQ (HDR10)
+        colour_data = (
+            _ebml_el(b'\x55\xB1', _ebml_uint(9))  +   # MatrixCoefficients=9 BT.2020
+            _ebml_el(b'\x55\xB2', _ebml_uint(10)) +   # BitsPerChannel=10
+            _ebml_el(b'\x55\xB9', _ebml_uint(1))  +   # Range=1 broadcast
+            _ebml_el(b'\x55\xBA', _ebml_uint(16)) +   # TransferCharacteristics=16 PQ
+            _ebml_el(b'\x55\xBB', _ebml_uint(9))      # Primaries=9 BT.2020
+        )
+        colour_el = _ebml_el(b'\x55\xB0', colour_data)
+    else:
+        colour_el = b''
+
     video_data = (
         _ebml_el(b'\xB0', _ebml_uint(width)) +
         _ebml_el(b'\xBA', _ebml_uint(height)) +
         _ebml_el(b'\x54\xB0', _ebml_uint(width)) +
-        _ebml_el(b'\x54\xBA', _ebml_uint(height))
+        _ebml_el(b'\x54\xBA', _ebml_uint(height)) +
+        colour_el
     )
     video_track = _ebml_el(b'\xAE', (
         _ebml_el(b'\xD7', _ebml_uint(1)) +
