@@ -204,6 +204,56 @@ Stream directly in the browser - no Jellyfin client needed.
 
 ---
 
+## 🍄 Mycelium Spore *(experimental — work in progress)*
+
+**Mycelium Spore** is a custom-built Plex integration developed specifically for Mycelium. Unlike solutions that require rclone, FUSE mounts, or virtual filesystems, Spore works entirely through a lightweight transcoder wrapper — no kernel modules, no extra daemons, no local storage.
+
+Plex streams directly from TorBox CDN on demand.
+
+```
+Plex scans stub .mkv files  →  user presses Play
+  →  Plex Transcoder called with -i /plex-media/movie.mkv
+  →  plex_transcoder_wrapper.sh rewrites -i to http://mycelium/spore-stream/<token>
+  →  FFmpeg reads real video directly from TorBox CDN
+  →  Plex serves stream to client
+```
+
+**How it works:**
+- Mycelium writes a small stub `.mkv` per item into a Plex-scanned folder — no real video data, just enough metadata for Plex to display the library
+- A transcoder wrapper intercepts every playback request and replaces the stub path with a live CDN stream URL
+- On first play, Mycelium builds a fast-start cache in the background so subsequent seeks are instant
+- Audio and subtitle tracks are automatically updated in the stub after first play
+
+**Setup** (Docker Compose):
+
+```yaml
+environment:
+  - SPORE_ENABLED=true
+  - SPORE_MEDIA_PATH=/data/plex-media   # path Plex scans
+volumes:
+  - ./data/plex-media:/plex-media:ro    # mount into Plex container (read-only)
+  - ./spore:/spore                       # wrapper script
+```
+
+In your Plex container, add an entrypoint that installs the wrapper once:
+
+```yaml
+entrypoint:
+  - /bin/sh
+  - -c
+  - |
+    if [ ! -f '/usr/lib/plexmediaserver/Plex Transcoder.real' ]; then
+      mv '/usr/lib/plexmediaserver/Plex Transcoder' '/usr/lib/plexmediaserver/Plex Transcoder.real'
+    fi
+    cp /spore/plex_transcoder_wrapper.sh '/usr/lib/plexmediaserver/Plex Transcoder'
+    chmod +x '/usr/lib/plexmediaserver/Plex Transcoder'
+    exec /init
+```
+
+> **Status:** Confirmed working on Android (Plex app) and Linux desktop. Shield TV testing in progress. Dolby Vision and lossless audio passthrough are not supported — Plex always transcodes via the wrapper.
+
+---
+
 ## 🚀 Quick start
 
 **Prerequisites:**
