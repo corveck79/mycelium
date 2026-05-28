@@ -1174,6 +1174,7 @@ def stream_redirect(token: str):
 
 
 _spore_cold_sizes: dict = {}  # token -> file_size, avoids repeated HEAD on CDN
+_spore_probing: set  = set()  # tokens currently running a background probe
 
 
 @app.get("/spore-stream/<token>")
@@ -1201,11 +1202,21 @@ def spore_stream_proxy(token: str):
     cdn_url = url
 
     def _build_then_probe(cdn_url_: str, tok: str) -> None:
-        ok = mp4_faststart.build_and_cache(cdn_url_, tok)
-        if not ok:
-            return
         import json as _json, subprocess as _sp
+        import strm_generator as _sg, db as _db, mp4_faststart as _fs
         try:
+            ok = mp4_faststart.build_and_cache(cdn_url_, tok)
+            if not ok:
+                return
+
+            # Skip if already probed and preferred_audio detection is done
+            existing = _db.load_spore_tracks(tok)
+            if existing and "preferred_audio_idx" in existing:
+                return
+
+            cp = _fs.extract_codec_private(tok)
+            v_extra_hex = cp.hex() if cp else ""
+
             res = _sp.run(
                 ["ffprobe", "-v", "quiet", "-print_format", "json",
                  "-show_streams", "-show_format", cdn_url_],
@@ -1218,12 +1229,22 @@ def spore_stream_proxy(token: str):
             audio   = [s for s in streams if s.get("codec_type") == "audio"]
             subs    = [s for s in streams if s.get("codec_type") == "subtitle"]
             dur     = float(data.get("format", {}).get("duration", 0) or 0)
-            import strm_generator as _sg, db as _db
-            _db.save_spore_tracks(tok, {"audio": audio, "subs": subs, "duration_s": dur})
-            if audio or subs or dur:
+            preferred_idx = _sg._preferred_audio_index(audio)
+            _db.save_spore_tracks(tok, {
+                "audio": audio, "subs": subs, "duration_s": dur,
+                "video_extradata_hex": v_extra_hex,
+                "preferred_audio_idx": preferred_idx,
+            })
+            if audio or subs or dur or v_extra_hex:
                 _sg.update_stub_from_probe(tok, audio, subs, duration_s=dur or None)
+            if preferred_idx > 0:
+                _sg.update_minfo_preferred_audio(tok, preferred_idx)
+                log.info("spore-stream: preferred_audio=%d for token=%s (TrueHD -> fallback)",
+                         preferred_idx, tok)
         except Exception as exc:
             log.warning("spore-stream: post-build probe failed for %s: %s", tok, exc)
+        finally:
+            _spore_probing.discard(tok)
 
     if info is None:
         # Cold cache: build .fsh in background, immediately proxy Range requests
@@ -1301,9 +1322,21 @@ def spore_stream_proxy(token: str):
 
         return resp
 
-    # CDN file is already moov-first: redirect directly, no proxy overhead
+    # CDN file is already moov-first (or MKV redirect sentinel): redirect to CDN.
+    # For MKV files _build_then_probe is never triggered by the cold-cache path,
+    # so we trigger it here once to probe audio streams and detect TrueHD.
     if info.get("already_fast"):
         _spore_cold_sizes.pop(token, None)
+        existing = db.load_spore_tracks(token)
+        if (not existing or "preferred_audio_idx" not in existing) and token not in _spore_probing:
+            _spore_probing.add(token)
+            threading.Thread(
+                target=_build_then_probe,
+                args=(cdn_url, token),
+                daemon=True,
+                name=f"probe-{token[:8]}",
+            ).start()
+            log.info("spore-stream: token=%s triggering background probe", token)
         log.info("spore-stream: token=%s already fast-start, 302 to CDN", token)
         return redirect(cdn_url, code=302)
 

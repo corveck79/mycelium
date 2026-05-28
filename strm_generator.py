@@ -266,6 +266,56 @@ def _cache_cdn_url(info_hash: str, ready_item: dict, title: str) -> None:
         log.debug("Preload: CDN cache skipped for %s: %s", title, exc)
 
 
+_TRUEHD_CODECS   = frozenset({"truehd", "mlp"})
+_SAFE_AUDIO_CODECS = frozenset({
+    "eac3", "ac3", "aac", "dts", "flac", "mp3", "opus", "vorbis",
+    "pcm_s16le", "pcm_s24le", "pcm_s32le",
+})
+
+
+def _preferred_audio_index(audio_streams: list[dict]) -> int:
+    """Return 0-based audio stream index to prefer for FFmpeg -map 0:a:N.
+
+    If the first audio track is TrueHD/MLP and a decode-safe fallback exists
+    (EAC3, AC3, AAC, ...), return the fallback's index. Otherwise return 0.
+    TrueHD decode often fails mid-stream on CDN files due to missing major-sync
+    frames after seeks, causing HLS transcoding (Android/Shield) to stall.
+    """
+    if not audio_streams:
+        return 0
+    first_codec = (audio_streams[0].get("codec_name") or "").lower()
+    if first_codec not in _TRUEHD_CODECS:
+        return 0
+    for i, s in enumerate(audio_streams[1:], 1):
+        if (s.get("codec_name") or "").lower() in _SAFE_AUDIO_CODECS:
+            return i
+    return 0
+
+
+def update_minfo_preferred_audio(token: str, audio_index: int) -> None:
+    """Add or update preferred_audio=N in the .minfo sidecar for token.
+
+    The Plex transcoder wrapper reads this to remap '-map 0:a:0' to the
+    specified stream index, skipping a corrupt primary TrueHD track.
+    """
+    item = db.get_virtual_item(token)
+    if not item or not item.get("strm_path"):
+        return
+    strm_path  = Path(item["strm_path"])
+    minfo_path = _spore_stub_dir(strm_path) / (strm_path.stem + ".minfo")
+    if not minfo_path.exists():
+        return
+    try:
+        lines = minfo_path.read_text(encoding="utf-8").splitlines()
+        lines = [l for l in lines if not l.startswith("preferred_audio=")]
+        if audio_index > 0:
+            lines.append(f"preferred_audio={audio_index}")
+        minfo_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        log.info("Spore: preferred_audio=%d saved to .minfo for token=%s", audio_index, token)
+    except Exception as exc:
+        log.warning("Spore: could not update .minfo for token=%s: %s", token, exc)
+
+
 def _preload_spore(cdn_url: str, token: str) -> None:
     """Build fast-start cache and probe tracks for a newly preloaded torrent.
     Runs in the preload thread so first Plex play is instant."""
@@ -273,9 +323,9 @@ def _preload_spore(cdn_url: str, token: str) -> None:
         return
     try:
         import mp4_faststart, json as _json, subprocess as _sp
-        # Skip probe if already done (prevents redundant CPU work on re-play)
+        # Skip probe if already done (preferred_audio detection included)
         existing = db.load_spore_tracks(token)
-        if existing and existing.get("video_extradata_hex"):
+        if existing and "preferred_audio_idx" in existing:
             return
 
         ok = mp4_faststart.build_and_cache(cdn_url, token)
@@ -298,11 +348,17 @@ def _preload_spore(cdn_url: str, token: str) -> None:
         audio   = [s for s in streams if s.get("codec_type") == "audio"]
         subs    = [s for s in streams if s.get("codec_type") == "subtitle"]
         dur     = float(data.get("format", {}).get("duration", 0) or 0)
+        preferred_idx = _preferred_audio_index(audio)
         db.save_spore_tracks(token, {
             "audio": audio, "subs": subs, "duration_s": dur,
             "video_extradata_hex": v_extra_hex,
+            "preferred_audio_idx": preferred_idx,
         })
         update_stub_from_probe(token, audio, subs, duration_s=dur or None)
+        if preferred_idx > 0:
+            update_minfo_preferred_audio(token, preferred_idx)
+            log.info("Preload: preferred_audio=%d for token=%s (TrueHD -> fallback)",
+                     preferred_idx, token)
         log.info("Preload: spore probe done token=%s dur=%.0fs subs=%d extradata=%d",
                  token, dur, len(subs), len(cp or b''))
     except Exception as exc:
