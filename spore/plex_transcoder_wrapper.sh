@@ -6,6 +6,23 @@
 SPORE_LOG=/config/spore-wrap-debug.log
 echo "$(date '+%H:%M:%S') WRAP started" >> "$SPORE_LOG"
 
+# ── EAE_ROOT discovery ─────────────────────────────────────────────────────────
+# Plex's patched FFmpeg maps the 'eac3' decoder to eac3_eae, which requires
+# EAE_ROOT to point to the EasyAudioEncoder watchfolder. Plex Media Server sets
+# this env var when spawning the transcoder, but it is sometimes missing
+# (known Plex bug). Discover and export it here as a fallback so EAE can init.
+echo "$(date '+%H:%M:%S') WRAP EAE_ROOT=${EAE_ROOT:-(not set)}" >> "$SPORE_LOG"
+if [ -z "$EAE_ROOT" ]; then
+    _eae_dir=$(find /tmp /var/tmp -maxdepth 5 -type d \
+        \( -name "EasyAudioEncoder" -o -name "*EAE*" \) 2>/dev/null | head -1)
+    if [ -n "$_eae_dir" ]; then
+        export EAE_ROOT="$_eae_dir"
+        echo "$(date '+%H:%M:%S') WRAP discovered EAE_ROOT=$EAE_ROOT" >> "$SPORE_LOG"
+    else
+        echo "$(date '+%H:%M:%S') WRAP WARNING: EAE watchfolder not found in /tmp" >> "$SPORE_LOG"
+    fi
+fi
+
 newargs=()
 found_i=0
 spore_replaced=0
@@ -159,6 +176,24 @@ if [ "$spore_replaced" = "1" ]; then
     # -max_muxing_queue_size  : bigger buffer for audio seek-sync recovery
     last="${newargs[-1]}"
     unset 'newargs[-1]'
+    # Replace -loglevel quiet / -loglevel_plex error with verbose so we can see
+    # FFmpeg errors in the Plex log. TEMPORARY DEBUG -- remove after fix confirmed.
+    replaced_loglevel=()
+    skip_loglevel=0
+    for arg in "${newargs[@]}"; do
+        if [ "$skip_loglevel" = "1" ]; then
+            skip_loglevel=0
+            replaced_loglevel+=("verbose")
+            continue
+        fi
+        if [[ "$arg" == "-loglevel" || "$arg" == "-loglevel_plex" ]]; then
+            skip_loglevel=1
+            replaced_loglevel+=("$arg")
+            continue
+        fi
+        replaced_loglevel+=("$arg")
+    done
+    newargs=("${replaced_loglevel[@]}")
     newargs+=("-max_interleave_delta" "0" "-max_muxing_queue_size" "4096" "$last")
     echo "SPORE-WRAP: injected muxer error-tolerance flags" >&2
     echo "SPORE-WRAP: full command: ${newargs[*]}" >&2
