@@ -869,6 +869,15 @@ def ui_merge_series():
     return redirect(url_for("ui_dashboard") + "#repair")
 
 
+@app.post("/ui/api/repair-tvshow-titles")
+@_csrf.exempt
+@auth.require_role("admin")
+def ui_api_repair_tvshow_titles():
+    """Rewrite tvshow.nfo files whose title is 'Season XX' instead of the real show name."""
+    result = nfo_generator.repair_tvshow_titles()
+    return jsonify(**result)
+
+
 @app.post("/ui/api/fix-imdb-titles")
 @_csrf.exempt
 @auth.require_role("admin")

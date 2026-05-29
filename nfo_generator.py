@@ -53,12 +53,16 @@ def _clean_for_tmdb(raw: str) -> str:
     return s
 
 
+def _xml_escape(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _movie_nfo(title: str, year: int | None, imdb_id: str) -> str:
     year_tag = f"\n  <year>{year}</year>" if year else ""
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         "<movie>\n"
-        f"  <title>{title}</title>{year_tag}\n"
+        f"  <title>{_xml_escape(title)}</title>{year_tag}\n"
         f'  <uniqueid type="imdb" default="true">{imdb_id}</uniqueid>\n'
         "</movie>\n"
     )
@@ -68,10 +72,67 @@ def _tvshow_nfo(title: str, imdb_id: str) -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         "<tvshow>\n"
-        f"  <title>{title}</title>\n"
+        f"  <title>{_xml_escape(title)}</title>\n"
         f'  <uniqueid type="imdb" default="true">{imdb_id}</uniqueid>\n'
         "</tvshow>\n"
     )
+
+
+_BAD_TITLE_RE = re.compile(r'^Season\s+\d+$', re.IGNORECASE)
+
+
+def repair_tvshow_titles() -> dict:
+    """Rewrite tvshow.nfo files whose title is 'Season XX' instead of the real show name.
+
+    Uses (in order of preference):
+      1. Canonical title from monitored_series table (by imdb_id)
+      2. Folder name stripped of trailing region codes like (IN) or (ZA)
+    """
+    media = Path(MEDIA_PATH)
+    series_dir = media / "series"
+    if not series_dir.is_dir():
+        return {"fixed": 0, "skipped": 0}
+
+    monitored_by_imdb = {s["imdb_id"]: s["title"] for s in db.get_all_monitored_series()}
+
+    fixed = skipped = 0
+    for folder in sorted(series_dir.iterdir()):
+        if not folder.is_dir():
+            continue
+        nfo_path = folder / "tvshow.nfo"
+        if not nfo_path.exists():
+            continue
+        try:
+            root = ET.parse(nfo_path).getroot()
+        except Exception:
+            continue
+
+        title_el = root.find("title")
+        if not title_el or not title_el.text:
+            continue
+        if not _BAD_TITLE_RE.match(title_el.text.strip()):
+            continue  # title already looks correct
+
+        imdb_id = _read_imdb_from_nfo(nfo_path)
+        if not imdb_id:
+            skipped += 1
+            continue
+
+        # Prefer canonical DB title, fall back to folder name (strip region suffix like (IN))
+        correct_title = monitored_by_imdb.get(imdb_id)
+        if not correct_title:
+            correct_title = re.sub(r'\s+\([A-Z]{2}\)$', '', folder.name).strip() or folder.name
+
+        try:
+            nfo_path.write_text(_tvshow_nfo(correct_title, imdb_id), encoding="utf-8")
+            log.info("NFO repair: '%s' -> '%s' (%s)", title_el.text.strip(), correct_title, nfo_path)
+            fixed += 1
+        except Exception as exc:
+            log.warning("NFO repair: could not write %s: %s", nfo_path, exc)
+            skipped += 1
+
+    log.info("NFO repair complete: %d fixed, %d skipped", fixed, skipped)
+    return {"fixed": fixed, "skipped": skipped}
 
 
 def _read_imdb_from_nfo(nfo_path: Path) -> str | None:
@@ -196,6 +257,9 @@ def generate_all() -> dict:
 
             # Use canonical title from monitored_series if available
             display_title = monitored_by_imdb.get(imdb_id, _clean_for_tmdb(folder.name) or folder.name)
+            # Safety guard: never write a "Season XX" string as the show title
+            if _BAD_TITLE_RE.match(display_title):
+                display_title = folder.name
             if _write(nfo_path, _tvshow_nfo(display_title, imdb_id)):
                 series += 1
 
