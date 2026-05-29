@@ -1,5 +1,7 @@
 import hmac
+import json as _json
 import logging
+import os.path as _path
 import re
 import threading
 
@@ -65,82 +67,10 @@ configure_logging()
 log_buffer.install()
 log = logging.getLogger("mycelium")
 
-APP_VERSION = "0.5.0-dev"
+APP_VERSION = "0.5.1-dev"
 
-RELEASES = [
-    {
-        "version": "0.5.0-dev",
-        "date": "2026-05-28",
-        "notes": [
-            "Mycelium Spore: custom Plex integration without rclone, FUSE or local storage (experimental)",
-            "Spore: direct TorBox CDN streaming via transcoder wrapper and stub MKV library",
-            "Spore: fast-start cache for instant playback, auto-updates tracks after first play",
-            "Fix: TorBox outage no longer causes 6-hour retry delay for affected items",
-            "Fix: HDR10+ no longer treated as HDR10 fallback in DV P5 filter",
-            "Fix: bulk rename items stored with raw IMDB codes as title (Admin > Maintenance > Fix IMDB titles)",
-            "webplayer: HEVC compatibility fix for browser playback",
-        ],
-    },
-    {
-        "version": "0.4.2",
-        "date": "2026-05-25",
-        "notes": [
-            "WEBHOOK_SECRET auto-generatie met copy-knop in admin",
-            "Setup wizard afgesloten na eerste run (heropen via Settings)",
-            "Metrics endpoint beveiligd met optioneel Bearer token",
-            "WebDAV auth hardening en security headers",
-            "Rate limiting op auth endpoints",
-        ],
-    },
-    {
-        "version": "0.4.1",
-        "date": "2026-05-25",
-        "notes": [
-            "Docker Hub CI/CD pipeline op release tags",
-            "Splash screen als login-achtergrond",
-        ],
-    },
-    {
-        "version": "0.4.0",
-        "date": "2026-05-25",
-        "notes": [
-            "LITE_MODE voor webhook-only deployments zonder zware schedulers",
-            "Setup wizard UI verbeterd",
-            "Settings tab in admin",
-        ],
-    },
-    {
-        "version": "0.3.0-beta",
-        "date": "2026-05-24",
-        "notes": [
-            "Web Player plugin: in-browser HLS speler met subtitle picker",
-            "Trakt plugin: watchlist sync en ratings",
-            "Plugin slot systeem voor frontend integratie",
-            "webplayer: HDR detectie, SDR-only release selectie, multi-audio HLS",
-        ],
-    },
-    {
-        "version": "0.2.0-beta",
-        "date": "2026-05-22",
-        "notes": [
-            "Redesigned React SPA met Library status, region picker",
-            "Multi-user authenticatie met rollen (admin/user)",
-            "OIDC/SSO ondersteuning",
-            "Users tab in admin met pending approvals",
-            "Security hardening: open redirect fix, /setup auth guard",
-        ],
-    },
-    {
-        "version": "0.1.0-beta.1",
-        "date": "2026-05-22",
-        "notes": [
-            "Eerste publieke release",
-            "Seerr webhook intake, TorBox integratie, .strm generatie",
-            "React SPA met Discover, Library, Requests, Wanted tabs",
-            "Jellyfin integratie via /stream/<token> catbox proxy",
-        ],
-    },
-]
+with open(_path.join(_path.dirname(__file__), "releases.json"), encoding="utf-8") as _f:
+    RELEASES: list[dict] = _json.load(_f)
 
 import settings as _settings_mod
 import os as _os

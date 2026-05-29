@@ -1,0 +1,86 @@
+[
+  {
+    "version": "0.5.1-dev",
+    "date": "2026-05-29",
+    "notes": [
+      "Library movies tab: paginated poster grid (24/page) matching Discover/Watchlist style",
+      "Library: search box and All / Available / Wanted filter tabs",
+      "New preference: open library posters directly in Jellyfin web (Settings > Preferences)",
+      "Jellyfin batch lookup pre-fetched so poster clicks are synchronous (no popup blocker)",
+      "Fix: arm64 CI build crash caused by dead spore-builder Dockerfile stage",
+      "Fix: Jellyfin click mode now activates instantly after toggling (optimistic session update)"
+    ]
+  },
+  {
+    "version": "0.5.0-dev",
+    "date": "2026-05-28",
+    "notes": [
+      "Mycelium Spore: custom Plex integration without rclone, FUSE or local storage (experimental)",
+      "Spore: direct TorBox CDN streaming via transcoder wrapper and stub MKV library",
+      "Spore: fast-start cache for instant playback, auto-updates tracks after first play",
+      "Fix: TorBox outage no longer causes 6-hour retry delay for affected items",
+      "Fix: HDR10+ no longer treated as HDR10 fallback in DV P5 filter",
+      "Fix: bulk rename items stored with raw IMDB codes as title (Admin > Maintenance > Fix IMDB titles)",
+      "webplayer: HEVC compatibility fix for browser playback"
+    ]
+  },
+  {
+    "version": "0.4.2",
+    "date": "2026-05-25",
+    "notes": [
+      "WEBHOOK_SECRET auto-generation with copy button in admin",
+      "Setup wizard closes after first run (re-open via Settings)",
+      "Metrics endpoint secured with optional Bearer token",
+      "WebDAV auth hardening and security headers",
+      "Rate limiting on auth endpoints"
+    ]
+  },
+  {
+    "version": "0.4.1",
+    "date": "2026-05-25",
+    "notes": [
+      "Docker Hub CI/CD pipeline on release tags",
+      "Splash screen as login background"
+    ]
+  },
+  {
+    "version": "0.4.0",
+    "date": "2026-05-25",
+    "notes": [
+      "LITE_MODE for webhook-only deployments without heavy schedulers",
+      "Setup wizard UI improved",
+      "Settings tab in admin"
+    ]
+  },
+  {
+    "version": "0.3.0-beta",
+    "date": "2026-05-24",
+    "notes": [
+      "Web Player plugin: in-browser HLS player with subtitle picker",
+      "Trakt plugin: watchlist sync and ratings",
+      "Plugin slot system for frontend integration",
+      "webplayer: HDR detection, SDR-only release selection, multi-audio HLS"
+    ]
+  },
+  {
+    "version": "0.2.0-beta",
+    "date": "2026-05-22",
+    "notes": [
+      "Redesigned React SPA with library status and region picker",
+      "Multi-user authentication with roles (admin/user)",
+      "OIDC/SSO support",
+      "Users tab in admin with pending approvals",
+      "Security hardening: open redirect fix, /setup auth guard"
+    ]
+  },
+  {
+    "version": "0.1.0-beta.1",
+    "date": "2026-05-22",
+    "notes": [
+      "First public release",
+      "Seerr webhook intake, TorBox integration, .strm generation",
+      "React SPA with Discover, Library, Requests, Wanted tabs",
+      "Jellyfin integration via /stream/<token> catbox proxy"
+    ]
+  }
+]

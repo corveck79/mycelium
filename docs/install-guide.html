@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Myc3l1um v2  -  Installation Guide / Installatiehandleiding</title>
+<title>Myc3l1um v2  -  Installation Guide</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Sora:wght@300;400;600;700&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -125,24 +125,24 @@
   </div>
   <div class="nav-logo">
     <div class="title"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="22" height="22" style="vertical-align:-3px;margin-right:6px"><g stroke="#22d3ee" stroke-width="1.5" opacity="0.7"><line x1="10" y1="20" x2="30" y2="10"/><line x1="10" y1="20" x2="30" y2="30"/><line x1="30" y1="10" x2="30" y2="30"/><line x1="20" y1="5" x2="10" y2="20"/><line x1="20" y1="35" x2="10" y2="20"/></g><circle cx="10" cy="20" r="3.5" fill="#0d9488"/><circle cx="30" cy="10" r="3" fill="#22d3ee"/><circle cx="30" cy="30" r="3" fill="#22d3ee"/><circle cx="20" cy="5" r="2.2" fill="#5eead4"/><circle cx="20" cy="35" r="2.2" fill="#5eead4"/></svg>myc<span style="color:#22d3ee">3</span>l<span style="color:#22d3ee">1</span>um</div>
-    <div class="sub"><span class="lang-en">v2  -  install guide</span><span class="lang-nl">v2  -  installatiegids</span></div>
+    <div class="sub"><span class="lang-en">v2  -  install guide</span><span class="lang-nl">v2  -  install guide</span></div>
   </div>
-  <div class="nav-section"><span class="lang-en">Preparation</span><span class="lang-nl">Voorbereiding</span></div>
-  <a href="#vereisten"><span class="lang-en">1. Requirements</span><span class="lang-nl">1. Vereisten</span></a>
-  <a href="#mappen"><span class="lang-en">2. Create folders</span><span class="lang-nl">2. Mappen aanmaken</span></a>
-  <a href="#bestanden"><span class="lang-en">3. Place files</span><span class="lang-nl">3. Bestanden plaatsen</span></a>
-  <a href="#env"><span class="lang-en">4. Configure .env</span><span class="lang-nl">4. .env invullen</span></a>
-  <div class="nav-section"><span class="lang-en">Startup (order matters!)</span><span class="lang-nl">Opstart (volgorde!)</span></div>
-  <a href="#starten"><span class="lang-en">5. Start containers</span><span class="lang-nl">5. Containers starten</span></a>
-  <a href="#jellyfin"><span class="lang-en">6. Set up Jellyfin</span><span class="lang-nl">6. Jellyfin inrichten</span></a>
+  <div class="nav-section"><span class="lang-en">Preparation</span><span class="lang-nl">Preparation</span></div>
+  <a href="#vereisten"><span class="lang-en">1. Requirements</span><span class="lang-nl">1. Requirements</span></a>
+  <a href="#mappen"><span class="lang-en">2. Create folders</span><span class="lang-nl">2. Create folders</span></a>
+  <a href="#bestanden"><span class="lang-en">3. Place files</span><span class="lang-nl">3. Place files</span></a>
+  <a href="#env"><span class="lang-en">4. Configure .env</span><span class="lang-nl">4. Configure .env</span></a>
+  <div class="nav-section"><span class="lang-en">Startup (order matters!)</span><span class="lang-nl">Startup (order matters!)</span></div>
+  <a href="#starten"><span class="lang-en">5. Start containers</span><span class="lang-nl">5. Start containers</span></a>
+  <a href="#jellyfin"><span class="lang-en">6. Set up Jellyfin</span><span class="lang-nl">6. Set up Jellyfin</span></a>
   <a href="#mycelium"><span class="lang-en">7. Mycelium wizard</span><span class="lang-nl">7. Mycelium wizard</span></a>
-  <div class="nav-section"><span class="lang-en">Optional</span><span class="lang-nl">Optioneel</span></div>
-  <a href="#seerr"><span class="lang-en">Seerr setup</span><span class="lang-nl">Seerr inrichten</span></a>
-  <a href="#plex"><span class="lang-en">Plex activation</span><span class="lang-nl">Plex activeren</span></a>
+  <div class="nav-section"><span class="lang-en">Optional</span><span class="lang-nl">Optional</span></div>
+  <a href="#seerr"><span class="lang-en">Seerr setup</span><span class="lang-nl">Seerr setup</span></a>
+  <a href="#plex"><span class="lang-en">Plex activation</span><span class="lang-nl">Plex activation</span></a>
   <a href="#webdav">WebDAV</a>
-  <div class="nav-section"><span class="lang-en">Management</span><span class="lang-nl">Beheer</span></div>
-  <a href="#commandes"><span class="lang-en">Commands</span><span class="lang-nl">Commando's</span></a>
-  <a href="#poorten"><span class="lang-en">Port overview</span><span class="lang-nl">Poortoverzicht</span></a>
+  <div class="nav-section"><span class="lang-en">Management</span><span class="lang-nl">Management</span></div>
+  <a href="#commandes"><span class="lang-en">Commands</span><span class="lang-nl">Commands</span></a>
+  <a href="#poorten"><span class="lang-en">Port overview</span><span class="lang-nl">Port overview</span></a>
   <a href="#streams404"><span class="lang-en">Streams &amp; 404</span><span class="lang-nl">Streams &amp; 404</span></a>
 </nav>
 
@@ -150,14 +150,14 @@
 
   <div class="page-header">
     <div class="badge"><span class="plat-proxmox">Debian 13 · Docker · Proxmox LXC</span><span class="plat-nas">Synology / QNAP · Docker · Container Manager</span></div>
-    <h1>Myc3l1um v2<br><span class="lang-en">Installation Guide</span><span class="lang-nl">Installatiehandleiding</span></h1>
-    <div class="credit-line"><span class="lang-en">Community guide by <a href="https://github.com/Ventrex" target="_blank">Ventrex</a></span><span class="lang-nl">Community handleiding door <a href="https://github.com/Ventrex" target="_blank">Ventrex</a></span></div>
+    <h1>Myc3l1um v2<br><span class="lang-en">Installation Guide</span><span class="lang-nl">Installation Guide</span></h1>
+    <div class="credit-line"><span class="lang-en">Community guide by <a href="https://github.com/Ventrex" target="_blank">Ventrex</a></span><span class="lang-nl">Community guide by <a href="https://github.com/Ventrex" target="_blank">Ventrex</a></span></div>
     <br>
     <div class="lang-en">
       <p>Step-by-step setup on a clean system. All configuration lives in a single <code>.env</code> file. <strong style="color:var(--text)">Follow the startup order</strong>  -  Jellyfin must be ready before Mycelium can connect to it.</p>
     </div>
     <div class="lang-nl">
-      <p>Stap-voor-stap opzet op een schoon systeem. Alle configuratie zit in een <code>.env</code> bestand. <strong style="color:var(--text)">Let op de volgorde bij inrichten</strong>  -  Jellyfin moet klaar zijn voordat Mycelium er verbinding mee kan maken.</p>
+      <p>Step-by-step setup on a clean system. All configuration lives in a single <code>.env</code> file. <strong style="color:var(--text)">Follow the startup order</strong>  -  Jellyfin must be ready before Mycelium can connect to it.</p>
     </div>
   </div>
 
@@ -167,48 +167,48 @@
       <p style="color:var(--text); font-weight:600; margin-bottom:0.5rem;">Startup order (important):</p>
     </div>
     <div class="lang-nl">
-      <p style="color:var(--text); font-weight:600; margin-bottom:0.5rem;">Opstartvolgorde (belangrijk):</p>
+      <p style="color:var(--text); font-weight:600; margin-bottom:0.5rem;">Startup order (important):</p>
     </div>
     <div class="flow">
-      <div class="flow-box active"><span class="lang-en">Files + folders</span><span class="lang-nl">Mappen + bestanden</span></div>
+      <div class="flow-box active"><span class="lang-en">Files + folders</span><span class="lang-nl">Files + folders</span></div>
       <div class="flow-arrow">&#8594;</div>
-      <div class="flow-box active"><span class="lang-en">Start containers</span><span class="lang-nl">Containers starten</span></div>
+      <div class="flow-box active"><span class="lang-en">Start containers</span><span class="lang-nl">Start containers</span></div>
       <div class="flow-arrow">&#8594;</div>
-      <div class="flow-box active"><span class="lang-en">Jellyfin setup</span><span class="lang-nl">Jellyfin inrichten</span></div>
+      <div class="flow-box active"><span class="lang-en">Jellyfin setup</span><span class="lang-nl">Jellyfin setup</span></div>
       <div class="flow-arrow">&#8594;</div>
       <div class="flow-box active"><span class="lang-en">Mycelium wizard</span><span class="lang-nl">Mycelium wizard</span></div>
       <div class="flow-arrow">&#8594;</div>
-      <div class="flow-box active"><span class="lang-en">Done!</span><span class="lang-nl">Klaar!</span></div>
+      <div class="flow-box active"><span class="lang-en">Done!</span><span class="lang-nl">Done!</span></div>
     </div>
   </section>
 
   <!-- 1. Requirements -->
   <section id="vereisten">
-    <h2><span class="section-num">1</span><span class="lang-en">Check requirements</span><span class="lang-nl">Vereisten controleren</span></h2>
+    <h2><span class="section-num">1</span><span class="lang-en">Check requirements</span><span class="lang-nl">Check requirements</span></h2>
     <div class="plat-proxmox">
       <div class="lang-en"><p>Docker and Docker Compose are already present via the Proxmox LXC template. Verify:</p></div>
-      <div class="lang-nl"><p>Docker en Docker Compose zijn al aanwezig via de Proxmox LXC template. Even checken:</p></div>
+      <div class="lang-nl"><p>Docker and Docker Compose are already present via the Proxmox LXC template. Verify:</p></div>
       <div class="cmd">docker --version<br>docker compose version</div>
     </div>
     <div class="plat-nas">
       <div class="lang-en"><p>Install <strong style="color:var(--text)">Container Manager</strong> (Synology) or <strong style="color:var(--text)">Container Station</strong> (QNAP) from the package center. Docker Compose is included. Then verify via SSH:</p></div>
-      <div class="lang-nl"><p>Installeer <strong style="color:var(--text)">Container Manager</strong> (Synology) of <strong style="color:var(--text)">Container Station</strong> (QNAP) vanuit het pakketcentrum. Docker Compose is inbegrepen. Controleer daarna via SSH:</p></div>
+      <div class="lang-nl"><p>Install <strong style="color:var(--text)">Container Manager</strong> (Synology) or <strong style="color:var(--text)">Container Station</strong> (QNAP) from the package center. Docker Compose is included. Then verify via SSH:</p></div>
       <div class="cmd">docker --version<br>docker compose version</div>
     </div>
     <div class="alert info">
       <span class="alert-icon">&#8505;</span>
       <span>
         <span class="lang-en">You need at least Docker Compose v2.x (<code>docker compose</code>, not <code>docker-compose</code>).</span>
-        <span class="lang-nl">Je hebt minimaal Docker Compose v2.x nodig (<code>docker compose</code>, niet <code>docker-compose</code>).</span>
+        <span class="lang-nl">You need at least Docker Compose v2.x (<code>docker compose</code>, not <code>docker-compose</code>).</span>
       </span>
     </div>
   </section>
 
   <!-- 2. Folders -->
   <section id="mappen">
-    <h2><span class="section-num">2</span><span class="lang-en">Create folders</span><span class="lang-nl">Mappen aanmaken</span></h2>
+    <h2><span class="section-num">2</span><span class="lang-en">Create folders</span><span class="lang-nl">Create folders</span></h2>
     <div class="lang-en"><p>Media in <code>mount/</code>, app configs in <code>apps/</code>:</p></div>
-    <div class="lang-nl"><p>Media in <code>mount/</code>, app-configs in <code>apps/</code>:</p></div>
+    <div class="lang-nl"><p>Media in <code>mount/</code>, app configs in <code>apps/</code>:</p></div>
     <div class="plat-proxmox">
       <div class="cmd">
         <span class="comment"># Media folders (TorBox writes .strm files here)</span><br>
@@ -240,7 +240,7 @@
         <span class="alert-icon">&#8505;</span>
         <span>
           <span class="lang-en">No <code>chown</code> needed for Seerr on NAS. Container Manager handles permissions automatically. Use your NAS user's PUID/PGID (not root). Find them with <code>id</code> via SSH.</span>
-          <span class="lang-nl">Geen <code>chown</code> nodig voor Seerr op NAS. Container Manager regelt rechten automatisch. Gebruik de PUID/PGID van je NAS-gebruiker (niet root). Vind ze met <code>id</code> via SSH.</span>
+          <span class="lang-nl">No <code>chown</code> needed for Seerr on NAS. Container Manager handles permissions automatically. Use your NAS user's PUID/PGID (not root). Find them with <code>id</code> via SSH.</span>
         </span>
       </div>
     </div>
@@ -249,7 +249,7 @@
       <span class="alert-icon">&#9888;</span>
       <span>
         <span class="lang-en"><strong style="color:var(--text)">Mycelium</strong> creates its own <code>apps/mycelium/data/media/movies</code> and <code>series</code> folders. Jellyfin uses these as its library. The <code>mount/</code> folder is the TorBox working directory.</span>
-        <span class="lang-nl"><strong style="color:var(--text)">Mycelium</strong> schrijft zijn eigen <code>apps/mycelium/data/media/movies</code> en <code>series</code> mappen aan. Jellyfin gebruikt die mappen als bibliotheek. De <code>mount/</code> map is de werkmap van TorBox.</span>
+        <span class="lang-nl"><strong style="color:var(--text)">Mycelium</strong> creates its own <code>apps/mycelium/data/media/movies</code> and <code>series</code> folders. Jellyfin uses these as its library. The <code>mount/</code> folder is the TorBox working directory.</span>
       </span>
     </div>
 
@@ -257,26 +257,26 @@
       <span class="alert-icon">&#9888;</span>
       <span>
         <span class="lang-en"><strong style="color:var(--text)">torbox-mc-strm and Mycelium both create .strm files.</strong> If you use Mycelium, you do NOT need torbox-mc-strm. Using both will cause duplicate entries in Jellyfin. Choose one or the other.</span>
-        <span class="lang-nl"><strong style="color:var(--text)">torbox-mc-strm en Mycelium maken allebei .strm bestanden.</strong> Als je Mycelium gebruikt, heb je torbox-mc-strm NIET nodig. Beide tegelijk gebruiken veroorzaakt dubbele items in Jellyfin. Kies een van beide.</span>
+        <span class="lang-nl"><strong style="color:var(--text)">torbox-mc-strm and Mycelium both create .strm files.</strong> If you use Mycelium, you do NOT need torbox-mc-strm. Using both will cause duplicate entries in Jellyfin. Choose one or the other.</span>
       </span>
     </div>
 
     <div class="lang-en"><p>Final folder structure:</p></div>
-    <div class="lang-nl"><p>Uiteindelijke structuur:</p></div>
+    <div class="lang-nl"><p>Final folder structure:</p></div>
     <div class="plat-proxmox">
       <div class="tree">
         <span class="dir">/opt/Myc3l1um/</span><br>
         &#9500;&#9472;&#9472; docker-compose.yml<br>
         &#9500;&#9472;&#9472; .env<br>
-        &#9500;&#9472;&#9472; <span class="dir">mount/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; TorBox working dir (only if NOT using Mycelium for .strm)</span><span class="comment-tree lang-nl">&larr; TorBox werkmap (alleen als je Mycelium NIET gebruikt voor .strm)</span><br>
+        &#9500;&#9472;&#9472; <span class="dir">mount/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; TorBox working dir (only if NOT using Mycelium for .strm)</span><span class="comment-tree lang-nl">&larr; TorBox working dir (only if NOT using Mycelium for .strm)</span><br>
         &#9474;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">movies/</span><br>
         &#9474;&nbsp;&nbsp;&nbsp;&#9492;&#9472;&#9472; <span class="dir">series/</span><br>
         &#9492;&#9472;&#9472; <span class="dir">apps/</span><br>
         &nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">jellyfin/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; Jellyfin config</span><span class="comment-tree lang-nl">&larr; Jellyfin config</span><br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">seerr/config/</span>&nbsp;<span class="comment-tree lang-en">&larr; Seerr config (chown 1000:1000), optional</span><span class="comment-tree lang-nl">&larr; Seerr config (chown 1000:1000), optioneel</span><br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">plex/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; Plex config (optional)</span><span class="comment-tree lang-nl">&larr; Plex config (optioneel)</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">seerr/config/</span>&nbsp;<span class="comment-tree lang-en">&larr; Seerr config (chown 1000:1000), optional</span><span class="comment-tree lang-nl">&larr; Seerr config (chown 1000:1000), optional</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">plex/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; Plex config (optional)</span><span class="comment-tree lang-nl">&larr; Plex config (optional)</span><br>
         &nbsp;&nbsp;&nbsp;&nbsp;&#9492;&#9472;&#9472; <span class="dir">mycelium/data/</span><br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#9492;&#9472;&#9472; <span class="dir">media/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; Mycelium .strm files (Jellyfin library)</span><span class="comment-tree lang-nl">&larr; Mycelium .strm bestanden (Jellyfin bibliotheek)</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#9492;&#9472;&#9472; <span class="dir">media/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; Mycelium .strm files (Jellyfin library)</span><span class="comment-tree lang-nl">&larr; Mycelium .strm files (Jellyfin library)</span><br>
         &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">movies/</span><br>
         &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#9492;&#9472;&#9472; <span class="dir">series/</span>
       </div>
@@ -286,15 +286,15 @@
         <span class="dir">/volume1/docker/mycelium/</span><br>
         &#9500;&#9472;&#9472; docker-compose.yml<br>
         &#9500;&#9472;&#9472; .env<br>
-        &#9500;&#9472;&#9472; <span class="dir">mount/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; TorBox working dir (only if NOT using Mycelium for .strm)</span><span class="comment-tree lang-nl">&larr; TorBox werkmap (alleen als je Mycelium NIET gebruikt voor .strm)</span><br>
+        &#9500;&#9472;&#9472; <span class="dir">mount/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; TorBox working dir (only if NOT using Mycelium for .strm)</span><span class="comment-tree lang-nl">&larr; TorBox working dir (only if NOT using Mycelium for .strm)</span><br>
         &#9474;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">movies/</span><br>
         &#9474;&nbsp;&nbsp;&nbsp;&#9492;&#9472;&#9472; <span class="dir">series/</span><br>
         &#9492;&#9472;&#9472; <span class="dir">apps/</span><br>
         &nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">jellyfin/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; Jellyfin config</span><span class="comment-tree lang-nl">&larr; Jellyfin config</span><br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">seerr/config/</span>&nbsp;<span class="comment-tree lang-en">&larr; Seerr config, optional</span><span class="comment-tree lang-nl">&larr; Seerr config, optioneel</span><br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">plex/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; Plex config (optional)</span><span class="comment-tree lang-nl">&larr; Plex config (optioneel)</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">seerr/config/</span>&nbsp;<span class="comment-tree lang-en">&larr; Seerr config, optional</span><span class="comment-tree lang-nl">&larr; Seerr config, optional</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">plex/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; Plex config (optional)</span><span class="comment-tree lang-nl">&larr; Plex config (optional)</span><br>
         &nbsp;&nbsp;&nbsp;&nbsp;&#9492;&#9472;&#9472; <span class="dir">mycelium/data/</span><br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#9492;&#9472;&#9472; <span class="dir">media/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; Mycelium .strm files (Jellyfin library)</span><span class="comment-tree lang-nl">&larr; Mycelium .strm bestanden (Jellyfin bibliotheek)</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#9492;&#9472;&#9472; <span class="dir">media/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment-tree lang-en">&larr; Mycelium .strm files (Jellyfin library)</span><span class="comment-tree lang-nl">&larr; Mycelium .strm files (Jellyfin library)</span><br>
         &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#9500;&#9472;&#9472; <span class="dir">movies/</span><br>
         &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#9492;&#9472;&#9472; <span class="dir">series/</span>
       </div>
@@ -303,10 +303,10 @@
 
   <!-- 3. Place files -->
   <section id="bestanden">
-    <h2><span class="section-num">3</span><span class="lang-en">Place files</span><span class="lang-nl">Bestanden plaatsen</span></h2>
+    <h2><span class="section-num">3</span><span class="lang-en">Place files</span><span class="lang-nl">Place files</span></h2>
     <div class="plat-proxmox">
       <div class="lang-en"><p>Both files belong in <code>/opt/Myc3l1um/</code>:</p></div>
-      <div class="lang-nl"><p>Beide bestanden horen in <code>/opt/Myc3l1um/</code>:</p></div>
+      <div class="lang-nl"><p>Both files belong in <code>/opt/Myc3l1um/</code>:</p></div>
       <div class="cmd">
         <span class="comment"># Copy from your own machine (adjust the IP):</span><br>
         scp docker-compose.yml .env root@&lt;your-ip&gt;:/opt/Myc3l1um/
@@ -315,22 +315,22 @@
         <span class="alert-icon">&#9888;</span>
         <span>
           <span class="lang-en">Make sure both files are placed exactly in <code>/opt/Myc3l1um/</code>. Docker Compose looks for <code>.env</code> next to <code>docker-compose.yml</code>.</span>
-          <span class="lang-nl">Zorg dat beide bestanden exact in <code>/opt/Myc3l1um/</code> staan. Docker Compose zoekt <code>.env</code> naast <code>docker-compose.yml</code>.</span>
+          <span class="lang-nl">Make sure both files are placed exactly in <code>/opt/Myc3l1um/</code>. Docker Compose looks for <code>.env</code> next to <code>docker-compose.yml</code>.</span>
         </span>
       </div>
     </div>
     <div class="plat-nas">
       <div class="lang-en"><p>Both files belong in <code>/volume1/docker/mycelium/</code>. Upload them via <strong style="color:var(--text)">File Station</strong> or copy them over an SMB share:</p></div>
-      <div class="lang-nl"><p>Beide bestanden horen in <code>/volume1/docker/mycelium/</code>. Upload ze via <strong style="color:var(--text)">File Station</strong> of kopieer ze via een SMB-share:</p></div>
+      <div class="lang-nl"><p>Both files belong in <code>/volume1/docker/mycelium/</code>. Upload them via <strong style="color:var(--text)">File Station</strong> or copy them over an SMB share:</p></div>
       <div class="cmd">
-        <span class="comment"><span class="lang-en"># Or copy via SMB from your own machine:</span><span class="lang-nl"># Of kopieer via SMB vanaf je eigen machine:</span></span><br>
+        <span class="comment"><span class="lang-en"># Or copy via SMB from your own machine:</span><span class="lang-nl"># Or copy via SMB from your own machine:</span></span><br>
         cp docker-compose.yml .env /mnt/nas-share/docker/mycelium/
       </div>
       <div class="alert warn">
         <span class="alert-icon">&#9888;</span>
         <span>
           <span class="lang-en">Make sure both files are placed exactly in <code>/volume1/docker/mycelium/</code>. Docker Compose looks for <code>.env</code> next to <code>docker-compose.yml</code>.</span>
-          <span class="lang-nl">Zorg dat beide bestanden exact in <code>/volume1/docker/mycelium/</code> staan. Docker Compose zoekt <code>.env</code> naast <code>docker-compose.yml</code>.</span>
+          <span class="lang-nl">Make sure both files are placed exactly in <code>/volume1/docker/mycelium/</code>. Docker Compose looks for <code>.env</code> next to <code>docker-compose.yml</code>.</span>
         </span>
       </div>
     </div>
@@ -339,14 +339,14 @@
       <span class="alert-icon">&#9888;</span>
       <span>
         <span class="lang-en"><strong style="color:var(--text)">docker-compose.yml: torbox-mc-strm</strong> is included in the compose file, but you should only use it if you are NOT using Mycelium to generate .strm files. If Mycelium handles your library (which it does by default), comment out or remove the torbox-mc-strm service to avoid duplicates in Jellyfin.</span>
-        <span class="lang-nl"><strong style="color:var(--text)">docker-compose.yml: torbox-mc-strm</strong> staat in het compose bestand, maar gebruik deze alleen als je Mycelium NIET gebruikt om .strm bestanden te genereren. Als Mycelium je bibliotheek beheert (standaard gedrag), commentarieer of verwijder dan de torbox-mc-strm service om dubbele items in Jellyfin te voorkomen.</span>
+        <span class="lang-nl"><strong style="color:var(--text)">docker-compose.yml: torbox-mc-strm</strong> is included in the compose file, but only use it if you are NOT using Mycelium to generate .strm files. If Mycelium manages your library (the default), comment out or remove the torbox-mc-strm service to avoid duplicates in Jellyfin.</span>
       </span>
     </div>
   </section>
 
   <!-- 4. .env -->
   <section id="env">
-    <h2><span class="section-num">4</span><span class="lang-en">Configure .env (minimal)</span><span class="lang-nl">.env instellen (minimaal)</span></h2>
+    <h2><span class="section-num">4</span><span class="lang-en">Configure .env (minimal)</span><span class="lang-nl">Configure .env (minimal)</span></h2>
     <div class="plat-proxmox">
       <div class="cmd">nano /opt/Myc3l1um/.env</div>
     </div>
@@ -354,10 +354,10 @@
       <div class="cmd">nano /volume1/docker/mycelium/.env</div>
     </div>
     <div class="lang-en"><p>You only need to set the <strong style="color:var(--text)">infrastructure basics</strong> here. All API keys, quality settings, and integrations are configured through Mycelium's built-in setup wizard (step 7).</p></div>
-    <div class="lang-nl"><p>Je hoeft hier alleen de <strong style="color:var(--text)">infrastructuur-basis</strong> in te vullen. Alle API keys, kwaliteitsinstellingen en integraties stel je in via de ingebouwde setup wizard van Mycelium (stap 7).</p></div>
+    <div class="lang-nl"><p>You only need to set the <strong style="color:var(--text)">infrastructure basics</strong> here. All API keys, quality settings, and integrations are configured through Mycelium's built-in setup wizard (step 7).</p></div>
     <div class="plat-proxmox">
       <div class="cmd">
-        <span class="comment"><span class="lang-en"># Only these need to be set manually:</span><span class="lang-nl"># Alleen deze hoef je handmatig in te vullen:</span></span><br>
+        <span class="comment"><span class="lang-en"># Only these need to be set manually:</span><span class="lang-nl"># Only these need to be set manually:</span></span><br>
         <span class="key">SERVER_IP</span>=<span class="val">&lt;your-ip&gt;</span><br>
         <span class="key">TZ</span>=<span class="val">Europe/Amsterdam</span><br>
         <span class="key">PUID</span>=<span class="val">0</span><br>
@@ -366,7 +366,7 @@
     </div>
     <div class="plat-nas">
       <div class="cmd">
-        <span class="comment"><span class="lang-en"># Only these need to be set manually:</span><span class="lang-nl"># Alleen deze hoef je handmatig in te vullen:</span></span><br>
+        <span class="comment"><span class="lang-en"># Only these need to be set manually:</span><span class="lang-nl"># Only these need to be set manually:</span></span><br>
         <span class="key">SERVER_IP</span>=<span class="val">&lt;your-nas-ip&gt;</span><br>
         <span class="key">TZ</span>=<span class="val">Europe/Amsterdam</span><br>
         <span class="key">PUID</span>=<span class="val">1026</span><br>
@@ -376,7 +376,7 @@
         <span class="alert-icon">&#8505;</span>
         <span>
           <span class="lang-en"><strong style="color:var(--text)">Do NOT use PUID=0 / PGID=0 on NAS.</strong> Use your NAS user's IDs instead. Find them by running <code>id</code> via SSH. Typical Synology values: PUID=1026, PGID=100.</span>
-          <span class="lang-nl"><strong style="color:var(--text)">Gebruik GEEN PUID=0 / PGID=0 op NAS.</strong> Gebruik de IDs van je NAS-gebruiker. Vind ze door <code>id</code> uit te voeren via SSH. Typische Synology-waarden: PUID=1026, PGID=100.</span>
+          <span class="lang-nl"><strong style="color:var(--text)">Do NOT use PUID=0 / PGID=0 on NAS.</strong> Use your NAS user's IDs instead. Find them by running <code>id</code> via SSH. Typical Synology values: PUID=1026, PGID=100.</span>
         </span>
       </div>
     </div>
@@ -384,16 +384,16 @@
       <span class="alert-icon">&#10003;</span>
       <span>
         <span class="lang-en"><strong style="color:var(--text)">No need to fill in API keys here.</strong> TorBox, TMDB, Jellyfin, quality preferences, Catbox, and all other settings are configured through the Mycelium setup wizard after first launch. The wizard has a Test button for each integration so you can verify everything works before saving.</span>
-        <span class="lang-nl"><strong style="color:var(--text)">API keys hoef je hier niet in te vullen.</strong> TorBox, TMDB, Jellyfin, kwaliteitsvoorkeuren, Catbox en alle andere instellingen stel je in via de Mycelium setup wizard na de eerste start. De wizard heeft een Test-knop per integratie zodat je alles kunt verifiëren voor je opslaat.</span>
+        <span class="lang-nl"><strong style="color:var(--text)">No need to fill in API keys here.</strong> TorBox, TMDB, Jellyfin, quality preferences, Catbox, and all other settings are configured through the Mycelium setup wizard after first launch. The wizard has a Test button for each integration so you can verify everything works before saving.</span>
       </span>
     </div>
     <div class="lang-en"><p>The included <code>.env</code> file has sensible defaults for everything else (ports, paths, intervals). You can adjust them later if needed.</p></div>
-    <div class="lang-nl"><p>Het meegeleverde <code>.env</code> bestand heeft goede standaardwaarden voor de rest (poorten, paden, intervallen). Die kun je later aanpassen indien nodig.</p></div>
+    <div class="lang-nl"><p>The included <code>.env</code> file has sensible defaults for everything else (ports, paths, intervals). You can adjust them later if needed.</p></div>
   </section>
 
   <!-- 5. Start containers -->
   <section id="starten">
-    <h2><span class="section-num">5</span><span class="lang-en">Start containers</span><span class="lang-nl">Containers starten</span></h2>
+    <h2><span class="section-num">5</span><span class="lang-en">Start containers</span><span class="lang-nl">Start containers</span></h2>
     <div class="plat-proxmox">
       <div class="cmd">
         cd /opt/Myc3l1um<br><br>
@@ -403,7 +403,7 @@
     </div>
     <div class="plat-nas">
       <div class="lang-en"><p>Via SSH, or import the <code>docker-compose.yml</code> as a project in Container Manager:</p></div>
-      <div class="lang-nl"><p>Via SSH, of importeer de <code>docker-compose.yml</code> als project in Container Manager:</p></div>
+      <div class="lang-nl"><p>Via SSH, or import the <code>docker-compose.yml</code> as a project in Container Manager:</p></div>
       <div class="cmd">
         cd /volume1/docker/mycelium<br><br>
         <span class="comment"># First time: download images + build Mycelium (~5-10 min)</span><br>
@@ -414,7 +414,7 @@
       <span class="alert-icon">&#10003;</span>
       <span>
         <span class="lang-en">Jellyfin, Mycelium, and TorBox will now start automatically. No <code>--profile</code> flag needed.</span>
-        <span class="lang-nl">Jellyfin, Mycelium en TorBox starten nu automatisch op. Geen <code>--profile</code> vlag nodig.</span>
+        <span class="lang-nl">Jellyfin, Mycelium, and TorBox will now start automatically. No <code>--profile</code> flag needed.</span>
       </span>
     </div>
     <div class="cmd">
@@ -425,36 +425,36 @@
 
   <!-- 6. Jellyfin -->
   <section id="jellyfin">
-    <h2><span class="section-num">6</span><span class="lang-en">Set up Jellyfin</span><span class="lang-nl">Jellyfin inrichten</span></h2>
+    <h2><span class="section-num">6</span><span class="lang-en">Set up Jellyfin</span><span class="lang-nl">Jellyfin setup</span></h2>
     <div class="lang-en"><p>Open <code>http://&lt;your-ip&gt;:8096</code> and go through the setup wizard.</p></div>
-    <div class="lang-nl"><p>Open <code>http://&lt;your-ip&gt;:8096</code> en doorloop de setup-wizard.</p></div>
+    <div class="lang-nl"><p>Open <code>http://&lt;your-ip&gt;:8096</code> and go through the setup wizard.</p></div>
     <div class="steps">
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Set language</strong>  -  Choose your preferred language. Set preferred language to NL, then EN.</span>
-          <span class="lang-nl"><strong>Taal instellen</strong>  -  Kies Nederlands. Stel voorkeurstaal in op NL, daarna EN.</span>
+          <span class="lang-nl"><strong>Set language</strong>  -  Choose your preferred language. Set preferred language to NL, then EN.</span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Add Movies media library</strong></span>
-          <span class="lang-nl"><strong>Mediabibliotheek Films toevoegen</strong></span><br>
-          <div class="cmd"><span class="lang-en">Path: </span><span class="lang-nl">Pad: </span><span class="val">/mnt/Myc3l1um/movies</span></div>
+          <span class="lang-nl"><strong>Add Movies media library</strong></span><br>
+          <div class="cmd"><span class="lang-en">Path: </span><span class="lang-nl">Path: </span><span class="val">/mnt/Myc3l1um/movies</span></div>
           <span class="lang-en">This is the Mycelium folder containing generated .strm files.</span>
-          <span class="lang-nl">Dit is de Mycelium-map met gegenereerde .strm bestanden.</span>
+          <span class="lang-nl">This is the Mycelium folder containing generated .strm files.</span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Add Series media library</strong></span>
-          <span class="lang-nl"><strong>Mediabibliotheek Series toevoegen</strong></span><br>
-          <div class="cmd"><span class="lang-en">Path: </span><span class="lang-nl">Pad: </span><span class="val">/mnt/Myc3l1um/series</span></div>
+          <span class="lang-nl"><strong>Add Series media library</strong></span><br>
+          <div class="cmd"><span class="lang-en">Path: </span><span class="lang-nl">Path: </span><span class="val">/mnt/Myc3l1um/series</span></div>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Create API key</strong>  -  Go to Administration &rarr; API Keys &rarr; New Key. Copy the key and add it to <code>.env</code>:</span>
-          <span class="lang-nl"><strong>API-sleutel aanmaken</strong>  -  Ga naar Beheer &rarr; API-sleutels &rarr; Nieuwe sleutel. Kopieer de sleutel en zet hem in <code>.env</code>:</span><br>
+          <span class="lang-nl"><strong>Create API key</strong>  -  Go to Administration &rarr; API Keys &rarr; New Key. Copy the key and add it to <code>.env</code>:</span><br>
           <div class="cmd"><span class="key">JELLYFIN_API_KEY</span>=<span class="val">your-key-here</span></div>
         </div>
       </div>
@@ -464,7 +464,7 @@
       <span class="alert-icon">&#8505;</span>
       <span>
         <span class="lang-en"><strong style="color:var(--text)">Jellyfin volumes:</strong> If you are NOT using torbox-mc-strm (recommended when running Mycelium), Jellyfin only needs the Mycelium media paths (<code>/mnt/Myc3l1um/movies</code> and <code>/mnt/Myc3l1um/series</code>). You can remove the torbox-mc-strm mount paths from the Jellyfin volumes in docker-compose.yml.</span>
-        <span class="lang-nl"><strong style="color:var(--text)">Jellyfin volumes:</strong> Als je torbox-mc-strm NIET gebruikt (aanbevolen bij Mycelium), heeft Jellyfin alleen de Mycelium mediapaden nodig (<code>/mnt/Myc3l1um/movies</code> en <code>/mnt/Myc3l1um/series</code>). Je kunt de torbox-mc-strm mountpaden uit de Jellyfin volumes in docker-compose.yml verwijderen.</span>
+        <span class="lang-nl"><strong style="color:var(--text)">Jellyfin volumes:</strong> If you are NOT using torbox-mc-strm (recommended when running Mycelium), Jellyfin only needs the Mycelium media paths (<code>/mnt/Myc3l1um/movies</code> and <code>/mnt/Myc3l1um/series</code>). You can remove the torbox-mc-strm mount paths from the Jellyfin volumes in docker-compose.yml.</span>
       </span>
     </div>
 
@@ -472,7 +472,7 @@
       <span class="alert-icon">&#9888;</span>
       <span>
         <span class="lang-en"><strong style="color:var(--text)">Similar titles</strong> (like the movie "Ghosts (2019)" and the series "Ghosts") can be mixed up by Mycelium. This is a known metadata bug where the wrong item gets requested. Report this to the Mycelium developer with the TMDB/IMDB ID of the incorrect result.</span>
-        <span class="lang-nl"><strong style="color:var(--text)">Gelijknamige titels</strong> (zoals de film "Ghosts (2019)" en de serie "Ghosts") kunnen door Mycelium door elkaar gehaald worden. Dit is een bekende metadata-bug waarbij het verkeerde item wordt aangevraagd. Meld dit bij de ontwikkelaar van Mycelium met het TMDB/IMDB-ID van het verkeerde resultaat.</span>
+        <span class="lang-nl"><strong style="color:var(--text)">Similar titles</strong> (like the movie "Ghosts (2019)" and the series "Ghosts") can be mixed up by Mycelium. This is a known metadata bug where the wrong item gets requested. Report this to the Mycelium developer with the TMDB/IMDB ID of the incorrect result.</span>
       </span>
     </div>
   </section>
@@ -484,37 +484,37 @@
       <p>Open <code>http://&lt;your-ip&gt;:8088</code>. On first launch, Mycelium automatically shows the <strong style="color:var(--text)">setup wizard</strong>. This is where all the real configuration happens:</p>
     </div>
     <div class="lang-nl">
-      <p>Open <code>http://&lt;your-ip&gt;:8088</code>. Bij de eerste start toont Mycelium automatisch de <strong style="color:var(--text)">setup wizard</strong>. Hier stel je alles in:</p>
+      <p>Open <code>http://&lt;your-ip&gt;:8088</code>. On first launch, Mycelium automatically shows the <strong style="color:var(--text)">setup wizard</strong>. This is where all the real configuration happens:</p>
     </div>
     <div class="steps">
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>TorBox API key</strong>  -  Get your key from torbox.app &#8594; Settings &#8594; API. The wizard has a Test button to verify the connection.</span>
-          <span class="lang-nl"><strong>TorBox API key</strong>  -  Haal je key op via torbox.app &#8594; Settings &#8594; API. De wizard heeft een Test-knop om de verbinding te verifiëren.</span>
+          <span class="lang-nl"><strong>TorBox API key</strong>  -  Get your key from torbox.app &#8594; Settings &#8594; API. The wizard has a Test button to verify the connection.</span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Jellyfin</strong>  -  Enter the URL and the API key you created in step 6. Test to confirm Mycelium can reach Jellyfin.</span>
-          <span class="lang-nl"><strong>Jellyfin</strong>  -  Vul de URL en de API key in die je in stap 6 hebt aangemaakt. Test om te bevestigen dat Mycelium Jellyfin kan bereiken.</span>
+          <span class="lang-nl"><strong>Jellyfin</strong>  -  Enter the URL and the API key you created in step 6. Test to confirm Mycelium can reach Jellyfin.</span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>TMDB</strong>  -  Enter your TMDB Read Access Token (starts with <code>eyJ</code>). Required for Discover, posters, and metadata.</span>
-          <span class="lang-nl"><strong>TMDB</strong>  -  Vul je TMDB Read Access Token in (begint met <code>eyJ</code>). Nodig voor Discover, posters en metadata.</span>
+          <span class="lang-nl"><strong>TMDB</strong>  -  Enter your TMDB Read Access Token (starts with <code>eyJ</code>). Required for Discover, posters, and metadata.</span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Quality &amp; language</strong>  -  Resolution preference (1080p, 4K), codec (HEVC, x264), audio language, and filtering rules.</span>
-          <span class="lang-nl"><strong>Kwaliteit &amp; taal</strong>  -  Resolutievoorkeur (1080p, 4K), codec (HEVC, x264), audiotaal en filterregels.</span>
+          <span class="lang-nl"><strong>Quality &amp; language</strong>  -  Resolution preference (1080p, 4K), codec (HEVC, x264), audio language, and filtering rules.</span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Catbox mode</strong>  -  Configures the streaming proxy URL. Torrents are only added to TorBox when you press play, and released after idle time.</span>
-          <span class="lang-nl"><strong>Catbox mode</strong>  -  Configureert de streaming proxy URL. Torrents worden pas aan TorBox toegevoegd als je op play drukt, en weer vrijgegeven na inactiviteit.</span>
+          <span class="lang-nl"><strong>Catbox mode</strong>  -  Configures the streaming proxy URL. Torrents are only added to TorBox when you press play, and released after idle time.</span>
         </div>
       </div>
     </div>
@@ -522,14 +522,14 @@
       <span class="alert-icon">&#8505;</span>
       <span>
         <span class="lang-en">Each step has a <strong style="color:var(--text)">Test</strong> button so you catch mistakes before saving. All settings are stored in the database, not in <code>.env</code>. You can re-run the wizard anytime from Admin &#8594; Settings &#8594; Re-run wizard.</span>
-        <span class="lang-nl">Elke stap heeft een <strong style="color:var(--text)">Test</strong>-knop zodat je fouten opvangt voor je opslaat. Alle instellingen worden opgeslagen in de database, niet in <code>.env</code>. Je kunt de wizard opnieuw draaien via Admin &#8594; Settings &#8594; Re-run wizard.</span>
+        <span class="lang-nl">Each step has a <strong style="color:var(--text)">Test</strong> button so you catch mistakes before saving. All settings are stored in the database, not in <code>.env</code>. You can re-run the wizard anytime from Admin &#8594; Settings &#8594; Re-run wizard.</span>
       </span>
     </div>
     <div class="alert success">
       <span class="alert-icon">&#10003;</span>
       <span>
         <span class="lang-en"><strong style="color:var(--text)">Done!</strong> After the wizard, your first account becomes admin. The Discover UI is the landing page where you can browse and request movies and series directly.</span>
-        <span class="lang-nl"><strong style="color:var(--text)">Klaar!</strong> Na de wizard wordt je eerste account admin. De Discover UI is de landingspagina waar je direct films en series kunt zoeken en aanvragen.</span>
+        <span class="lang-nl"><strong style="color:var(--text)">Done!</strong> After the wizard, your first account becomes admin. The Discover UI is the landing page where you can browse and request movies and series directly.</span>
       </span>
     </div>
   </section>
@@ -538,77 +538,77 @@
 
   <!-- Optional: Seerr -->
   <section id="seerr">
-    <h2><span class="section-opt">&#9679;</span><span class="lang-en">Optional: Seerr setup</span><span class="lang-nl">Optioneel: Seerr inrichten</span></h2>
+    <h2><span class="section-opt">&#9679;</span><span class="lang-en">Optional: Seerr setup</span><span class="lang-nl">Optional: Seerr setup</span></h2>
     <div class="alert info">
       <span class="alert-icon">&#8505;</span>
       <span>
         <span class="lang-en"><strong style="color:var(--text)">Seerr is optional.</strong> Mycelium has its own built-in Discover UI for browsing and requesting content. You only need Seerr if you want an additional request portal for your users, or if you prefer Seerr's interface.</span>
-        <span class="lang-nl"><strong style="color:var(--text)">Seerr is optioneel.</strong> Mycelium heeft een eigen ingebouwde Discover UI om content te zoeken en aan te vragen. Je hebt Seerr alleen nodig als je een extra aanvraagportaal voor je gebruikers wilt, of als je de voorkeur geeft aan Seerr's interface.</span>
+        <span class="lang-nl"><strong style="color:var(--text)">Seerr is optional.</strong> Mycelium has its own built-in Discover UI for browsing and requesting content. You only need Seerr if you want an additional request portal for your users, or if you prefer Seerr's interface.</span>
       </span>
     </div>
     <div class="lang-en"><p>Open <code>http://&lt;your-ip&gt;:5055</code> and go through the setup.</p></div>
-    <div class="lang-nl"><p>Open <code>http://&lt;your-ip&gt;:5055</code> en doorloop de setup.</p></div>
+    <div class="lang-nl"><p>Open <code>http://&lt;your-ip&gt;:5055</code> and go through the setup.</p></div>
     <div class="steps">
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Connect Jellyfin</strong>  -  Go to Settings &rarr; Jellyfin:</span>
-          <span class="lang-nl"><strong>Jellyfin koppelen</strong>  -  Ga naar Instellingen &rarr; Jellyfin:</span><br>
+          <span class="lang-nl"><strong>Connect Jellyfin</strong>  -  Go to Settings &rarr; Jellyfin:</span><br>
           <div class="cmd">
             URL: <span class="val">http://jellyfin:8096</span><br>
             <span class="comment">(use the Docker network name, not the IP)</span><br>
-            <span class="lang-en">API key: </span><span class="lang-nl">API-sleutel: </span><span class="val">&lt;<span class="lang-en">Jellyfin API key from step 6</span><span class="lang-nl">Jellyfin API-sleutel uit stap 6</span>&gt;</span>
+            <span class="lang-en">API key: </span><span class="lang-nl">API key: </span><span class="val">&lt;<span class="lang-en">Jellyfin API key from step 6</span><span class="lang-nl">Jellyfin API key from step 6</span>&gt;</span>
           </div>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Sync libraries</strong>  -  Click "Sync Libraries" so Seerr knows what is already available.</span>
-          <span class="lang-nl"><strong>Bibliotheken synchroniseren</strong>  -  Klik op "Sync Libraries" zodat Seerr weet wat al beschikbaar is.</span>
+          <span class="lang-nl"><strong>Sync libraries</strong>  -  Click "Sync Libraries" so Seerr knows what is already available.</span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Copy Seerr API key</strong>  -  Go to Settings &rarr; General &rarr; API Key. Add it to <code>.env</code>:</span>
-          <span class="lang-nl"><strong>Seerr API-sleutel kopieren</strong>  -  Ga naar Instellingen &rarr; Algemeen &rarr; API-sleutel. Zet hem in <code>.env</code>:</span><br>
+          <span class="lang-nl"><strong>Copy Seerr API key</strong>  -  Go to Settings &rarr; General &rarr; API Key. Add it to <code>.env</code>:</span><br>
           <div class="cmd"><span class="key">SEERR_API_KEY</span>=<span class="val">your-seerr-key</span></div>
         </div>
       </div>
     </div>
 
-    <h3><span class="lang-en">Set up webhook in Seerr</span><span class="lang-nl">Webhook instellen in Seerr</span></h3>
+    <h3><span class="lang-en">Set up webhook in Seerr</span><span class="lang-nl">Set up webhook in Seerr</span></h3>
     <div class="lang-en"><p>So Seerr forwards requests to Mycelium:</p></div>
-    <div class="lang-nl"><p>Zodat Seerr aanvragen doorstuurt naar Mycelium:</p></div>
+    <div class="lang-nl"><p>So Seerr forwards requests to Mycelium:</p></div>
     <div class="steps">
       <div class="step">
         <div class="step-body">
           <span class="lang-en">In Seerr, go to <strong>Settings &rarr; Notifications &rarr; Webhook</strong></span>
-          <span class="lang-nl">Ga in Seerr naar <strong>Instellingen &rarr; Notificaties &rarr; Webhook</strong></span>
+          <span class="lang-nl">In Seerr, go to <strong>Settings &rarr; Notifications &rarr; Webhook</strong></span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en">Enter the webhook URL:</span>
-          <span class="lang-nl">Vul de webhook-URL in:</span><br>
+          <span class="lang-nl">Enter the webhook URL:</span><br>
           <div class="cmd">http://mycelium:8088/webhook</div>
           <span style="color:var(--text3); font-size:13px;">
             <span class="lang-en">Use the Docker network name <code>mycelium</code>, not the server IP. Containers on the same network reach each other directly.</span>
-            <span class="lang-nl">Gebruik de Docker-netwerknaam <code>mycelium</code>, niet het server-IP. Containers op hetzelfde netwerk bereiken elkaar zo direct.</span>
+            <span class="lang-nl">Use the Docker network name <code>mycelium</code>, not the server IP. Containers on the same network reach each other directly.</span>
           </span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Set trigger</strong>  -  Select at minimum: <em>Request Approved</em> (and optionally <em>Request Pending</em>).</span>
-          <span class="lang-nl"><strong>Trigger instellen</strong>  -  Selecteer minimaal: <em>Request Approved</em> (en eventueel <em>Request Pending</em>).</span>
+          <span class="lang-nl"><strong>Set trigger</strong>  -  Select at minimum: <em>Request Approved</em> (and optionally <em>Request Pending</em>).</span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Test</strong>  -  Click "Test" in Seerr. Then check the Mycelium logs:</span>
-          <span class="lang-nl"><strong>Testen</strong>  -  Klik op "Test" in Seerr. Controleer daarna de Mycelium-logs:</span><br>
+          <span class="lang-nl"><strong>Test</strong>  -  Click "Test" in Seerr. Then check the Mycelium logs:</span><br>
           <div class="cmd">docker compose logs -f mycelium</div>
           <span class="lang-en">You should see an incoming webhook message.</span>
-          <span class="lang-nl">Je zou een inkomend webhook-bericht moeten zien.</span>
+          <span class="lang-nl">You should see an incoming webhook message.</span>
         </div>
       </div>
     </div>
@@ -617,32 +617,32 @@
       <span class="alert-icon">&#9888;</span>
       <span>
         <span class="lang-en"><strong style="color:var(--text)">Webhook not arriving?</strong> Check the network name: <code>docker network inspect Myc3l1um-Net</code>. Both containers must be on the same network. Also verify that <code>SEERR_API_KEY</code> and <code>JELLYFIN_API_KEY</code> are correct in <code>.env</code> and that you restarted Mycelium after filling them in.</span>
-        <span class="lang-nl"><strong style="color:var(--text)">Webhook niet aangekomen?</strong> Controleer of de netwerknaam klopt: <code>docker network inspect Myc3l1um-Net</code>. Beide containers moeten in dat netwerk zitten. Controleer ook of <code>SEERR_API_KEY</code> en <code>JELLYFIN_API_KEY</code> correct in <code>.env</code> staan en of je Mycelium hebt herstart na het invullen.</span>
+        <span class="lang-nl"><strong style="color:var(--text)">Webhook not arriving?</strong> Check the network name: <code>docker network inspect Myc3l1um-Net</code>. Both containers must be on the same network. Also verify that <code>SEERR_API_KEY</code> and <code>JELLYFIN_API_KEY</code> are correct in <code>.env</code> and that you restarted Mycelium after filling them in.</span>
       </span>
     </div>
   </section>
 
   <!-- Optional: Plex -->
   <section id="plex">
-    <h2><span class="section-opt">&#9679;</span><span class="lang-en">Optional: Plex activation</span><span class="lang-nl">Optioneel: Plex activeren</span></h2>
+    <h2><span class="section-opt">&#9679;</span><span class="lang-en">Optional: Plex activation</span><span class="lang-nl">Optional: Plex activation</span></h2>
     <div class="steps">
       <div class="step">
         <div class="step-body">
           <span class="lang-en"><strong>Get Plex Claim</strong>  -  Go to <a href="https://plex.tv/claim" style="color:var(--accent)" target="_blank">plex.tv/claim</a> (valid for 4 minutes).</span>
-          <span class="lang-nl"><strong>Plex Claim ophalen</strong>  -  Ga naar <a href="https://plex.tv/claim" style="color:var(--accent)" target="_blank">plex.tv/claim</a> (geldig 4 minuten).</span>
+          <span class="lang-nl"><strong>Get Plex Claim</strong>  -  Go to <a href="https://plex.tv/claim" style="color:var(--accent)" target="_blank">plex.tv/claim</a> (valid for 4 minutes).</span>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en">Add to <code>.env</code>:</span>
-          <span class="lang-nl">Invullen in <code>.env</code>:</span><br>
+          <span class="lang-nl">Add to <code>.env</code>:</span><br>
           <div class="cmd"><span class="key">PLEX_CLAIM</span>=<span class="val">claim-xxxxxxxxxx</span></div>
         </div>
       </div>
       <div class="step">
         <div class="step-body">
           <span class="lang-en">Start with the Plex profile (also starts <code>torbox-mc-fuse</code> automatically):</span>
-          <span class="lang-nl">Starten met Plex-profiel (start ook <code>torbox-mc-fuse</code> automatisch):</span><br>
+          <span class="lang-nl">Start with the Plex profile (also starts <code>torbox-mc-fuse</code> automatically):</span><br>
           <div class="cmd">docker compose --profile plex up -d</div>
         </div>
       </div>
@@ -651,7 +651,7 @@
       <span class="alert-icon">&#8505;</span>
       <span>
         <span class="lang-en">Plex uses <code>network_mode: host</code>. Interface available at <code>http://&lt;your-ip&gt;:32400/web</code>.</span>
-        <span class="lang-nl">Plex gebruikt <code>network_mode: host</code>. Interface bereikbaar op <code>http://&lt;your-ip&gt;:32400/web</code>.</span>
+        <span class="lang-nl">Plex uses <code>network_mode: host</code>. Interface available at <code>http://&lt;your-ip&gt;:32400/web</code>.</span>
       </span>
     </div>
     <div class="plat-nas">
@@ -659,7 +659,7 @@
         <span class="alert-icon">&#9888;</span>
         <span>
           <span class="lang-en"><strong style="color:var(--text)">FUSE mode does NOT work on most NAS devices</strong> (no <code>/dev/fuse</code> available). Plex with Mycelium requires FUSE for the torbox-mc-fuse mount. Plex is not recommended on NAS with Mycelium. Use Jellyfin instead.</span>
-          <span class="lang-nl"><strong style="color:var(--text)">FUSE-modus werkt NIET op de meeste NAS-apparaten</strong> (geen <code>/dev/fuse</code> beschikbaar). Plex met Mycelium vereist FUSE voor de torbox-mc-fuse mount. Plex wordt niet aanbevolen op NAS met Mycelium. Gebruik in plaats daarvan Jellyfin.</span>
+          <span class="lang-nl"><strong style="color:var(--text)">FUSE mode does NOT work on most NAS devices</strong> (no <code>/dev/fuse</code> available). Plex with Mycelium requires FUSE for the torbox-mc-fuse mount. Plex is not recommended on NAS with Mycelium. Use Jellyfin instead.</span>
         </span>
       </div>
     </div>
@@ -667,12 +667,12 @@
 
   <!-- Optional: WebDAV -->
   <section id="webdav">
-    <h2><span class="section-opt">&#9679;</span><span class="lang-en">Optional: WebDAV</span><span class="lang-nl">Optioneel: WebDAV</span></h2>
+    <h2><span class="section-opt">&#9679;</span><span class="lang-en">Optional: WebDAV</span><span class="lang-nl">Optional: WebDAV</span></h2>
     <div class="lang-en"><p>Already enabled (<code>WEBDAV_ENABLED=true</code> in <code>.env</code>). Accessible at:</p></div>
-    <div class="lang-nl"><p>Staat al aan (<code>WEBDAV_ENABLED=true</code> in <code>.env</code>). Bereikbaar via:</p></div>
+    <div class="lang-nl"><p>Already enabled (<code>WEBDAV_ENABLED=true</code> in <code>.env</code>). Accessible at:</p></div>
     <div class="cmd">http://&lt;your-ip&gt;:8088/dav</div>
     <div class="lang-en"><p>Mount on another machine:</p></div>
-    <div class="lang-nl"><p>Mounten op een andere machine:</p></div>
+    <div class="lang-nl"><p>Mount on another machine:</p></div>
     <div class="cmd">
       sudo mkdir -p /mnt/Myc3l1um-webdav<br>
       sudo mount -t davfs http://&lt;your-ip&gt;:8088/dav /mnt/Myc3l1um-webdav
@@ -684,19 +684,19 @@
 
   <!-- Commands -->
   <section id="commandes">
-    <h2><span class="section-num">8</span><span class="lang-en">Useful commands</span><span class="lang-nl">Handige commando's</span></h2>
+    <h2><span class="section-num">8</span><span class="lang-en">Useful commands</span><span class="lang-nl">Useful commands</span></h2>
 
     <div class="plat-nas">
       <div class="alert info">
         <span class="alert-icon">&#8505;</span>
         <span>
           <span class="lang-en"><strong style="color:var(--text)">SSH access required.</strong> Synology SSH is on port 22 by default but may be custom. Add <code>sudo</code> before docker commands if you are not logged in as root.</span>
-          <span class="lang-nl"><strong style="color:var(--text)">SSH-toegang vereist.</strong> Synology SSH staat standaard op poort 22 maar kan anders zijn. Zet <code>sudo</code> voor docker-commando's als je niet als root bent ingelogd.</span>
+          <span class="lang-nl"><strong style="color:var(--text)">SSH access required.</strong> Synology SSH is on port 22 by default but may be custom. Add <code>sudo</code> before docker commands if you are not logged in as root.</span>
         </span>
       </div>
     </div>
 
-    <h3><span class="lang-en">Daily use</span><span class="lang-nl">Dagelijks gebruik</span></h3>
+    <h3><span class="lang-en">Daily use</span><span class="lang-nl">Daily use</span></h3>
     <div class="plat-proxmox">
       <div class="cmd">
         <span class="comment"># Start everything</span><br>
@@ -742,7 +742,7 @@
       </div>
     </div>
 
-    <h3><span class="lang-en">Troubleshooting</span><span class="lang-nl">Probleemoplossing</span></h3>
+    <h3><span class="lang-en">Troubleshooting</span><span class="lang-nl">Troubleshooting</span></h3>
     <div class="plat-proxmox">
       <div class="cmd">
         <span class="comment"># Restart container</span><br>
@@ -769,82 +769,82 @@
 
   <!-- Port overview -->
   <section id="poorten">
-    <h2><span class="section-num">9</span><span class="lang-en">Port overview</span><span class="lang-nl">Poortoverzicht</span></h2>
+    <h2><span class="section-num">9</span><span class="lang-en">Port overview</span><span class="lang-nl">Port overview</span></h2>
     <div class="service-grid">
       <div class="service-card">
         <div class="svc-name">Jellyfin</div>
         <div class="svc-port">:8096</div>
-        <div class="svc-desc"><span class="lang-en">Media server, main viewing interface</span><span class="lang-nl">Mediaserver, hoofdinterface voor kijken</span></div>
+        <div class="svc-desc"><span class="lang-en">Media server, main viewing interface</span><span class="lang-nl">Media server, main viewing interface</span></div>
       </div>
       <div class="service-card">
         <div class="svc-name">Seerr</div>
         <div class="svc-port">:5055</div>
-        <div class="svc-desc"><span class="lang-en">Optional request portal for users</span><span class="lang-nl">Optioneel aanvraagportaal voor gebruikers</span></div>
+        <div class="svc-desc"><span class="lang-en">Optional request portal for users</span><span class="lang-nl">Optional request portal for users</span></div>
       </div>
       <div class="service-card">
         <div class="svc-name">Mycelium</div>
         <div class="svc-port">:8088</div>
-        <div class="svc-desc"><span class="lang-en">Automation, Discover UI, webhook listener, WebDAV</span><span class="lang-nl">Automatisering, Discover UI, webhook-listener, WebDAV</span></div>
+        <div class="svc-desc"><span class="lang-en">Automation, Discover UI, webhook listener, WebDAV</span><span class="lang-nl">Automation, Discover UI, webhook listener, WebDAV</span></div>
       </div>
       <div class="service-card">
         <div class="svc-name">Plex</div>
         <div class="svc-port">:32400</div>
-        <div class="svc-desc"><span class="lang-en">Optional, activate with --profile plex</span><span class="lang-nl">Optioneel, activeer met --profile plex</span></div>
+        <div class="svc-desc"><span class="lang-en">Optional, activate with --profile plex</span><span class="lang-nl">Optional, activate with --profile plex</span></div>
       </div>
       <div class="service-card">
         <div class="svc-name">Radarr</div>
         <div class="svc-port">:7878</div>
-        <div class="svc-desc"><span class="lang-en">Disabled (uncomment to activate)</span><span class="lang-nl">Uitgeschakeld (uitcommentarieren om te activeren)</span></div>
+        <div class="svc-desc"><span class="lang-en">Disabled (uncomment to activate)</span><span class="lang-nl">Disabled (uncomment to activate)</span></div>
       </div>
       <div class="service-card">
         <div class="svc-name">Sonarr</div>
         <div class="svc-port">:8989</div>
-        <div class="svc-desc"><span class="lang-en">Disabled</span><span class="lang-nl">Uitgeschakeld</span></div>
+        <div class="svc-desc"><span class="lang-en">Disabled</span><span class="lang-nl">Disabled</span></div>
       </div>
       <div class="service-card">
         <div class="svc-name">Prowlarr</div>
         <div class="svc-port">:9696</div>
-        <div class="svc-desc"><span class="lang-en">Disabled, indexer manager</span><span class="lang-nl">Uitgeschakeld, indexer-manager</span></div>
+        <div class="svc-desc"><span class="lang-en">Disabled, indexer manager</span><span class="lang-nl">Disabled, indexer manager</span></div>
       </div>
       <div class="service-card">
         <div class="svc-name">Byparr</div>
         <div class="svc-port">:8191</div>
-        <div class="svc-desc"><span class="lang-en">Disabled, Cloudflare bypass</span><span class="lang-nl">Uitgeschakeld, Cloudflare-bypass</span></div>
+        <div class="svc-desc"><span class="lang-en">Disabled, Cloudflare bypass</span><span class="lang-nl">Disabled, Cloudflare bypass</span></div>
       </div>
     </div>
   </section>
 
   <!-- Streams 404 -->
   <section id="streams404">
-    <h2><span class="section-num">10</span><span class="lang-en">Understanding streams and 404 errors</span><span class="lang-nl">Streams en 404-fouten begrijpen</span></h2>
+    <h2><span class="section-num">10</span><span class="lang-en">Understanding streams and 404 errors</span><span class="lang-nl">Understanding streams and 404 errors</span></h2>
     <div class="lang-en">
       <p>Mycelium uses <strong style="color:var(--text)">catbox mode</strong>: the <code>.strm</code> files contain a proxy URL (<code>/stream/&lt;token&gt;</code>). Torrents are NOT added to TorBox during request processing. Instead, the torrent is added <strong style="color:var(--text)">on-demand when you press play</strong> in Jellyfin. Mycelium then finds a cached release, adds it to TorBox, waits for it to be ready, and redirects to the CDN stream.</p>
     </div>
     <div class="lang-nl">
-      <p>Mycelium gebruikt <strong style="color:var(--text)">catbox mode</strong>: de <code>.strm</code> bestanden bevatten een proxy-URL (<code>/stream/&lt;token&gt;</code>). Torrents worden NIET aan TorBox toegevoegd tijdens het verwerken van aanvragen. In plaats daarvan wordt de torrent <strong style="color:var(--text)">on-demand toegevoegd wanneer je op play drukt</strong> in Jellyfin. Mycelium zoekt dan een gecachede release, voegt deze toe aan TorBox, wacht tot deze klaar is, en stuurt door naar de CDN-stream.</p>
+      <p>Mycelium uses <strong style="color:var(--text)">catbox mode</strong>: the <code>.strm</code> files contain a proxy URL (<code>/stream/&lt;token&gt;</code>). Torrents are NOT added to TorBox during request processing. Instead, the torrent is added <strong style="color:var(--text)">on-demand when you press play</strong> in Jellyfin. Mycelium then finds a cached release, adds it to TorBox, waits for it to be ready, and redirects to the CDN stream.</p>
     </div>
     <div class="alert info">
       <span class="alert-icon">&#8505;</span>
       <span>
         <span class="lang-en">A <strong style="color:var(--text)">404 on a stream</strong> means the token is unknown or the item has not been registered in Mycelium yet. This can happen if the .strm file was created by torbox-mc-strm instead of Mycelium, or if the database was reset. Items registered in Mycelium will work on first play, as the torrent is fetched on demand.</span>
-        <span class="lang-nl">Een <strong style="color:var(--text)">404 op een stream</strong> betekent dat het token onbekend is of dat het item nog niet in Mycelium is geregistreerd. Dit kan gebeuren als het .strm bestand is aangemaakt door torbox-mc-strm in plaats van Mycelium, of als de database is gereset. Items die in Mycelium zijn geregistreerd werken bij de eerste keer afspelen, omdat de torrent on-demand wordt opgehaald.</span>
+        <span class="lang-nl">A <strong style="color:var(--text)">404 on a stream</strong> means the token is unknown or the item has not been registered in Mycelium yet. This can happen if the .strm file was created by torbox-mc-strm instead of Mycelium, or if the database was reset. Items registered in Mycelium will work on first play, as the torrent is fetched on demand.</span>
       </span>
     </div>
     <div class="lang-en">
       <p>After inactivity (<code>CATBOX_IDLE_MINUTES=60</code>), the torrent is removed from TorBox to save space. The next time you play, it is re-added automatically. This cycle is normal and by design.</p>
     </div>
     <div class="lang-nl">
-      <p>Na inactiviteit (<code>CATBOX_IDLE_MINUTES=60</code>) wordt de torrent verwijderd uit TorBox om ruimte te besparen. De volgende keer dat je afspeelt, wordt deze automatisch opnieuw toegevoegd. Dit is normaal en zo ontworpen.</p>
+      <p>After inactivity (<code>CATBOX_IDLE_MINUTES=60</code>), the torrent is removed from TorBox to save space. The next time you play, it is re-added automatically. This cycle is normal and by design.</p>
     </div>
   </section>
 
   <footer>
     <span class="lang-en">Myc3l1um v2  -  installation guide &nbsp;·&nbsp; <span class="plat-proxmox">Debian 13 · Proxmox LXC</span><span class="plat-nas">Synology / QNAP · NAS</span> · Docker Compose v2</span>
-    <span class="lang-nl">Myc3l1um v2  -  handleiding &nbsp;·&nbsp; <span class="plat-proxmox">Debian 13 · Proxmox LXC</span><span class="plat-nas">Synology / QNAP · NAS</span> · Docker Compose v2</span>
+    <span class="lang-nl">Myc3l1um v2  -  installation guide &nbsp;·&nbsp; <span class="plat-proxmox">Debian 13 · Proxmox LXC</span><span class="plat-nas">Synology / QNAP · NAS</span> · Docker Compose v2</span>
     <br>
     <span style="margin-top: 6px; display: inline-block;">
       <span class="lang-en">Guide originally created by </span>
-      <span class="lang-nl">Handleiding oorspronkelijk gemaakt door </span>
+      <span class="lang-nl">Guide originally created by </span>
       <a href="https://github.com/Ventrex" target="_blank" style="color:var(--accent); text-decoration:none;">Ventrex</a>
     </span>
   </footer>

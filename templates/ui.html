@@ -739,7 +739,7 @@
   <div id="tab-releases" class="tab-pane">
     <div class="section-header">
       <span class="section-title">Releases</span>
-      <span class="dim" style="font-size:12px">Huidige versie: <strong>{{ app_version }}</strong></span>
+      <span class="dim" style="font-size:12px">Current version: <strong>{{ app_version }}</strong></span>
     </div>
     <div class="release-list">
       {% for rel in releases %}
@@ -747,7 +747,7 @@
         <summary class="release-summary">
           <span class="release-version">v{{ rel.version }}</span>
           <span class="release-date dim">{{ rel.date }}</span>
-          {% if loop.first %}<span class="badge-current">huidig</span>{% endif %}
+          {% if loop.first %}<span class="badge-current">current</span>{% endif %}
         </summary>
         <ul class="release-notes">
           {% for note in rel.notes %}

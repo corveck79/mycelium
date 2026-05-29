@@ -30,6 +30,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py ./
+COPY releases.json ./
 COPY plugins/ ./plugins/
 COPY templates/ ./templates/
 COPY docs/ ./docs/
