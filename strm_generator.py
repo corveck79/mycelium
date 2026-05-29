@@ -843,15 +843,16 @@ def make_stub_mkv(title: str, quality: str | None = None,
             )
             next_num += 1
     else:
-        # PCM 16ch placeholder: uncompressed 16-channel PCM cannot be passed
-        # through HDMI on any device (exceeds bandwidth), so Plex always invokes
-        # the external transcoder regardless of client capabilities (phones,
-        # Shield TV with AV receiver, desktop). Plex transcodes PCM natively
-        # without EAE, avoiding EAE timeouts. TrueHD 8ch would be Direct Played
-        # by Shield TV with HDMI eARC passthrough, bypassing the wrapper.
+        # PCM 2ch placeholder: PCM stereo is not listed in the Shield TV XML
+        # profile's DirectPlayProfile audio codecs, so Plex always invokes the
+        # external transcoder (never direct-plays the stub). Using 2ch instead
+        # of the previous 16ch avoids the Shield TV client augmentation limit of
+        # audio.channels <= 8, which caused "Direct Streaming is disabled" and
+        # forced unnecessary video re-encoding. With 2ch the channels check
+        # passes and Plex can copy the video stream while transcoding audio.
         tracks_data += _ebml_audio_track_entry(
             track_num=2, codec_mkv="A_PCM/INT/LIT", lang="und",
-            channels=16, sample_rate=48000.0, is_default=True,
+            channels=2, sample_rate=48000.0, is_default=True,
         )
         next_num = 3
 
