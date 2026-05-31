@@ -102,6 +102,10 @@ TORBOX_POLL_INTERVAL_SEC = _env_int("TORBOX_POLL_INTERVAL_SEC", 2)
 TORBOX_POLL_TIMEOUT_SEC = _env_int("TORBOX_POLL_TIMEOUT_SEC", 600)
 
 WEBHOOK_SECRET = _env("WEBHOOK_SECRET", "")
+# Separate secret guarding the TorBox completion-notification endpoint. Empty
+# means unauthenticated (legacy behaviour); set it and configure the same
+# value as the TorBox webhook signing header to reject spoofed callbacks.
+TORBOX_WEBHOOK_SECRET = _env("TORBOX_WEBHOOK_SECRET", "")
 METRICS_TOKEN  = _env("METRICS_TOKEN", "")   # optional Bearer token for /metrics scraping
 
 DB_PATH = _env("DB_PATH", "/data/requests.db")
