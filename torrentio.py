@@ -185,11 +185,25 @@ def fetch_streams(
     episode: int | None = None,
     timeout: int = 30,
 ) -> list[TorrentioStream]:
+    """Return parsed Torrentio streams or [] on any failure.
+
+    Failure modes that map to []: network errors, 429 rate limits, 5xx
+    upstream errors, malformed JSON. We never raise here so a Torrentio
+    outage / throttle never blocks the rest of the scraper pool (Zilean,
+    MediaFusion, Prowlarr) from running.
+    """
     url = _build_url(media_type, imdb_id, season, episode)
     log.info("Querying Torrentio: %s", url)
-    resp = requests.get(url, timeout=timeout, headers=_HTTP_HEADERS)
-    resp.raise_for_status()
-    payload = resp.json() or {}
+    try:
+        resp = requests.get(url, timeout=timeout, headers=_HTTP_HEADERS)
+        resp.raise_for_status()
+        payload = resp.json() or {}
+    except requests.RequestException as exc:
+        log.warning("Torrentio unavailable for %s: %s", imdb_id, exc)
+        return []
+    except ValueError as exc:
+        log.warning("Torrentio bad JSON for %s: %s", imdb_id, exc)
+        return []
     raw_streams = payload.get("streams", []) or []
     parsed = [s for s in (_to_stream(r, season) for r in raw_streams) if s is not None]
     log.info("Torrentio returned %d streams (%d parsed)", len(raw_streams), len(parsed))
