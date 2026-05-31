@@ -1,5 +1,6 @@
 import logging
 import shutil
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -9,6 +10,26 @@ log = logging.getLogger(__name__)
 
 _BACKUP_DIR = Path(DB_PATH).parent / "backups"
 _KEEP = 14
+
+
+def _snapshot_db(src_path: Path, dst_path: Path) -> None:
+    """Take a consistent snapshot of a WAL-mode SQLite database.
+
+    shutil.copy2 only copies the .db file, not the -wal / -shm siblings, so
+    between checkpoints it produces a torn or stale image that may fail to
+    open after restore. sqlite3.Connection.backup() uses SQLite's online
+    backup API which handles WAL correctly under concurrent writes and
+    writes a fully self-contained file (no -wal/-shm needed alongside)."""
+    src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
+    try:
+        dst = sqlite3.connect(str(dst_path))
+        try:
+            with dst:
+                src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
 
 
 def run() -> Path | None:
@@ -26,10 +47,16 @@ def run() -> Path | None:
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     dst = _BACKUP_DIR / f"requests_{stamp}.db"
     try:
-        shutil.copy2(src, dst)
+        _snapshot_db(src, dst)
         log.info("Backup: wrote %s (%.1f KB)", dst.name, dst.stat().st_size / 1024)
     except Exception as exc:
-        log.warning("Backup: copy failed: %s", exc)
+        log.warning("Backup: snapshot failed: %s", exc)
+        # Remove partial file if SQLite created one before failing.
+        try:
+            if dst.exists():
+                dst.unlink()
+        except Exception:
+            pass
         return None
 
     # Prune oldest, keep _KEEP most recent
@@ -76,7 +103,10 @@ def restore(name: str) -> bool:
     safety = dst.with_suffix(f".pre-restore.{stamp}.db")
     try:
         if dst.exists():
-            shutil.copy2(dst, safety)
+            # Use the online-backup API for the safety copy too so the
+            # rollback target is a consistent snapshot even if a writer is
+            # still mid-transaction when restore runs.
+            _snapshot_db(dst, safety)
             log.info("Restore: stashed current DB at %s", safety.name)
         shutil.copy2(src, dst)
         log.warning("Restore: replaced live DB with %s  -  restart Mycelium", name)
