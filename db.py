@@ -311,7 +311,16 @@ def init() -> None:
 
 
 def _dedup_requests(conn) -> None:
-    """Remove duplicate imdb_id rows before the UNIQUE index is created."""
+    """Remove duplicate imdb_id rows before the UNIQUE index is created.
+
+    Skipped on a fresh DB where the table doesn't exist yet; the dedup pass
+    is only meaningful when migrating from a pre-UNIQUE schema.
+    """
+    has_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='requests'"
+    ).fetchone()
+    if not has_table:
+        return
     dupes = conn.execute(
         "SELECT imdb_id, COUNT(*) AS cnt FROM requests "
         "GROUP BY imdb_id HAVING cnt > 1"
