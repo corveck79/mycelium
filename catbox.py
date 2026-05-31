@@ -19,6 +19,8 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
+import cachetools
+
 import db
 import settings as _settings
 import torbox
@@ -27,9 +29,15 @@ from config import CATBOX_HOST, CATBOX_IDLE_MINUTES as _CATBOX_IDLE_MINUTES_DEFA
 log = logging.getLogger(__name__)
 
 
+# All module-level caches below are bounded with cachetools so a stuck or
+# adversarial caller cannot grow them indefinitely. TTLs match the existing
+# expiry semantics; maxsize caps are sized for ~10k concurrent tokens, well
+# above the household library sizes Mycelium targets.
 _URL_CACHE_TTL_SEC = 82800  # 23 hours  -  within TorBox CDN URL 24h validity
 ON_PLAY_READY_TIMEOUT_SEC = 45  # max wait on-play before giving up (cached = seconds)
-_url_cache: dict[str, tuple[str, float]] = {}
+_url_cache: "cachetools.TTLCache[str, tuple[str, float]]" = cachetools.TTLCache(
+    maxsize=10000, ttl=_URL_CACHE_TTL_SEC
+)
 _url_cache_lock = threading.Lock()
 
 # Failure cooldown: after a failed materialize (429, timeout, no file found),
@@ -37,7 +45,12 @@ _url_cache_lock = threading.Lock()
 # hammer TorBox with repeated createtorrent calls.
 _FAIL_COOLDOWN_SEC = 30        # standard failure (readd blocked, no file)
 _FAIL_COOLDOWN_429_SEC = 120   # TorBox 429  -  back off longer
-_fail_cache: dict[str, float] = {}  # token → expiry monotonic timestamp
+# TTL on the cache equals the longest cooldown; per-entry expiries still
+# enforced explicitly via the monotonic-timestamp value (older entries with
+# shorter cooldowns get reported as expired sooner).
+_fail_cache: "cachetools.TTLCache[str, float]" = cachetools.TTLCache(
+    maxsize=10000, ttl=_FAIL_COOLDOWN_429_SEC
+)
 _fail_cache_lock = threading.Lock()
 
 # ── Reason codes (structured, for playability_state + admin UI) ───────────────
@@ -66,11 +79,17 @@ def _fail_put(token: str, ttl: int = _FAIL_COOLDOWN_SEC) -> None:
     with _fail_cache_lock:
         _fail_cache[token] = time.monotonic() + ttl
 
-_token_locks: dict[str, threading.Lock] = {}
+# LRU because a Lock has no useful TTL; cap protects against unbounded growth
+# when scan probes or malformed callers spray distinct tokens. Evicted locks
+# are discarded (any waiter dies with the lock owner, not a problem in practice
+# since the owner thread either finishes or holds a process-lifetime Python ref).
+_token_locks: "cachetools.LRUCache[str, threading.Lock]" = cachetools.LRUCache(maxsize=10000)
 
 # Per-content search cache so Zilean/Torrentio are called at most once per hour
 # for the same (imdb_id, season, episode) combo, regardless of how many tokens share it.
-_search_cache: dict[tuple, tuple[float, object]] = {}  # key → (expiry, result)
+# The (expiry, result) tuple keeps the historic explicit TTL behaviour; the
+# cachetools wrapper exists only to bound size.
+_search_cache: "cachetools.LRUCache[tuple, tuple[float, object]]" = cachetools.LRUCache(maxsize=10000)
 _search_cache_lock = threading.Lock()
 _SEARCH_HIT_TTL    = 300    # 5 min: re-check soon if a cached release was found
 _SEARCH_MISS_TTL   = 21600  # 6 h:  nothing cached  -  back off (matches _fail_put below)
@@ -89,7 +108,9 @@ _SCAN_WINDOW_SEC = 25
 # titles within the same 25s window isn't misread as a library scan and
 # denied re-add. A real scan opens far more than this many distinct items.
 _SCAN_DISTINCT_THRESHOLD = 8
-_recent_tokens: dict[str, float] = {}
+_recent_tokens: "cachetools.TTLCache[str, float]" = cachetools.TTLCache(
+    maxsize=1000, ttl=_SCAN_WINDOW_SEC
+)
 _recent_lock = threading.Lock()
 
 

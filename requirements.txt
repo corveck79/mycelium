@@ -7,3 +7,4 @@ Authlib==1.3.2
 Flask-WTF==1.2.1
 Flask-Limiter==3.8.0
 psycopg2-binary==2.9.9
+cachetools>=5.3,<6

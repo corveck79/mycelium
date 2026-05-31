@@ -1433,7 +1433,10 @@ def stream_redirect(token: str):
     return redirect(f"/spore-stream/{token}", code=302)
 
 
-_spore_cold_sizes: dict = {}  # token -> file_size, avoids repeated HEAD on CDN
+import cachetools as _cachetools
+# Bounded to keep memory finite when a Plex transcoder churns through many
+# distinct tokens; entries are cheap (int file_size) so 10k is generous.
+_spore_cold_sizes: "_cachetools.TTLCache[str, int]" = _cachetools.TTLCache(maxsize=10000, ttl=86400)
 _spore_probing: set  = set()  # tokens currently running a background probe
 
 # Short-lived "confirmed alive" cache for the MKV-sentinel CDN liveness check
@@ -3072,8 +3075,12 @@ def ui_api_mdblist_sync():
     return jsonify(ok=True, added=added)
 
 
-# Cache Jellyfin item IDs: imdb_id -> jellyfin_item_id (or None if not found)
-_jellyfin_item_cache: dict[str, str | None] = {}
+# Cache Jellyfin item IDs: imdb_id -> jellyfin_item_id (or None if not found).
+# TTL keeps the cache from going stale across library churn; cap keeps memory
+# bounded even if the dashboard is left open against a large library.
+_jellyfin_item_cache: "_cachetools.TTLCache[str, str | None]" = _cachetools.TTLCache(
+    maxsize=20000, ttl=3600,
+)
 
 
 @app.get("/ui/api/jellyfin/item")

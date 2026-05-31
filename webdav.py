@@ -25,10 +25,12 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 from xml.sax.saxutils import escape as xml_escape
 
+import cachetools
 import requests
 from flask import Response, request
 
 import settings
+from config import WEBDAV_URL_CACHE_TTL_SECONDS
 
 log = logging.getLogger(__name__)
 
@@ -43,10 +45,17 @@ _VIDEO_MIME = {
     ".m2ts": "video/mp2t",
 }
 
-# (resolved_url, expires_at) keyed by absolute on-disk .strm path
-_url_cache: dict[Path, tuple[str, datetime]] = {}
+# (resolved_url, expires_at) keyed by absolute on-disk .strm path. Bounded so
+# a Plex / Emby scanner walking a large library cannot grow it indefinitely.
+# Per-entry expires_at still drives the WebDAV freshness check; the cachetools
+# TTL just guarantees inactive entries get evicted.
+_url_cache: "cachetools.TTLCache[Path, tuple[str, datetime]]" = cachetools.TTLCache(
+    maxsize=20000, ttl=max(WEBDAV_URL_CACHE_TTL_SECONDS, 3600) + 600,
+)
 # upstream content-length, keyed by .strm path
-_size_cache: dict[Path, tuple[int, datetime]] = {}
+_size_cache: "cachetools.TTLCache[Path, tuple[int, datetime]]" = cachetools.TTLCache(
+    maxsize=20000, ttl=86400,
+)
 _cache_lock = threading.Lock()
 
 _CATBOX_TOKEN_RE = re.compile(r"/stream/([a-fA-F0-9]{8,})$")
