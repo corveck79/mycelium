@@ -69,6 +69,20 @@ configure_logging()
 log_buffer.install()
 log = logging.getLogger("mycelium")
 
+# ── Startup gate: refuse to run unauthenticated unless explicitly opted in ───
+# Without this gate, a deploy with no auth config + an exposed port hands full
+# admin to any caller. INSECURE_ALLOW_ANON=true preserves the legacy single
+# user experience for local development.
+if not (cfg.AUTH_ENABLED or cfg.OIDC_ENABLED or cfg.TRUSTED_PROXY_AUTH or cfg.INSECURE_ALLOW_ANON):
+    import sys as _sys
+    log.error(
+        "Refusing to start: no authentication configured. Set one of "
+        "AUTH_ENABLED, OIDC_ENABLED, TRUSTED_PROXY_AUTH, or "
+        "INSECURE_ALLOW_ANON=true (acknowledges that the dashboard is open "
+        "to any caller that reaches the listener)."
+    )
+    _sys.exit(1)
+
 APP_VERSION = "0.6.1"
 
 with open(_path.join(_path.dirname(__file__), "releases.json"), encoding="utf-8") as _f:

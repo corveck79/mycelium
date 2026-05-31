@@ -129,14 +129,17 @@ def _proxy_user() -> str | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def is_enabled() -> bool:
-    if settings.get("AUTH_ENABLED", False):
-        return True
-    # OIDC implicitly enables auth-gating
-    try:
-        import oidc
-        return oidc.is_enabled()
-    except Exception:
+    """Whether auth-gating is active.
+
+    Returns False ONLY when INSECURE_ALLOW_ANON is explicitly true (legacy
+    single-user mode, every caller treated as admin). Otherwise returns True;
+    the startup gate in app.py guarantees at least one auth method
+    (AUTH_ENABLED, OIDC_ENABLED, or TRUSTED_PROXY_AUTH) is configured before
+    the process is allowed to start.
+    """
+    if settings.get("INSECURE_ALLOW_ANON", False):
         return False
+    return True
 
 
 def current_user() -> str | None:
@@ -310,6 +313,16 @@ def install_before_request(app) -> None:
             return None
         if path.startswith("/dav"):
             return _enforce_basic_auth()
+        # First-run setup wizard: when no users exist yet, allow /setup paths so
+        # an admin can be created. /setup/save and /setup/create-admin enforce
+        # their own checks once the first user exists.
+        if path.startswith("/setup"):
+            try:
+                import db as _db
+                if _db.user_count() == 0:
+                    return None
+            except Exception:
+                pass
         if session.get("user"):
             return None
         proxy_user = _proxy_user()

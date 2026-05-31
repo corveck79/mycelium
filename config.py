@@ -255,6 +255,13 @@ AUTH_PASSWORD = _env("AUTH_PASSWORD", "")  # plain (will be upgraded), or empty
 AUTH_SESSION_SECRET = _env("AUTH_SESSION_SECRET", "mycelium-please-change-me")
 COOKIE_SECURE = _env("COOKIE_SECURE", "false").lower() in ("1", "true", "yes")
 
+# Explicit opt-in for unauthenticated mode. When true, the dashboard and JSON
+# APIs accept any caller as admin (legacy single-user behaviour). When false
+# (default), startup refuses unless AUTH_ENABLED, OIDC_ENABLED, or
+# TRUSTED_PROXY_AUTH is configured. Setting this true on an internet-exposed
+# port grants full admin to anyone who reaches the listener.
+INSECURE_ALLOW_ANON = _env("INSECURE_ALLOW_ANON", "false").lower() in ("1", "true", "yes")
+
 # Trust an upstream proxy that does auth (Authelia / Authentik / Traefik /
 # Cloudflare Access). Only honoured when the request originates from a
 # trusted network so headers can't be spoofed from the public internet.
