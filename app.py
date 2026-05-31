@@ -690,17 +690,78 @@ def setup_skip():
     return jsonify(ok=True)
 
 
+# Keys the unauthenticated /setup/save endpoint is allowed to write. Auth-
+# related keys (AUTH_*, OIDC_*, TRUSTED_PROXY_*, *_SECRET) are excluded:
+# without this whitelist, an attacker reaching /setup before the first admin
+# is created can set AUTH_PASSWORD_HASH to a value they control and lock the
+# instance to themselves. Keep in sync with the IDs in templates/setup.html.
+_SETUP_ALLOWED_KEYS = frozenset({
+    "LITE_MODE",
+    "TORBOX_API_KEY", "TORBOX_BASE_URL",
+    "JELLYFIN_URL", "JELLYFIN_API_KEY",
+    "SEERR_URL", "SEERR_API_KEY",
+    "TMDB_API_KEY",
+    "QUALITY_PREFERENCE", "ALLOW_4K", "EXCLUDE_REMUX", "EXCLUDE_BLURAY",
+    "EXCLUDE_CAM", "STRICT_NO_CAM", "PREFER_WEBDL", "PREFER_HEVC",
+    "MIN_SEEDERS", "MAX_SIZE_GB",
+    "AUDIO_LANGUAGE_PREFERENCE", "EXCLUDE_LANGUAGES",
+    "CATBOX_MODE", "CATBOX_HOST", "CATBOX_IDLE_MINUTES",
+    "CATBOX_GC_INTERVAL_MINUTES", "CATBOX_LAZY_ADD", "CATBOX_PRELOAD",
+    "DISCORD_WEBHOOK_URL",
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+    "NOTIFY_ON_SUCCESS", "NOTIFY_ON_FAILURE",
+    "TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET",
+    "OPENSUBTITLES_API_KEY", "OPENSUBTITLES_LANGUAGES",
+    "ZILEAN_URL", "ZILEAN_ENABLED",
+    "RADARR_URL", "RADARR_API_KEY",
+    "SONARR_URL", "SONARR_API_KEY",
+})
+
+
+@app.post("/setup/create-admin")
+@_csrf.exempt
+@limiter.limit("5 per minute; 20 per hour")
+def setup_create_admin():
+    """Create the first admin account. Only callable when the users table is
+    empty; subsequent admin creation goes through the regular /ui/api/users
+    routes guarded by require_role('admin')."""
+    if db.user_count() > 0:
+        return jsonify(error="admin already exists"), 409
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password") or ""
+    if not username or len(username) > 64:
+        return jsonify(error="username required (max 64 chars)"), 400
+    if len(password) < 8:
+        return jsonify(error="password must be at least 8 characters"), 400
+    try:
+        uid = auth.create_user_account(username, password, role="admin",
+                                       auto_approve=True)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    # Log the new admin in so the wizard can proceed without a second round-trip.
+    from flask import session as _session
+    _session["user"] = username
+    _session["user_id"] = uid
+    _session["role"] = "admin"
+    log.info("Setup: created first admin account %r (id=%d)", username, uid)
+    return jsonify(ok=True, user_id=uid)
+
+
 @app.post("/setup/save")
 @limiter.limit("10 per minute")
 def setup_save():
-    if db.user_count() > 0 and not auth.is_admin():
+    # Anonymous access is only allowed during the first-run window AND only
+    # for whitelisted keys. The first admin must be created via
+    # /setup/create-admin before any settings write that touches auth.
+    first_run = (db.user_count() == 0)
+    if not first_run and not auth.is_admin():
         return jsonify(error="unauthorized"), 401
     import settings as _settings
-    _allowed_keys = {k for g in _settings.SETTING_GROUPS for k in g["keys"]} | {"SETUP_COMPLETE"}
     saved = 0
+    rejected = []
     for key, value in request.form.items():
-        if key not in _allowed_keys:
-            log.warning("setup_save: rejected unknown key %r", key)
+        if key not in _SETUP_ALLOWED_KEYS:
+            rejected.append(key)
             continue
         try:
             # Treat empty strings as "clear override"
@@ -713,6 +774,11 @@ def setup_save():
             saved += 1
         except ValueError as exc:
             log.warning("setup_save: rejected invalid value for %s: %s", key, exc)
+    if rejected:
+        log.warning("Setup wizard rejected non-whitelisted keys: %s",
+                    ", ".join(sorted(rejected)))
+        return jsonify(error="non-whitelisted keys rejected",
+                       rejected=sorted(rejected)), 400
     _settings.set("SETUP_COMPLETE", True)
     log.info("Setup wizard saved %d settings", saved)
     return jsonify(ok=True, saved=saved)
