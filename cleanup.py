@@ -116,22 +116,35 @@ def _resolve_imdb(title: str, year: int | None, media_type: str) -> str | None:
 
 
 def _fetch_candidates(imdb_id: str, title: str, media_type: str) -> list:
+    import mediafusion as _mf
     if media_type == "movie":
+        all_streams: list = []
+        seen: set = set()
         if _settings.get("ZILEAN_ENABLED", False):
-            streams = zilean.fetch_streams(imdb_id)
-            candidates = torrentio.rank_streams(streams)
-            if candidates:
-                return candidates
-        streams = torrentio.fetch_streams("movie", imdb_id)
-        return torrentio.rank_streams(streams)
+            for s in zilean.fetch_streams(imdb_id):
+                if s.info_hash not in seen:
+                    seen.add(s.info_hash); all_streams.append(s)
+        for s in torrentio.fetch_streams("movie", imdb_id):
+            if s.info_hash not in seen:
+                seen.add(s.info_hash); all_streams.append(s)
+        for s in _mf.fetch_streams("movie", imdb_id):
+            if s.info_hash not in seen:
+                seen.add(s.info_hash); all_streams.append(s)
+        return torrentio.rank_streams(all_streams)
     else:
+        all_streams = []
+        seen = set()
         if _settings.get("ZILEAN_ENABLED", False):
-            streams = zilean.fetch_streams(imdb_id, season=1, episode=1)
-            candidates = torrentio.rank_streams(streams, prefer_season_pack=True)
-            if candidates:
-                return candidates
-        streams = torrentio.fetch_streams("series", imdb_id, season=1, episode=1)
-        return torrentio.rank_streams(streams, prefer_season_pack=True)
+            for s in zilean.fetch_streams(imdb_id, season=1, episode=1):
+                if s.info_hash not in seen:
+                    seen.add(s.info_hash); all_streams.append(s)
+        for s in torrentio.fetch_streams("series", imdb_id, season=1, episode=1):
+            if s.info_hash not in seen:
+                seen.add(s.info_hash); all_streams.append(s)
+        for s in _mf.fetch_streams("series", imdb_id, season=1, episode=1):
+            if s.info_hash not in seen:
+                seen.add(s.info_hash); all_streams.append(s)
+        return torrentio.rank_streams(all_streams, prefer_season_pack=True)
 
 
 def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:

@@ -230,6 +230,11 @@ def _retry_episode(ep: dict) -> bool:
         if s.info_hash not in seen_hashes:
             seen_hashes.add(s.info_hash)
             streams.append(s)
+    import mediafusion as _mf
+    for s in _mf.fetch_streams("series", imdb_id, season=season, episode=episode):
+        if s.info_hash not in seen_hashes:
+            seen_hashes.add(s.info_hash)
+            streams.append(s)
 
     candidates = torrentio.rank_streams(streams)
     if not candidates:
@@ -310,10 +315,18 @@ def search_episode_now(imdb_id: str, title: str, season: int, episode: int) -> b
 def _search_and_add_season(imdb_id: str, title: str, seasons: list[int]) -> None:
     for season in seasons:
         streams: list = []
+        seen_pack: set = set()
         if _settings.get("ZILEAN_ENABLED", False):
-            streams = zilean.fetch_streams(imdb_id, season=season, episode=1)
-        if not streams:
-            streams = torrentio.fetch_streams("series", imdb_id, season=season, episode=1)
+            for s in zilean.fetch_streams(imdb_id, season=season, episode=1):
+                if s.info_hash not in seen_pack:
+                    seen_pack.add(s.info_hash); streams.append(s)
+        for s in torrentio.fetch_streams("series", imdb_id, season=season, episode=1):
+            if s.info_hash not in seen_pack:
+                seen_pack.add(s.info_hash); streams.append(s)
+        import mediafusion as _mf
+        for s in _mf.fetch_streams("series", imdb_id, season=season, episode=1):
+            if s.info_hash not in seen_pack:
+                seen_pack.add(s.info_hash); streams.append(s)
         candidates = torrentio.rank_streams(streams, prefer_season_pack=True)
         if not candidates:
             continue

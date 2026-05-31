@@ -42,6 +42,13 @@ ZILEAN_PG_PASSWORD = _env("ZILEAN_PG_PASSWORD", "")
 TORRENTIO_BASE_URL = _env("TORRENTIO_BASE_URL", "https://torrentio.strem.fun")
 TORRENTIO_OPTS = _env("TORRENTIO_OPTS", "")
 
+# MediaFusion (https://github.com/mhdzumair/MediaFusion). Stremio addon
+# aggregator that fans out to Prowlarr indexers + its own scrapers; runs
+# alongside Torrentio + Zilean to widen the candidate pool, especially for
+# anime (Nyaa), foreign releases, and titles missing from public DMM caches.
+MEDIAFUSION_BASE_URL = _env("MEDIAFUSION_BASE_URL", "")
+MEDIAFUSION_ENABLED  = _env("MEDIAFUSION_ENABLED", "false").lower() in ("1", "true", "yes")
+
 JELLYFIN_URL = _env("JELLYFIN_URL", "")
 JELLYFIN_API_KEY = _env("JELLYFIN_API_KEY", "")
 

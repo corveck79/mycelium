@@ -7,6 +7,7 @@ import db
 import health_cache
 import jellyfin
 import locks
+import mediafusion
 import monitor
 import notify
 import strm_generator
@@ -72,8 +73,12 @@ def _fetch_movie_candidates(req: MediaRequest) -> list:
             if s.info_hash not in seen_hashes:
                 seen_hashes.add(s.info_hash)
                 streams.append(s)
+    for s in mediafusion.fetch_streams("movie", req.imdb_id):
+        if s.info_hash not in seen_hashes:
+            seen_hashes.add(s.info_hash)
+            streams.append(s)
     if streams:
-        log.info("Combined %d unique streams for movie %s (zilean+torrentio)", len(streams), req.title)
+        log.info("Combined %d unique streams for movie %s (zilean+torrentio+mediafusion)", len(streams), req.title)
     return _rank(streams, override=override)
 
 
@@ -92,8 +97,12 @@ def _fetch_season_candidates(req: MediaRequest, season: int, episode: int, prefe
             if s.info_hash not in seen_hashes:
                 seen_hashes.add(s.info_hash)
                 streams.append(s)
+    for s in mediafusion.fetch_streams("series", req.imdb_id, season=season, episode=episode):
+        if s.info_hash not in seen_hashes:
+            seen_hashes.add(s.info_hash)
+            streams.append(s)
     if streams:
-        log.info("Combined %d unique streams for %s S%02dE%02d (zilean+torrentio)", len(streams), req.title, season, episode)
+        log.info("Combined %d unique streams for %s S%02dE%02d (zilean+torrentio+mediafusion)", len(streams), req.title, season, episode)
     return _rank(streams, prefer_season_pack=prefer_season_pack, override=override)
 
 
