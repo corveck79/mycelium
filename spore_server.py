@@ -13,20 +13,62 @@ proxies the requested byte range directly from the TorBox CDN.
 """
 from __future__ import annotations
 
+import collections
 import logging
 import os
+import re
 import socket
 import threading
+import time
 
 import requests as req_lib
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_HOST = "127.0.0.1"  # no auth on this protocol - never expose beyond loopback by default
+# Bind localhost by default so the byte-range API is reachable only by the
+# Plex interceptor running in the same container/host - no auth on this
+# protocol, never expose beyond loopback unless you know what you're doing.
+# Override with SPORE_BIND_ADDR (or MYCELIUM_SPORE_HOST) when the Plex
+# transcoder runs on a different host that needs reachability.
+_DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8089
 _MAX_COUNT    = 10 * 1024 * 1024   # cap per request at 10 MB
 _CONNECT_TIMEOUT = 10
 _READ_TIMEOUT    = 60
+
+# Tokens are generated as uuid.uuid4().hex[:16] in catbox.register; reject
+# anything else before the request hits the DB / lock-allocation paths.
+_TOKEN_RE = re.compile(r"^[a-f0-9]{16}$")
+
+# Per-source-IP sliding-window rate limit. The handler is cheap, but each
+# request can allocate a token lock and touch the cache, so an attacker can
+# grow internal dicts indefinitely by spraying random tokens.
+_RATE_WINDOW_SEC = 60
+_RATE_MAX_REQUESTS = 10
+_rate_lock = threading.Lock()
+_rate_hits: dict[str, "collections.deque[float]"] = {}
+
+
+def _rate_allow(addr: str) -> bool:
+    now = time.monotonic()
+    with _rate_lock:
+        dq = _rate_hits.get(addr)
+        if dq is None:
+            dq = collections.deque(maxlen=_RATE_MAX_REQUESTS)
+            _rate_hits[addr] = dq
+        # Drop entries that fell out of the window.
+        while dq and (now - dq[0]) > _RATE_WINDOW_SEC:
+            dq.popleft()
+        if len(dq) >= _RATE_MAX_REQUESTS:
+            return False
+        dq.append(now)
+        # Light cap on the tracker map itself to avoid unbounded growth.
+        if len(_rate_hits) > 4096:
+            cutoff = now - _RATE_WINDOW_SEC
+            stale = [k for k, v in _rate_hits.items() if not v or v[-1] < cutoff]
+            for k in stale:
+                _rate_hits.pop(k, None)
+        return True
 
 
 def _get_cdn_url(token: str, allow_readd: bool = False) -> str | None:
@@ -89,6 +131,17 @@ def _fetch_range(cdn_url: str, offset: int, count: int) -> bytes | None:
 
 def _handle(conn: socket.socket, addr) -> None:
     """Handle one Spore client connection."""
+    src_ip = addr[0] if isinstance(addr, tuple) and addr else "unknown"
+    if not _rate_allow(src_ip):
+        log.warning("Spore: rate limit exceeded for %s", src_ip)
+        try:
+            conn.sendall(b"ERR rate limited\n")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return
     log.info("Spore: connection from %s", addr)
     try:
         # Read request line
@@ -108,6 +161,12 @@ def _handle(conn: socket.socket, addr) -> None:
             return
 
         token, offset_s, count_s = parts
+        # Reject malformed tokens BEFORE touching the DB or allocating any
+        # per-token state. Catbox tokens are 16-char lowercase hex.
+        if not _TOKEN_RE.match(token):
+            log.warning("Spore: rejected malformed token from %s", src_ip)
+            conn.sendall(b"ERR bad token\n")
+            return
         try:
             offset = int(offset_s)
             count  = min(int(count_s), _MAX_COUNT)
@@ -192,6 +251,10 @@ def start(host: str = _DEFAULT_HOST,
           port: int = _DEFAULT_PORT) -> socket.socket:
     """Start the Spore TCP server in a background daemon thread.
     Returns the server socket (for shutdown if needed)."""
+    env_host = (os.environ.get("SPORE_BIND_ADDR")
+                or os.environ.get("MYCELIUM_SPORE_HOST"))
+    if env_host:
+        host = env_host
     env_port = os.environ.get("MYCELIUM_SPORE_PORT")
     if env_port:
         try:
