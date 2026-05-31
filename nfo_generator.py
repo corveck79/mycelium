@@ -13,6 +13,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from xml.sax.saxutils import escape as _stdlib_xml_escape
 
 import requests as _requests
 
@@ -55,7 +56,8 @@ def _clean_for_tmdb(raw: str) -> str:
 
 
 def _xml_escape(s: str) -> str:
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    """Escape characters that have special meaning in XML element content."""
+    return _stdlib_xml_escape(s or "")
 
 
 def _movie_nfo(title: str, year: int | None, imdb_id: str) -> str:
@@ -64,7 +66,7 @@ def _movie_nfo(title: str, year: int | None, imdb_id: str) -> str:
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         "<movie>\n"
         f"  <title>{_xml_escape(title)}</title>{year_tag}\n"
-        f'  <uniqueid type="imdb" default="true">{imdb_id}</uniqueid>\n'
+        f'  <uniqueid type="imdb" default="true">{_xml_escape(imdb_id)}</uniqueid>\n'
         "</movie>\n"
     )
 
@@ -74,7 +76,7 @@ def _tvshow_nfo(title: str, imdb_id: str) -> str:
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         "<tvshow>\n"
         f"  <title>{_xml_escape(title)}</title>\n"
-        f'  <uniqueid type="imdb" default="true">{imdb_id}</uniqueid>\n'
+        f'  <uniqueid type="imdb" default="true">{_xml_escape(imdb_id)}</uniqueid>\n'
         "</tvshow>\n"
     )
 

@@ -4,6 +4,7 @@ import struct
 import threading
 import time
 from pathlib import Path
+from xml.sax.saxutils import escape as _xml_escape, quoteattr as _xml_quoteattr
 
 import requests as req_lib
 
@@ -260,17 +261,25 @@ def _write_nfo(strm_path: Path, imdb_id: str | None, tmdb_id: int | None = None,
 
     fileinfo = _fileinfo_xml(quality)
 
+    # Title/IDs come from the on-disk folder name and scraped metadata, which
+    # originate in torrent release titles. Treat as untrusted: escape every
+    # interpolation so a release like `<title>&` cannot break the NFO XML for
+    # Jellyfin/Kodi/Plex.
+    safe_title = _xml_escape(title)
+    safe_imdb  = _xml_escape(imdb_id) if imdb_id else None
+    safe_tmdb  = _xml_escape(str(tmdb_id)) if tmdb_id else None
+
     uid_tags = ""
-    if imdb_id:
-        uid_tags += f'  <uniqueid type="imdb" default="true">{imdb_id}</uniqueid>\n'
-    if tmdb_id:
-        uid_tags += f'  <uniqueid type="tmdb">{tmdb_id}</uniqueid>\n'
+    if safe_imdb:
+        uid_tags += f'  <uniqueid type="imdb" default="true">{safe_imdb}</uniqueid>\n'
+    if safe_tmdb:
+        uid_tags += f'  <uniqueid type="tmdb">{safe_tmdb}</uniqueid>\n'
 
     if media_type == "movie":
         year_tag = f"\n  <year>{year}</year>" if year else ""
         content = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-            f"<movie>\n  <title>{title}</title>{year_tag}\n{uid_tags}{fileinfo}</movie>\n"
+            f"<movie>\n  <title>{safe_title}</title>{year_tag}\n{uid_tags}{fileinfo}</movie>\n"
         )
     elif media_type == "episode":
         # Per-episode NFO: Plex uses this to read <fileinfo> codec data for .strm playback
@@ -283,7 +292,7 @@ def _write_nfo(strm_path: Path, imdb_id: str | None, tmdb_id: int | None = None,
         # tvshow.nfo - no fileinfo needed (Plex reads episode NFOs for codec info)
         content = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-            f"<tvshow>\n  <title>{title}</title>\n{uid_tags}</tvshow>\n"
+            f"<tvshow>\n  <title>{safe_title}</title>\n{uid_tags}</tvshow>\n"
         )
     try:
         atomic_write_text(nfo_path, content)
