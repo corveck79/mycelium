@@ -195,8 +195,8 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
         try:
             path.unlink()
             path.with_suffix(".nfo").unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("unlink failed for %s: %s", path, exc)
         db.delete_virtual_item_by_strm_path(str(path))
         db.insert_repair_item(run_id, str(path), title, media_type, torrent_id, None,
                               "unfixable", "IMDB ID not found")
@@ -208,8 +208,8 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
         try:
             path.unlink()
             path.with_suffix(".nfo").unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("unlink failed for %s: %s", path, exc)
         db.delete_virtual_item_by_strm_path(str(path))
         db.insert_repair_item(run_id, str(path), title, media_type, torrent_id, None,
                               "unfixable", "no candidates found")
@@ -248,8 +248,8 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
             path.unlink(missing_ok=True)
             path.with_suffix(".nfo").unlink(missing_ok=True)
             strm_generator._delete_spore_stubs(path)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("unlink failed for %s after repair: %s", path, exc)
         # process_torrent() already registered a fresh virtual_item for the
         # replacement above; the old row for this now-deleted path must go
         # too, or it lingers forever and pollutes integrity/upgrade scans.
@@ -263,8 +263,8 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
     try:
         path.unlink()
         strm_generator._delete_spore_stubs(path)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("unlink failed for %s after all-candidates-failed: %s", path, exc)
     db.delete_virtual_item_by_strm_path(str(path))
     db.insert_repair_item(run_id, str(path), title, media_type, torrent_id, None,
                           "unfixable", "all replacement candidates failed")
