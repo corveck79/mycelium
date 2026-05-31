@@ -43,11 +43,22 @@ TORRENTIO_BASE_URL = _env("TORRENTIO_BASE_URL", "https://torrentio.strem.fun")
 TORRENTIO_OPTS = _env("TORRENTIO_OPTS", "")
 
 # MediaFusion (https://github.com/mhdzumair/MediaFusion). Stremio addon
-# aggregator that fans out to Prowlarr indexers + its own scrapers; runs
-# alongside Torrentio + Zilean to widen the candidate pool, especially for
-# anime (Nyaa), foreign releases, and titles missing from public DMM caches.
+# aggregator that fans out to Prowlarr indexers + its own scrapers. Note:
+# MediaFusion only returns results for titles already present in its TMDB-
+# synced metadata catalog (it's a browse-first system), so for the on-demand
+# rebuild flow we prefer Prowlarr-direct (see below). Leave MediaFusion
+# enabled too so it slowly populates and serves cached results back.
 MEDIAFUSION_BASE_URL = _env("MEDIAFUSION_BASE_URL", "")
 MEDIAFUSION_ENABLED  = _env("MEDIAFUSION_ENABLED", "false").lower() in ("1", "true", "yes")
+
+# Prowlarr (https://prowlarr.com). Direct Newznab-style search across every
+# configured indexer (Nyaa for anime, YTS, EZTV, TorrentGalaxy, Pirate Bay,
+# Knaben, Internet Archive, LimeTorrents, MixtapeTorrent, Zilean, ...).
+# Unlike MediaFusion this hits indexers live per call (no pre-seeded
+# catalog required), which is the right shape for the on-demand pipeline.
+PROWLARR_BASE_URL = _env("PROWLARR_BASE_URL", "")
+PROWLARR_API_KEY  = _env("PROWLARR_API_KEY", "")
+PROWLARR_ENABLED  = _env("PROWLARR_ENABLED", "false").lower() in ("1", "true", "yes")
 
 JELLYFIN_URL = _env("JELLYFIN_URL", "")
 JELLYFIN_API_KEY = _env("JELLYFIN_API_KEY", "")

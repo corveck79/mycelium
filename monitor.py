@@ -231,7 +231,12 @@ def _retry_episode(ep: dict) -> bool:
             seen_hashes.add(s.info_hash)
             streams.append(s)
     import mediafusion as _mf
+    import prowlarr as _pa
     for s in _mf.fetch_streams("series", imdb_id, season=season, episode=episode):
+        if s.info_hash not in seen_hashes:
+            seen_hashes.add(s.info_hash)
+            streams.append(s)
+    for s in _pa.fetch_streams("series", imdb_id, season=season, episode=episode):
         if s.info_hash not in seen_hashes:
             seen_hashes.add(s.info_hash)
             streams.append(s)
@@ -324,7 +329,11 @@ def _search_and_add_season(imdb_id: str, title: str, seasons: list[int]) -> None
             if s.info_hash not in seen_pack:
                 seen_pack.add(s.info_hash); streams.append(s)
         import mediafusion as _mf
+        import prowlarr as _pa
         for s in _mf.fetch_streams("series", imdb_id, season=season, episode=1):
+            if s.info_hash not in seen_pack:
+                seen_pack.add(s.info_hash); streams.append(s)
+        for s in _pa.fetch_streams("series", imdb_id, season=season, episode=1):
             if s.info_hash not in seen_pack:
                 seen_pack.add(s.info_hash); streams.append(s)
         candidates = torrentio.rank_streams(streams, prefer_season_pack=True)

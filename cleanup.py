@@ -117,6 +117,7 @@ def _resolve_imdb(title: str, year: int | None, media_type: str) -> str | None:
 
 def _fetch_candidates(imdb_id: str, title: str, media_type: str) -> list:
     import mediafusion as _mf
+    import prowlarr as _pa
     if media_type == "movie":
         all_streams: list = []
         seen: set = set()
@@ -128,6 +129,9 @@ def _fetch_candidates(imdb_id: str, title: str, media_type: str) -> list:
             if s.info_hash not in seen:
                 seen.add(s.info_hash); all_streams.append(s)
         for s in _mf.fetch_streams("movie", imdb_id):
+            if s.info_hash not in seen:
+                seen.add(s.info_hash); all_streams.append(s)
+        for s in _pa.fetch_streams("movie", imdb_id):
             if s.info_hash not in seen:
                 seen.add(s.info_hash); all_streams.append(s)
         return torrentio.rank_streams(all_streams)
@@ -142,6 +146,9 @@ def _fetch_candidates(imdb_id: str, title: str, media_type: str) -> list:
             if s.info_hash not in seen:
                 seen.add(s.info_hash); all_streams.append(s)
         for s in _mf.fetch_streams("series", imdb_id, season=1, episode=1):
+            if s.info_hash not in seen:
+                seen.add(s.info_hash); all_streams.append(s)
+        for s in _pa.fetch_streams("series", imdb_id, season=1, episode=1):
             if s.info_hash not in seen:
                 seen.add(s.info_hash); all_streams.append(s)
         return torrentio.rank_streams(all_streams, prefer_season_pack=True)

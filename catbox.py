@@ -676,6 +676,7 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
         import concurrent.futures
         import torrentio
         import mediafusion as _mediafusion
+        import prowlarr as _prowlarr
         import debrid
         import blacklist
         media_type = item["media_type"]
@@ -683,8 +684,8 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
         episode = item.get("episode")
         import zilean as _zilean
 
-        # Run Zilean + Torrentio + MediaFusion in parallel to cap latency at
-        # the slowest single scraper instead of summing them.
+        # Run all four scrapers in parallel so total latency caps at the
+        # slowest single scraper instead of summing them.
         def _fetch_zilean():
             if not _settings.get("ZILEAN_ENABLED", False):
                 return []
@@ -702,23 +703,32 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
                 imdb_id, season=season, episode=episode,
             )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+        def _fetch_prowlarr():
+            return _prowlarr.fetch_streams(
+                "movie" if media_type == "movie" else "series",
+                imdb_id, season=season, episode=episode,
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
             f_zilean = ex.submit(_fetch_zilean)
             f_torrentio = ex.submit(_fetch_torrentio)
             f_mediafusion = ex.submit(_fetch_mediafusion)
+            f_prowlarr = ex.submit(_fetch_prowlarr)
             zilean_streams = f_zilean.result()
             torrentio_streams = f_torrentio.result()
             mediafusion_streams = f_mediafusion.result()
+            prowlarr_streams = f_prowlarr.result()
 
-        log.info("Catbox search: Zilean=%d Torrentio=%d MediaFusion=%d stream(s) for %s (%s)",
-                 len(zilean_streams), len(torrentio_streams), len(mediafusion_streams),
+        log.info("Catbox search: Zilean=%d Torrentio=%d MediaFusion=%d Prowlarr=%d stream(s) for %s (%s)",
+                 len(zilean_streams), len(torrentio_streams),
+                 len(mediafusion_streams), len(prowlarr_streams),
                  item.get("title"), imdb_id)
-        # Merge: dedup by info_hash across all three sources, preserve order
-        # (Zilean -> Torrentio -> MediaFusion) so the more-trusted DMM caches
-        # come first.
+        # Merge: dedup by info_hash across all four sources, preserve order
+        # (Zilean → Torrentio → MediaFusion → Prowlarr) so the more-trusted
+        # DMM caches come first.
         seen_hashes: set = set()
         streams: list = []
-        for src in (zilean_streams, torrentio_streams, mediafusion_streams):
+        for src in (zilean_streams, torrentio_streams, mediafusion_streams, prowlarr_streams):
             for s in src:
                 if s.info_hash not in seen_hashes:
                     seen_hashes.add(s.info_hash)
