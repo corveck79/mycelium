@@ -33,17 +33,20 @@ def _thread_conn() -> sqlite3.Connection:
 
 @contextmanager
 def _connect():
-    """Yield a per-thread sqlite3 connection. We deliberately do NOT close it
-    on exit; the connection lives for the thread's lifetime."""
-    conn = _thread_conn()
-    try:
-        yield conn
-    except Exception:
-        try:
-            conn.execute("ROLLBACK")
-        except Exception:
-            pass
-        raise
+    """Yield a per-thread sqlite3 connection.
+
+    The connection is configured with isolation_level=None (autocommit), so
+    every individual `execute` is its own implicit transaction. Wrapping a
+    block of these in `with _connect() as conn:` does NOT make them
+    atomic; an exception halfway through leaves earlier statements
+    committed and only the in-flight statement uncommitted. For genuinely
+    atomic multi-statement operations, open an explicit transaction with
+    `conn.execute("BEGIN")` / `COMMIT` and handle rollback locally.
+
+    The connection is deliberately not closed on exit; it lives for the
+    thread's lifetime (see _thread_conn).
+    """
+    yield _thread_conn()
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS requests (
