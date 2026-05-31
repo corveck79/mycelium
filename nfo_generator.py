@@ -19,6 +19,7 @@ import requests as _requests
 import db
 import tmdb
 from config import MEDIA_PATH
+from io_utils import atomic_write_text
 
 _IMAGE_BASE_POSTER = "https://image.tmdb.org/t/p/w500"
 _IMAGE_BASE_BACKDROP = "https://image.tmdb.org/t/p/w1280"
@@ -124,7 +125,7 @@ def repair_tvshow_titles() -> dict:
             correct_title = re.sub(r'\s+\([A-Z]{2}\)$', '', folder.name).strip() or folder.name
 
         try:
-            nfo_path.write_text(_tvshow_nfo(correct_title, imdb_id), encoding="utf-8")
+            atomic_write_text(nfo_path, _tvshow_nfo(correct_title, imdb_id))
             log.info("NFO repair: '%s' -> '%s' (%s)", title_el.text.strip(), correct_title, nfo_path)
             fixed += 1
         except Exception as exc:
@@ -166,7 +167,7 @@ def _write(path: Path, content: str) -> bool:
     if path.exists():
         return False
     try:
-        path.write_text(content, encoding="utf-8")
+        atomic_write_text(path, content)
         log.info("Wrote NFO: %s", path)
         return True
     except Exception as exc:

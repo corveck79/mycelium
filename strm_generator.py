@@ -15,6 +15,7 @@ import settings
 import torbox as torbox_mod
 import config as cfg
 from config import MEDIA_PATH, TORBOX_BASE_URL as _TORBOX_BASE_URL_DEFAULT, SPORE_MEDIA_PATH
+from io_utils import atomic_write_bytes, atomic_write_text
 
 log = logging.getLogger(__name__)
 
@@ -285,7 +286,7 @@ def _write_nfo(strm_path: Path, imdb_id: str | None, tmdb_id: int | None = None,
             f"<tvshow>\n  <title>{title}</title>\n{uid_tags}</tvshow>\n"
         )
     try:
-        nfo_path.write_text(content, encoding="utf-8")
+        atomic_write_text(nfo_path, content)
         log.info("Wrote NFO: %s", nfo_path)
     except Exception as exc:
         log.warning("Could not write NFO %s: %s", nfo_path, exc)
@@ -602,7 +603,7 @@ def update_minfo_preferred_audio(token: str, audio_index: int) -> None:
         lines = [l for l in lines if not l.startswith("preferred_audio=")]
         if audio_index > 0:
             lines.append(f"preferred_audio={audio_index}")
-        minfo_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        atomic_write_text(minfo_path, "\n".join(lines) + "\n")
         log.info("Spore: preferred_audio=%d saved to .minfo for token=%s", audio_index, token)
     except Exception as exc:
         log.warning("Spore: could not update .minfo for token=%s: %s", token, exc)
@@ -1205,7 +1206,7 @@ def _write_spore_stubs(strm_path: Path, token: str,
                 log.debug("Spore: TMDB duration lookup failed for %s: %s", title, _e)
 
             stub = make_stub_mkv(title, quality, duration_sec=duration_sec)
-            mkv_path.write_bytes(stub)
+            atomic_write_bytes(mkv_path, stub)
             log.debug("Spore: wrote stub MKV %s (%d bytes, quality=%s dur=%.0fs)",
                       mkv_path.name, len(stub), quality or "?", duration_sec)
         except Exception as exc:
@@ -1216,9 +1217,7 @@ def _write_spore_stubs(strm_path: Path, token: str,
     if not minfo_path.exists():
         try:
             size_bytes = int((size_gb or 0.0) * 1_000_000_000)
-            minfo_path.write_text(
-                f"token={token}\nsize={size_bytes}\n", encoding="utf-8"
-            )
+            atomic_write_text(minfo_path, f"token={token}\nsize={size_bytes}\n")
             log.debug("Spore: wrote .minfo %s (token=%s size=%d)",
                       minfo_path.name, token, size_bytes)
         except Exception as exc:
@@ -1334,7 +1333,7 @@ def regenerate_spore_stubs(token: str | None = None) -> dict:
                 subtitle_tracks=sub_tracks,
             )
             stub_dir.mkdir(parents=True, exist_ok=True)
-            mkv_path.write_bytes(stub)
+            atomic_write_bytes(mkv_path, stub)
             log.info("Spore: regenerated stub %s (quality=%s subs=%d)",
                      mkv_path.name, item.get("quality") or "?", len(sub_tracks or []))
             regenerated += 1
@@ -1496,7 +1495,7 @@ def update_stub_from_probe(token: str, audio_streams: list[dict],
                 lines = minfo_path.read_text(encoding="utf-8").splitlines()
                 lines = [l for l in lines if not l.startswith("cdn_audio_codec=")]
                 lines.append(f"cdn_audio_codec={cdn_codec}")
-                minfo_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                atomic_write_text(minfo_path, "\n".join(lines) + "\n")
                 log.info("Spore: cdn_audio_codec=%s saved to .minfo for token=%s", cdn_codec, token)
         except Exception as exc:
             log.warning("Spore: could not write cdn_audio_codec to .minfo for token=%s: %s", token, exc)
@@ -1510,7 +1509,7 @@ def update_stub_from_probe(token: str, audio_streams: list[dict],
             subtitle_tracks=subtitle_tracks or None,
             # video_codec_private omitted: updated via update_stub_from_probe
         )
-        mkv_path.write_bytes(stub)
+        atomic_write_bytes(mkv_path, stub)
         log.info(
             "Spore: updated stub for token=%s with %d audio + %d subs",
             token, len(audio_streams), len(subtitle_tracks),
@@ -1557,8 +1556,7 @@ def _write_strm(path: Path, url: str) -> bool:
                     log.info("Skipping duplicate strm %s  -  already have %s", title_folder.name, existing.name)
                     return False
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(url, encoding='utf-8')
+        atomic_write_text(path, url)
         log.info("Created .strm: %s", path)
         return True
     except Exception as exc:
@@ -1778,8 +1776,7 @@ def create_series_strms_from_files(torrent_name: str, files_with_urls: list) -> 
         if path.exists():
             continue
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(url, encoding="utf-8")
+            atomic_write_text(path, url)
             log.info("Created series .strm: %s", path)
             written += 1
         except Exception as exc:
@@ -1801,8 +1798,7 @@ def create_episode_strm_from_url(title: str, season: int, episode: int,
     if path.exists():
         return path
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(url, encoding="utf-8")
+        atomic_write_text(path, url)
         log.info("Created episode .strm: %s", path)
         return path
     except Exception as exc:
@@ -1824,8 +1820,7 @@ def create_movie_strm_from_url(title: str, url: str) -> Path | None:
     if path.exists():
         return path
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(url, encoding="utf-8")
+        atomic_write_text(path, url)
         log.info("Created RD .strm: %s", path)
         return path
     except Exception as exc:
@@ -2160,8 +2155,7 @@ def _repair_expired_strms_locked(media_type: str = "movie") -> dict:
         item = next((i for i in items if i.get("strm_path") == str(strm_path)), items[0])
         new_url = _catbox.proxy_url(item["token"])
         try:
-            strm_path.parent.mkdir(parents=True, exist_ok=True)
-            strm_path.write_text(new_url, encoding="utf-8")
+            atomic_write_text(strm_path, new_url)
             log.info("repair_strms: wrote %s → token %s", strm_path.name, item["token"])
             return True
         except Exception as exc:

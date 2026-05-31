@@ -13,6 +13,7 @@ import torrentio
 import zilean
 import settings as _settings
 from config import MEDIA_PATH
+from io_utils import atomic_write_text
 from torrentio import TorrentioStream
 
 log = logging.getLogger(__name__)
@@ -365,7 +366,7 @@ def _regenerate_wrong_files(strm_files: list[Path], mylist: list[dict], run_id: 
         if not new_url:
             continue
         try:
-            path.write_text(new_url, encoding="utf-8")
+            atomic_write_text(path, new_url)
             db.insert_repair_item(
                 run_id, str(path), path.parent.name, "movie", file_id,
                 str(main.get("id")), "repaired", "regenerated wrong file (was trailer/sample)",
@@ -547,7 +548,7 @@ def merge_series_duplicates() -> int:
                                 continue
                         else:
                             try:
-                                dest.write_text(content, encoding="utf-8")
+                                atomic_write_text(dest, content)
                             except Exception as exc:
                                 log.warning("Could not copy strm %s: %s", strm, exc)
                                 fully_merged = False
@@ -718,7 +719,7 @@ def merge_movie_duplicates() -> int:
                 if dest.exists():
                     continue
                 try:
-                    dest.write_text(strm.read_text(encoding="utf-8"), encoding="utf-8")
+                    atomic_write_text(dest, strm.read_text(encoding="utf-8"))
                 except Exception as exc:
                     log.warning("Could not copy strm %s to %s: %s", strm, dest, exc)
                     fully_merged = False
