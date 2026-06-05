@@ -445,6 +445,18 @@ def _start_scheduler() -> BackgroundScheduler:
             log.debug("modify_job(%s): %s", jid, exc)
 
     scheduler.start()
+    # 2026-06-05 fix: jobs above were added with next_run_time=None, which APScheduler 3.x
+    # treats as PAUSED -> the entire automation layer never fired. Resume each so it runs
+    # on its configured interval (first run = now + interval; naturally staggered).
+    _resumed = 0
+    for _job in scheduler.get_jobs():
+        if _job.next_run_time is None:
+            try:
+                scheduler.resume_job(_job.id)
+                _resumed += 1
+            except Exception as _exc:
+                log.warning("resume_job(%s) failed: %s", _job.id, _exc)
+    log.info("Resumed %d paused scheduler job(s)", _resumed)
     return scheduler
 
 
