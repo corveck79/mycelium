@@ -27,6 +27,7 @@ SEGMENT_WAIT_TIMEOUT = 90
 SESSION_IDLE_CLEANUP = 1800
 
 _BROWSER_AUDIO_OK    = {"aac"}   # vorbis/opus not reliable in mpegts HLS
+_DIRECT_AUDIO_OK     = {"aac", "mp3", "vorbis", "opus"}
 _NO_BROWSER_VIDEO_RE = re.compile(r"\b(av1|vp9|vp8)\b", re.IGNORECASE)
 _HDR_NAME_RE         = re.compile(r"\bhdr10\+|\bhdr10plus\b|\bhdr10\b|\bhdr\b|\bhlg\b|\bpq10\b", re.IGNORECASE)
 _AAC_SAMPLE_RATE     = "48000"   # browsers require consistent sample rate in TS
@@ -102,18 +103,20 @@ class JobStatus(str, Enum):
 
 @dataclass
 class PrepareJob:
-    job_id:     str
-    imdb_id:    str
-    media_type: str
-    season:     int | None
-    episode:    int | None
-    status:     JobStatus = JobStatus.SEARCHING
-    message:    str = ""
-    stream_url: str | None = None
-    cdn_url:    str | None = None
-    file_info:  dict | None = None
-    error:      str | None = None
-    _thread:    threading.Thread = field(default=None, repr=False)
+    job_id:      str
+    imdb_id:     str
+    media_type:  str
+    season:      int | None
+    episode:     int | None
+    status:      JobStatus = JobStatus.SEARCHING
+    message:     str = ""
+    token:       str | None = None
+    stream_url:  str | None = None
+    stream_type: str = "hls"
+    cdn_url:     str | None = None
+    file_info:   dict | None = None
+    error:       str | None = None
+    _thread:     threading.Thread = field(default=None, repr=False)
 
 
 _jobs: dict[str, PrepareJob] = {}
@@ -310,36 +313,44 @@ def _run_job(job: PrepareJob) -> None:
         job.status  = JobStatus.PREPARING
         job.message = "Preparing for playback…"
 
-        tmp_dir = PLAYER_TMP_DIR / session_key
-        tmp_dir.mkdir(parents=True, exist_ok=True)
+        if _is_direct_playable(file_info):
+            _start_direct(session_key, file_info)
+            job.token       = session_key
+            job.stream_type = "direct"
+            job.stream_url  = f"/stream/{session_key}/direct"
+            job.status      = JobStatus.READY
+            job.message     = "Ready"
+        else:
+            tmp_dir = PLAYER_TMP_DIR / session_key
+            tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        multi_audio = len(file_info["audio_tracks"]) > 1
+            multi_audio = len(file_info["audio_tracks"]) > 1
 
-        # Start subtitle fetch in parallel with FFmpeg so they finish together.
-        sub_thread = threading.Thread(
-            target=_subtitles_task,
-            args=(cdn_url, file_info, job.imdb_id, job.media_type,
-                  job.season, job.episode, session_key, tmp_dir),
-            daemon=True,
-        )
-        sub_thread.start()
+            sub_thread = threading.Thread(
+                target=_subtitles_task,
+                args=(cdn_url, file_info, job.imdb_id, job.media_type,
+                      job.season, job.episode, session_key, tmp_dir),
+                daemon=True,
+            )
+            sub_thread.start()
 
-        session = _start_hls(session_key, cdn_url, file_info, tmp_dir)
+            session = _start_hls(session_key, cdn_url, file_info, tmp_dir)
 
-        if not multi_audio:
-            if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
-                session.proc.terminate()
-                job.status = JobStatus.ERROR
-                job.error  = "Timeout: FFmpeg produced no segments."
-                return
+            if not multi_audio:
+                if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
+                    session.proc.terminate()
+                    job.status = JobStatus.ERROR
+                    job.error  = "Timeout: FFmpeg produced no segments."
+                    return
 
-        # Wait for subtitles (max 15s)  -  usually done by the time FFmpeg is ready.
-        sub_thread.join(timeout=15)
+            sub_thread.join(timeout=15)
 
-        job.status     = JobStatus.READY
-        job.message    = "Ready"
-        job.stream_url = (f"/stream/{session_key}/hls/master.m3u8" if multi_audio
-                          else f"/stream/{session_key}/hls/playlist.m3u8")
+            job.token       = session_key
+            job.stream_type = "hls"
+            job.stream_url  = (f"/stream/{session_key}/hls/master.m3u8" if multi_audio
+                               else f"/stream/{session_key}/hls/playlist.m3u8")
+            job.status      = JobStatus.READY
+            job.message     = "Ready"
 
     except Exception:
         log.exception("web_player: prepare job %s crashed", job.job_id)
@@ -369,7 +380,7 @@ def _probe(cdn_url: str) -> dict:
     _HDR_TRANSFERS = {"smpte2084", "arib-std-b67", "smpte428"}
     color_transfer  = video.get("color_transfer", "")
     is_hdr          = color_transfer in _HDR_TRANSFERS
-
+    fmt_name        = data.get("format", {}).get("format_name", "")
     return {
         "duration_s":      float(data.get("format", {}).get("duration", 0)),
         "video_codec":     video.get("codec_name", "unknown"),
@@ -377,6 +388,7 @@ def _probe(cdn_url: str) -> dict:
         "height":          video.get("height"),
         "is_hdr":          is_hdr,
         "color_transfer":  color_transfer,
+        "container":       fmt_name,
         "audio_tracks":    [
             {"index": i, "codec": t["codec_name"],
              "language": _tag(t, "language", "und"),
@@ -391,6 +403,65 @@ def _probe(cdn_url: str) -> dict:
             for i, t in enumerate(subs)
         ],
     }
+
+
+# ── Direct play ───────────────────────────────────────────────────────────────
+
+def _is_direct_playable(file_info: dict) -> bool:
+    """True when the browser can play the file as-is — no FFmpeg needed."""
+    if file_info.get("video_codec") != "h264":
+        return False
+    tracks = file_info.get("audio_tracks", [])
+    if not tracks:
+        return False
+    return all(t["codec"] in _DIRECT_AUDIO_OK for t in tracks)
+
+
+def _content_type_for(file_info: dict) -> str:
+    fmt = file_info.get("container", "")
+    if "matroska" in fmt or "webm" in fmt:
+        return "video/x-matroska"
+    return "video/mp4"
+
+
+@dataclass
+class DirectSession:
+    token:        str
+    content_type: str
+    started_at:   float = field(default_factory=time.monotonic)
+    last_request: float = field(default_factory=time.monotonic)
+    _hb:          threading.Thread = field(default=None, repr=False)
+
+    def touch(self):
+        self.last_request = time.monotonic()
+
+    def start_heartbeat(self):
+        def _beat():
+            while True:
+                time.sleep(60)
+                if time.monotonic() - self.last_request > SESSION_IDLE_CLEANUP:
+                    break
+                db.touch_virtual_item(self.token)
+        self._hb = threading.Thread(target=_beat, daemon=True)
+        self._hb.start()
+
+
+_direct_sessions: dict[str, DirectSession] = {}
+_direct_lock = threading.Lock()
+
+
+def get_direct_session(token: str) -> DirectSession | None:
+    with _direct_lock:
+        return _direct_sessions.get(token)
+
+
+def _start_direct(token: str, file_info: dict) -> DirectSession:
+    session = DirectSession(token=token, content_type=_content_type_for(file_info))
+    session.start_heartbeat()
+    with _direct_lock:
+        _direct_sessions[token] = session
+    log.info("web_player: direct play session started token=%s", token)
+    return session
 
 
 # ── HLS session ────────────────────────────────────────────────────────────────
@@ -745,6 +816,7 @@ def list_subtitles(token: str) -> list[dict]:
 
 def cleanup_idle_sessions() -> None:
     cutoff = time.monotonic() - SESSION_IDLE_CLEANUP
+
     with _sessions_lock:
         stale = [t for t, s in _sessions.items() if s.last_request < cutoff]
     for token in stale:
@@ -753,5 +825,12 @@ def cleanup_idle_sessions() -> None:
         if session:
             session.proc.terminate()
             shutil.rmtree(session.tmp_dir, ignore_errors=True)
-            log.info("web_player: cleaned up idle session token=%s", token)
+            log.info("web_player: cleaned up idle HLS session token=%s", token)
+
+    with _direct_lock:
+        stale_direct = [t for t, s in _direct_sessions.items() if s.last_request < cutoff]
+    for token in stale_direct:
+        with _direct_lock:
+            _direct_sessions.pop(token, None)
+        log.info("web_player: cleaned up idle direct session token=%s", token)
 

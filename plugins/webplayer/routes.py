@@ -1,5 +1,7 @@
 import db
 import auth
+import catbox
+import requests as req_lib
 from flask import Blueprint, abort, jsonify, request, send_file, Response
 from flask import session as flask_session
 from . import web_player
@@ -33,12 +35,14 @@ def web_player_status(job_id: str):
     if not job:
         abort(404)
     return jsonify(
-        status     = job.status.value,
-        message    = job.message,
-        stream_url = job.stream_url,
-        cdn_url    = job.cdn_url,
-        file_info  = job.file_info,
-        error      = job.error,
+        status      = job.status.value,
+        message     = job.message,
+        token       = job.token,
+        stream_url  = job.stream_url,
+        stream_type = job.stream_type,
+        cdn_url     = job.cdn_url,
+        file_info   = job.file_info,
+        error       = job.error,
     )
 
 
@@ -67,6 +71,39 @@ def stream_hls_file(token: str, filename: str):
     if filename.endswith(".mp4"):
         return send_file(p, mimetype="video/mp4")
     abort(400)
+
+
+@bp.get("/stream/<token>/direct")
+def stream_direct(token: str):
+    s = web_player.get_direct_session(token)
+    if not s:
+        abort(404)
+    s.touch()
+
+    cdn_url = catbox.materialize(token, allow_readd=True)
+    if not cdn_url:
+        abort(503)
+
+    headers = {}
+    range_hdr = request.headers.get("Range")
+    if range_hdr:
+        headers["Range"] = range_hdr
+
+    upstream = req_lib.get(cdn_url, headers=headers, stream=True, timeout=30)
+
+    response_headers = {
+        "Content-Type":   s.content_type,
+        "Accept-Ranges":  "bytes",
+    }
+    for h in ("Content-Length", "Content-Range"):
+        if upstream.headers.get(h):
+            response_headers[h] = upstream.headers[h]
+
+    return Response(
+        upstream.iter_content(chunk_size=65536),
+        status=upstream.status_code,
+        headers=response_headers,
+    )
 
 
 @bp.get("/stream/<token>/subtitles")

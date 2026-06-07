@@ -29,12 +29,14 @@ interface FileInfo {
 }
 
 interface JobStatus {
-  status:      'searching' | 'materializing' | 'probing' | 'preparing' | 'ready' | 'error'
-  message:     string
-  stream_url?: string
-  cdn_url?:    string
-  file_info?:  FileInfo
-  error?:      string
+  status:       'searching' | 'materializing' | 'probing' | 'preparing' | 'ready' | 'error'
+  message:      string
+  token?:       string
+  stream_url?:  string
+  stream_type?: 'direct' | 'hls'
+  cdn_url?:     string
+  file_info?:   FileInfo
+  error?:       string
 }
 
 export default function PlayerModal({ imdb_id, media_type, title, season, episode, onClose }: {
@@ -80,9 +82,12 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
   useEffect(() => {
     if (status?.status !== 'ready' || !status.stream_url || !videoRef.current) return
 
-    const video = videoRef.current
+    const video    = videoRef.current
+    const isDirect = status.stream_type === 'direct'
 
-    if (Hls.isSupported()) {
+    if (isDirect) {
+      video.src = status.stream_url!
+    } else if (Hls.isSupported()) {
       const hls = new Hls({ enableWorker: false })
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (!data.fatal) return
@@ -94,7 +99,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
         }
       })
       hls.attachMedia(video)
-      hls.loadSource(status.stream_url)
+      hls.loadSource(status.stream_url!)
       hlsRef.current = hls
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // Safari: native HLS
@@ -294,7 +299,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
                 )}
                 <span>{fileInfo.video_codec?.toUpperCase()}</span>
 
-                {fileInfo.audio_tracks?.length > 1 && (
+                {fileInfo.audio_tracks?.length > 1 && status?.stream_type !== 'direct' && (
                   <select
                     onChange={e => {
                       if (hlsRef.current) hlsRef.current.audioTrack = +e.target.value
