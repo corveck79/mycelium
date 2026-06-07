@@ -307,22 +307,16 @@ def _run_job(job: PrepareJob) -> None:
                 log.warning("web_player: requestdl failed for hash=%s, skipping", _hash)
                 continue
 
-            job.status  = JobStatus.PROBING
-            job.message = "Reading file info…"
-            _info = _probe(_cdn)
-
-            if _info.get("is_hdr"):
-                log.warning("web_player: probe detected HDR for hash=%s, skipping", _hash)
-                continue
-
+            # Skip probe — serve directly and let the browser decide.
+            # ffprobe runs lazily only if HLS fallback is triggered.
             cdn_url     = _cdn
-            file_info   = _info
+            file_info   = _file_info_from_candidate(candidate)
             session_key = _hash
             break
 
         if not cdn_url or not file_info or not session_key:
             job.status = JobStatus.ERROR
-            job.error  = "No SDR version available for web playback. Use Jellyfin."
+            job.error  = "No instantly available version found. Use Jellyfin."
             return
 
         job.cdn_url   = cdn_url
@@ -456,12 +450,43 @@ def start_hls_conversion(token: str) -> bool:
     return True
 
 
+def _file_info_from_candidate(candidate) -> dict:
+    """Minimal file_info derived from torrent name — no ffprobe needed."""
+    blob = f"{candidate.name} {candidate.title}".lower()
+    codec = 'unknown'
+    if 'x265' in blob or 'hevc' in blob or 'h265' in blob:
+        codec = 'hevc'
+    elif 'x264' in blob or 'h264' in blob or 'avc' in blob:
+        codec = 'h264'
+    height = {'2160p': 2160, '1080p': 1080, '720p': 720, '480p': 480}.get(
+        candidate.quality or '', 0)
+    container = 'matroska' if ('.mkv' in blob or blob.split().count('mkv') > 0) else 'mp4'
+    return {
+        'video_codec':      codec,
+        'height':           height,
+        'width':            0,
+        'duration_s':       0,
+        'is_hdr':           False,
+        'color_transfer':   '',
+        'container':        container,
+        'audio_tracks':     [],
+        'subtitle_tracks':  [],
+    }
+
+
 def _do_hls_conversion(token: str, file_info: dict) -> None:
     try:
         cdn_url = catbox.materialize(token, allow_readd=True)
         if not cdn_url:
             log.warning("web_player: HLS fallback — could not materialize token=%s", token)
             return
+        # Probe now if we skipped it during direct play (lazy path).
+        if not file_info.get('audio_tracks'):
+            log.info("web_player: lazy ffprobe for HLS fallback token=%s", token)
+            file_info = _probe(cdn_url)
+            s = get_direct_session(token)
+            if s:
+                s.file_info = file_info
         tmp_dir = PLAYER_TMP_DIR / token
         tmp_dir.mkdir(parents=True, exist_ok=True)
         session = _start_hls(token, cdn_url, file_info, tmp_dir)
