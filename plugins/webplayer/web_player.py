@@ -269,14 +269,28 @@ def _run_job(job: PrepareJob) -> None:
 
             log.info("web_player: selected %r hash=%s", candidate.title, _hash)
 
-            # Reuse an active session without re-probing (skip if HDR was detected).
+            # Reuse an active direct session (always prefer direct play).
+            with _direct_lock:
+                existing_direct = _direct_sessions.get(_hash)
+            if existing_direct:
+                log.info("web_player: reusing active direct session hash=%s", _hash)
+                job.token       = _hash
+                job.file_info   = existing_direct.file_info
+                job.cdn_url     = None
+                job.stream_type = "direct"
+                job.stream_url  = f"/stream/{_hash}/direct"
+                job.status      = JobStatus.READY
+                job.message     = "Ready"
+                return
+
+            # Reuse an active HLS session without re-probing (skip if HDR).
             with _sessions_lock:
                 existing = _sessions.get(_hash)
             if existing and existing.proc.poll() is None:
                 if existing.file_info.get("is_hdr"):
                     log.warning("web_player: skipping HDR cached session hash=%s", _hash)
                     continue
-                log.info("web_player: reusing active session hash=%s", _hash)
+                log.info("web_player: reusing active HLS session hash=%s", _hash)
                 multi_audio   = len(existing.file_info.get("audio_tracks", [])) > 1
                 job.file_info = existing.file_info
                 job.cdn_url   = existing.cdn_url
