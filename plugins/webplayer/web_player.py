@@ -325,7 +325,7 @@ def _run_job(job: PrepareJob) -> None:
         job.status  = JobStatus.PREPARING
         job.message = "Preparing for playback…"
 
-        _start_direct(session_key, file_info)
+        _start_direct(session_key, file_info, cdn_url)
         job.token       = session_key
         job.stream_type = "direct"
         job.stream_url  = f"/stream/{session_key}/direct"
@@ -398,6 +398,7 @@ def _content_type_for(file_info: dict) -> str:
 class DirectSession:
     token:        str
     content_type: str
+    cdn_url:      str
     file_info:    dict
     converting:   bool  = False   # True once HLS fallback has been triggered
     started_at:   float = field(default_factory=time.monotonic)
@@ -427,9 +428,9 @@ def get_direct_session(token: str) -> DirectSession | None:
         return _direct_sessions.get(token)
 
 
-def _start_direct(token: str, file_info: dict) -> DirectSession:
+def _start_direct(token: str, file_info: dict, cdn_url: str) -> DirectSession:
     session = DirectSession(token=token, content_type=_content_type_for(file_info),
-                            file_info=file_info)
+                            cdn_url=cdn_url, file_info=file_info)
     session.start_heartbeat()
     with _direct_lock:
         _direct_sessions[token] = session
@@ -476,9 +477,10 @@ def _file_info_from_candidate(candidate) -> dict:
 
 def _do_hls_conversion(token: str, file_info: dict) -> None:
     try:
-        cdn_url = catbox.materialize(token, allow_readd=True)
+        s = get_direct_session(token)
+        cdn_url = s.cdn_url if s else None
         if not cdn_url:
-            log.warning("web_player: HLS fallback — could not materialize token=%s", token)
+            log.warning("web_player: HLS fallback — no CDN URL for token=%s", token)
             return
         # Probe now if we skipped it during direct play (lazy path).
         if not file_info.get('audio_tracks'):

@@ -1,6 +1,5 @@
 import db
 import auth
-import catbox
 import requests as req_lib
 from flask import Blueprint, abort, jsonify, request, send_file, Response
 from flask import session as flask_session
@@ -87,10 +86,7 @@ def stream_direct(token: str):
     if not s:
         abort(404)
     s.touch()
-
-    cdn_url = catbox.materialize(token, allow_readd=True)
-    if not cdn_url:
-        abort(503)
+    cdn_url = s.cdn_url
 
     headers = {}
     range_hdr = request.headers.get("Range")
