@@ -19,12 +19,13 @@ const STEPS = ['searching', 'materializing', 'probing', 'preparing'] as const
 
 interface AudioTrack { index: number; codec: string; language: string; title: string }
 interface FileInfo {
-  duration_s:    number
-  video_codec:   string
-  width:         number
-  height:        number
-  is_hdr:        boolean
-  audio_tracks:  AudioTrack[]
+  duration_s:      number
+  video_codec:     string
+  container:       string
+  width:           number
+  height:          number
+  is_hdr:          boolean
+  audio_tracks:    AudioTrack[]
   subtitle_tracks: any[]
 }
 
@@ -37,6 +38,25 @@ interface JobStatus {
   cdn_url?:     string
   file_info?:   FileInfo
   error?:       string
+}
+
+function _browserCanPlay(fileInfo: FileInfo | undefined): boolean {
+  if (!fileInfo) return false
+  const v = document.createElement('video')
+  const codec  = (fileInfo.video_codec || '').toLowerCase()
+  const container = (fileInfo as any).container || ''
+  const isMp4 = container.includes('mp4') || container.includes('mov') || container.includes('m4v')
+  if (codec === 'h264' || codec === 'avc') {
+    return isMp4 && v.canPlayType('video/mp4; codecs="avc1.42E01E"') !== ''
+  }
+  if (codec === 'hevc' || codec === 'h265') {
+    if (!isMp4) return false   // MKV HEVC: no browser supports it
+    return (
+      v.canPlayType('video/mp4; codecs="hvc1"') !== '' ||
+      v.canPlayType('video/mp4; codecs="hev1"') !== ''
+    )
+  }
+  return false
 }
 
 export default function PlayerModal({ imdb_id, media_type, title, season, episode, onClose }: {
@@ -86,10 +106,31 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
     if (status?.status !== 'ready' || !status.stream_url || !videoRef.current) return
 
     const video    = videoRef.current
-    const isDirect = status.stream_type === 'direct'
+    const fileInfo = status.file_info
+    const isDirect = status.stream_type === 'direct' && _browserCanPlay(fileInfo)
 
     if (isDirect) {
       video.src = status.stream_url!
+    } else if (!isDirect && status.stream_type === 'direct') {
+      // Browser can't handle the codec/container — skip to HLS immediately
+      if (!hlsReady) {
+        setConverting(true)
+        const tok = status.token!
+        fetch(`/stream/${tok}/convert-hls`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'X-CSRFToken': document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '' },
+        })
+        pollHlsRef.current = setInterval(async () => {
+          const r = await fetch(`/stream/${tok}/hls/playlist.m3u8`)
+          if (r.ok) {
+            clearInterval(pollHlsRef.current)
+            setConverting(false)
+            setHlsReady(true)
+          }
+        }, 1000)
+      }
+      return
     } else if (Hls.isSupported()) {
       const hls = new Hls({ enableWorker: false })
       hls.on(Hls.Events.ERROR, (_e, data) => {
