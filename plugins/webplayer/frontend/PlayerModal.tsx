@@ -42,21 +42,9 @@ interface JobStatus {
 
 function _browserCanPlay(fileInfo: FileInfo | undefined): boolean {
   if (!fileInfo) return false
-  const v = document.createElement('video')
-  const codec  = (fileInfo.video_codec || '').toLowerCase()
-  const container = (fileInfo as any).container || ''
-  const isMp4 = container.includes('mp4') || container.includes('mov') || container.includes('m4v')
-  if (codec === 'h264' || codec === 'avc') {
-    return isMp4 && v.canPlayType('video/mp4; codecs="avc1.42E01E"') !== ''
-  }
-  if (codec === 'hevc' || codec === 'h265') {
-    if (!isMp4) return false   // MKV HEVC: no browser supports it
-    return (
-      v.canPlayType('video/mp4; codecs="hvc1"') !== '' ||
-      v.canPlayType('video/mp4; codecs="hev1"') !== ''
-    )
-  }
-  return false
+  const codec = (fileInfo.video_codec || '').toLowerCase()
+  // Let the browser try H.264 and HEVC directly; onerror handles failure.
+  return codec === 'h264' || codec === 'avc' || codec === 'hevc' || codec === 'h265'
 }
 
 export default function PlayerModal({ imdb_id, media_type, title, season, episode, onClose }: {
