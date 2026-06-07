@@ -30,6 +30,9 @@ _BROWSER_AUDIO_OK    = {"aac"}   # vorbis/opus not reliable in mpegts HLS
 _NO_BROWSER_VIDEO_RE = re.compile(r"\b(av1|vp9|vp8)\b", re.IGNORECASE)
 _HDR_NAME_RE         = re.compile(r"\bhdr10\+|\bhdr10plus\b|\bhdr10\b|\bhdr\b|\bhlg\b|\bpq10\b", re.IGNORECASE)
 _AAC_SAMPLE_RATE     = "48000"   # browsers require consistent sample rate in TS
+_H264_RE             = re.compile(r"\bx264\b|\bh\.?264\b|\bavc\b", re.IGNORECASE)
+_AAC_NAME_RE         = re.compile(r"\baac\b", re.IGNORECASE)
+_BAD_AUDIO_RE        = re.compile(r"\bdts\b|\btruehd\b|\batmos\b|\bdts.?hd\b|\bdts.?ma\b", re.IGNORECASE)
 _TEXT_SUB_CODECS  = {"subrip", "ass", "ssa", "webvtt", "mov_text", "srt"}
 
 
@@ -50,7 +53,9 @@ def _web_score(stream: torrentio.TorrentioStream) -> int:
     elif stream.quality == "2160p":                   score += 80   # 4K SDR remux: fine for browsers
     elif stream.quality == "720p":                    score += 50
     if torrentio._WEBDL_RE.search(blob):              score += 40
-    if torrentio._HEVC_RE.search(blob):               score += 20  # smaller file, same quality
+    if _H264_RE.search(blob):                         score += 60  # universally direct-playable
+    if _AAC_NAME_RE.search(blob):                     score += 30  # universally direct-playable audio
+    if _BAD_AUDIO_RE.search(blob):                    score -= 40  # DTS/TrueHD always needs transcode
     if stream.seeders > 10:                           score += 10
 
     # Smaller = faster initial buffering.
