@@ -27,7 +27,6 @@ SEGMENT_WAIT_TIMEOUT = 90
 SESSION_IDLE_CLEANUP = 1800
 
 _BROWSER_AUDIO_OK    = {"aac"}   # vorbis/opus not reliable in mpegts HLS
-_DIRECT_AUDIO_OK     = {"aac", "mp3", "vorbis", "opus"}
 _NO_BROWSER_VIDEO_RE = re.compile(r"\b(av1|vp9|vp8)\b", re.IGNORECASE)
 _HDR_NAME_RE         = re.compile(r"\bhdr10\+|\bhdr10plus\b|\bhdr10\b|\bhdr\b|\bhlg\b|\bpq10\b", re.IGNORECASE)
 _AAC_SAMPLE_RATE     = "48000"   # browsers require consistent sample rate in TS
@@ -313,44 +312,12 @@ def _run_job(job: PrepareJob) -> None:
         job.status  = JobStatus.PREPARING
         job.message = "Preparing for playback…"
 
-        if _is_direct_playable(file_info):
-            _start_direct(session_key, file_info)
-            job.token       = session_key
-            job.stream_type = "direct"
-            job.stream_url  = f"/stream/{session_key}/direct"
-            job.status      = JobStatus.READY
-            job.message     = "Ready"
-        else:
-            tmp_dir = PLAYER_TMP_DIR / session_key
-            tmp_dir.mkdir(parents=True, exist_ok=True)
-
-            multi_audio = len(file_info["audio_tracks"]) > 1
-
-            sub_thread = threading.Thread(
-                target=_subtitles_task,
-                args=(cdn_url, file_info, job.imdb_id, job.media_type,
-                      job.season, job.episode, session_key, tmp_dir),
-                daemon=True,
-            )
-            sub_thread.start()
-
-            session = _start_hls(session_key, cdn_url, file_info, tmp_dir)
-
-            if not multi_audio:
-                if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
-                    session.proc.terminate()
-                    job.status = JobStatus.ERROR
-                    job.error  = "Timeout: FFmpeg produced no segments."
-                    return
-
-            sub_thread.join(timeout=15)
-
-            job.token       = session_key
-            job.stream_type = "hls"
-            job.stream_url  = (f"/stream/{session_key}/hls/master.m3u8" if multi_audio
-                               else f"/stream/{session_key}/hls/playlist.m3u8")
-            job.status      = JobStatus.READY
-            job.message     = "Ready"
+        _start_direct(session_key, file_info)
+        job.token       = session_key
+        job.stream_type = "direct"
+        job.stream_url  = f"/stream/{session_key}/direct"
+        job.status      = JobStatus.READY
+        job.message     = "Ready"
 
     except Exception:
         log.exception("web_player: prepare job %s crashed", job.job_id)
@@ -407,16 +374,6 @@ def _probe(cdn_url: str) -> dict:
 
 # ── Direct play ───────────────────────────────────────────────────────────────
 
-def _is_direct_playable(file_info: dict) -> bool:
-    """True when the browser can play the file as-is — no FFmpeg needed."""
-    if file_info.get("video_codec") != "h264":
-        return False
-    tracks = file_info.get("audio_tracks", [])
-    if not tracks:
-        return False
-    return all(t["codec"] in _DIRECT_AUDIO_OK for t in tracks)
-
-
 def _content_type_for(file_info: dict) -> str:
     fmt = file_info.get("container", "")
     if "matroska" in fmt or "webm" in fmt:
@@ -428,6 +385,8 @@ def _content_type_for(file_info: dict) -> str:
 class DirectSession:
     token:        str
     content_type: str
+    file_info:    dict
+    converting:   bool  = False   # True once HLS fallback has been triggered
     started_at:   float = field(default_factory=time.monotonic)
     last_request: float = field(default_factory=time.monotonic)
     _hb:          threading.Thread = field(default=None, repr=False)
@@ -456,12 +415,49 @@ def get_direct_session(token: str) -> DirectSession | None:
 
 
 def _start_direct(token: str, file_info: dict) -> DirectSession:
-    session = DirectSession(token=token, content_type=_content_type_for(file_info))
+    session = DirectSession(token=token, content_type=_content_type_for(file_info),
+                            file_info=file_info)
     session.start_heartbeat()
     with _direct_lock:
         _direct_sessions[token] = session
     log.info("web_player: direct play session started token=%s", token)
     return session
+
+
+def start_hls_conversion(token: str) -> bool:
+    """Trigger HLS pipeline for an active direct session (browser couldn't play it)."""
+    s = get_direct_session(token)
+    if not s:
+        return False
+    if s.converting:
+        return True  # already in progress — idempotent
+    s.converting = True
+    threading.Thread(target=_do_hls_conversion, args=(token, s.file_info),
+                     daemon=True).start()
+    return True
+
+
+def _do_hls_conversion(token: str, file_info: dict) -> None:
+    try:
+        cdn_url = catbox.materialize(token, allow_readd=True)
+        if not cdn_url:
+            log.warning("web_player: HLS fallback — could not materialize token=%s", token)
+            return
+        tmp_dir = PLAYER_TMP_DIR / token
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        session = _start_hls(token, cdn_url, file_info, tmp_dir)
+        if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
+            session.proc.terminate()
+            log.warning("web_player: HLS fallback timed out token=%s", token)
+            return
+        threading.Thread(
+            target=_extract_subtitles,
+            args=(cdn_url, file_info["subtitle_tracks"], token, tmp_dir),
+            daemon=True,
+        ).start()
+        log.info("web_player: HLS fallback ready token=%s", token)
+    except Exception:
+        log.exception("web_player: HLS fallback crashed token=%s", token)
 
 
 # ── HLS session ────────────────────────────────────────────────────────────────

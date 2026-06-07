@@ -73,6 +73,14 @@ def stream_hls_file(token: str, filename: str):
     abort(400)
 
 
+@bp.post("/stream/<token>/convert-hls")
+def stream_convert_hls(token: str):
+    ok = web_player.start_hls_conversion(token)
+    if not ok:
+        abort(404)
+    return jsonify(ok=True)
+
+
 @bp.get("/stream/<token>/direct")
 def stream_direct(token: str):
     s = web_player.get_direct_session(token)

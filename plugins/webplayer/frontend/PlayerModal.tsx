@@ -58,6 +58,9 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
   const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null)
   const [jumpMin,     setJumpMin]     = useState('')
   const [jumping,     setJumping]     = useState(false)
+  const [converting,  setConverting]  = useState(false)
+  const [hlsReady,    setHlsReady]    = useState(false)
+  const pollHlsRef = useRef<ReturnType<typeof setInterval>>()
 
   const prepareMutation = useMutation({
     mutationFn: () =>
@@ -110,6 +113,26 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
 
     video.addEventListener('loadedmetadata', () => video.play(), { once: true })
 
+    video.addEventListener('error', () => {
+      if (isDirect && !hlsReady) {
+        setConverting(true)
+        const tok = status.token!
+        fetch(`/stream/${tok}/convert-hls`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'X-CSRFToken': document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '' },
+        })
+        pollHlsRef.current = setInterval(async () => {
+          const r = await fetch(`/stream/${tok}/hls/playlist.m3u8`)
+          if (r.ok) {
+            clearInterval(pollHlsRef.current)
+            setConverting(false)
+            setHlsReady(true)
+          }
+        }, 1000)
+      }
+    }, { once: true })
+
     video.addEventListener('play', () => {
       if (traktEnabled) {
         const progress = video.duration ? (video.currentTime / video.duration) * 100 : 0
@@ -135,8 +158,27 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
       }
       hlsRef.current?.destroy()
       clearInterval(saveTimer.current)
+      clearInterval(pollHlsRef.current)
     }
   }, [status?.status])
+
+  // Wire HLS.js once the automatic fallback conversion is done
+  useEffect(() => {
+    const tok = status?.token
+    if (!hlsReady || !videoRef.current || !tok) return
+    const video = videoRef.current
+    const hls = new Hls({ enableWorker: false })
+    hls.on(Hls.Events.ERROR, (_e, data) => {
+      if (!data.fatal) return
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError()
+      else hls.destroy()
+    })
+    hls.attachMedia(video)
+    hls.loadSource(`/stream/${tok}/hls/playlist.m3u8`)
+    hlsRef.current = hls
+    video.play().catch(() => {})
+    return () => hls.destroy()
+  }, [hlsReady])
 
   // Reload Hls.js (or native video) with a new source URL  -  used after seek restart.
   const reloadHls = useCallback((url: string) => {
@@ -286,6 +328,14 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
         {/* Player */}
         {status?.status === 'ready' && (
           <div className="bg-black rounded-xl overflow-hidden shadow-2xl">
+            {converting && (
+              <div className="absolute inset-0 z-10 bg-black/80 flex flex-col items-center justify-center gap-3">
+                <p className="text-white text-sm font-medium">Switching to compatible mode…</p>
+                <div className="w-32 h-1 bg-zinc-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-indigo-500 rounded-full animate-pulse w-1/2" />
+                </div>
+              </div>
+            )}
             <video
               ref={videoRef}
               controls
