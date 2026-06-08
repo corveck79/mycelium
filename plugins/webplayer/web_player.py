@@ -54,9 +54,12 @@ def _web_score(stream: torrentio.TorrentioStream) -> int:
     elif stream.quality == "2160p":                   score += 80   # 4K SDR remux: fine for browsers
     elif stream.quality == "720p":                    score += 50
     if torrentio._WEBDL_RE.search(blob):              score += 40
-    if _H264_RE.search(blob):                         score += 60  # universally direct-playable
-    if _AAC_NAME_RE.search(blob):                     score += 30  # universally direct-playable audio
-    if _BAD_AUDIO_RE.search(blob):                    score -= 40  # DTS/TrueHD always needs transcode
+    is_h264 = bool(_H264_RE.search(blob))
+    is_aac  = bool(_AAC_NAME_RE.search(blob))
+    if is_h264:                                       score += 100  # direct play in every browser
+    if is_aac:                                        score += 50   # direct play audio, no transcode
+    if is_h264 and is_aac:                            score += 50   # perfect combo: zero server work
+    if _BAD_AUDIO_RE.search(blob):                    score -= 40   # DTS/TrueHD always needs transcode
     if stream.seeders > 10:                           score += 10
 
     # Smaller = faster initial buffering.
