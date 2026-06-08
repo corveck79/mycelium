@@ -30,6 +30,7 @@ SESSION_IDLE_CLEANUP = 1800
 _BROWSER_AUDIO_OK    = {"aac"}   # vorbis/opus not reliable in mpegts HLS
 _NO_BROWSER_VIDEO_RE = re.compile(r"\b(av1|vp9|vp8)\b", re.IGNORECASE)
 _HDR_NAME_RE         = re.compile(r"\bhdr10\+|\bhdr10plus\b|\bhdr10\b|\bhdr\b|\bhlg\b|\bpq10\b", re.IGNORECASE)
+_HEVC_NAME_RE        = re.compile(r"\b(x265|hevc|h\.?265)\b", re.IGNORECASE)
 _AAC_SAMPLE_RATE     = "48000"   # browsers require consistent sample rate in TS
 _H264_RE             = re.compile(r"\bx264\b|\bh\.?264\b|\bavc\b", re.IGNORECASE)
 _AAC_NAME_RE         = re.compile(r"\baac\b", re.IGNORECASE)
@@ -37,9 +38,28 @@ _BAD_AUDIO_RE        = re.compile(r"\bdts\b|\btruehd\b|\batmos\b|\bdts.?hd\b|\bd
 _TEXT_SUB_CODECS  = {"subrip", "ass", "ssa", "webvtt", "mov_text", "srt"}
 
 
+def _parse_browser_caps(user_agent: str) -> dict:
+    """Derive codec capabilities from User-Agent string.
+
+    Used to tune candidate scoring per browser:
+    - Firefox has no HEVC playback support (always needs server transcode).
+    - Chrome/Edge on desktop support HEVC via hardware, but not guaranteed on Linux.
+    - Safari supports HEVC natively.
+    """
+    ua = (user_agent or "").lower()
+    is_firefox = "firefox/" in ua
+    # Chromium on Linux rarely has HEVC hardware decode; desktop Windows/Mac usually does.
+    is_linux   = "linux" in ua and "android" not in ua
+    is_chrome  = ("chrome/" in ua or "chromium/" in ua) and "edg" not in ua
+    hevc_ok    = not is_firefox and not (is_chrome and is_linux)
+    return {"hevc_ok": hevc_ok}
+
+
 # ── Torrent selection ──────────────────────────────────────────────────────────
 
-def _web_score(stream: torrentio.TorrentioStream) -> int:
+def _web_score(stream: torrentio.TorrentioStream,
+               caps: dict | None = None) -> int:
+    caps = caps or {}
     blob = f"{stream.name} {stream.title}"
     if torrentio._DV_RE.search(blob):      return -1  # Dolby Vision: browser-incompatible
     if _NO_BROWSER_VIDEO_RE.search(blob):  return -1  # AV1/VP9/VP8: no browser HLS support
@@ -50,31 +70,40 @@ def _web_score(stream: torrentio.TorrentioStream) -> int:
         return -1
 
     score = 0
-    if stream.quality == "1080p":                     score += 100
-    elif stream.quality == "2160p":                   score += 80   # 4K SDR remux: fine for browsers
-    elif stream.quality == "720p":                    score += 50
-    if torrentio._WEBDL_RE.search(blob):              score += 40
+    if stream.quality == "1080p":   score += 100
+    elif stream.quality == "2160p": score += 80
+    elif stream.quality == "720p":  score += 50
+
+    if torrentio._WEBDL_RE.search(blob): score += 40
+
     is_h264 = bool(_H264_RE.search(blob))
     is_aac  = bool(_AAC_NAME_RE.search(blob))
-    if is_h264:                                       score += 100  # direct play in every browser
-    if is_aac:                                        score += 50   # direct play audio, no transcode
-    if is_h264 and is_aac:                            score += 50   # perfect combo: zero server work
-    if _BAD_AUDIO_RE.search(blob):                    score -= 40   # DTS/TrueHD always needs transcode
-    if stream.seeders > 10:                           score += 10
+    if is_h264:            score += 100  # direct play in every browser
+    if is_aac:             score += 50   # direct play audio, no transcode needed
+    if is_h264 and is_aac: score += 50   # perfect combo: zero server work
+
+    # Browser-specific: penalise HEVC when the browser can't hardware-decode it.
+    # Firefox has no HEVC at all; Chrome on Linux usually lacks hardware decode.
+    if not caps.get("hevc_ok", True) and _HEVC_NAME_RE.search(blob):
+        score -= 200  # still selectable as last resort, but strongly avoided
+
+    if _BAD_AUDIO_RE.search(blob): score -= 40  # DTS/TrueHD always needs transcode
+    if stream.seeders > 10:        score += 10
 
     # Smaller = faster initial buffering.
-    if   0 < stream.size_gb < 0.5:  score += 55
-    elif stream.size_gb     < 2:    score += 40
-    elif stream.size_gb     < 4:    score += 30
-    elif stream.size_gb     < 8:    score += 18
-    elif stream.size_gb     < 12:   score += 8
+    if   0 < stream.size_gb < 0.5: score += 55
+    elif stream.size_gb     < 2:   score += 40
+    elif stream.size_gb     < 4:   score += 30
+    elif stream.size_gb     < 8:   score += 18
+    elif stream.size_gb     < 12:  score += 8
 
     return score
 
 
 def find_web_candidates(imdb_id: str, media_type: str,
                         season: int | None = None,
-                        episode: int | None = None) -> list[torrentio.TorrentioStream]:
+                        episode: int | None = None,
+                        browser_caps: dict | None = None) -> list[torrentio.TorrentioStream]:
     streams: list[torrentio.TorrentioStream] = []
     seen: set[str] = set()
 
@@ -92,7 +121,8 @@ def find_web_candidates(imdb_id: str, media_type: str,
                 streams.append(s)
 
     scored = sorted(
-        ((s, _web_score(s)) for s in streams if _web_score(s) >= 0),
+        ((s, _web_score(s, browser_caps)) for s in streams
+         if _web_score(s, browser_caps) >= 0),
         key=lambda x: x[1], reverse=True,
     )
     return [s for s, _ in scored]
@@ -111,20 +141,21 @@ class JobStatus(str, Enum):
 
 @dataclass
 class PrepareJob:
-    job_id:      str
-    imdb_id:     str
-    media_type:  str
-    season:      int | None
-    episode:     int | None
-    status:      JobStatus = JobStatus.SEARCHING
-    message:     str = ""
-    token:       str | None = None
-    stream_url:  str | None = None
-    stream_type: str = "hls"
-    cdn_url:     str | None = None
-    file_info:   dict | None = None
-    error:       str | None = None
-    _thread:     threading.Thread = field(default=None, repr=False)
+    job_id:       str
+    imdb_id:      str
+    media_type:   str
+    season:       int | None
+    episode:      int | None
+    browser_caps: dict = field(default_factory=dict)
+    status:       JobStatus = JobStatus.SEARCHING
+    message:      str = ""
+    token:        str | None = None
+    stream_url:   str | None = None
+    stream_type:  str = "hls"
+    cdn_url:      str | None = None
+    file_info:    dict | None = None
+    error:        str | None = None
+    _thread:      threading.Thread = field(default=None, repr=False)
 
 
 _jobs: dict[str, PrepareJob] = {}
@@ -133,10 +164,12 @@ _jobs_lock = threading.Lock()
 
 def start_prepare_job(imdb_id: str, media_type: str,
                       season: int | None = None,
-                      episode: int | None = None) -> str:
+                      episode: int | None = None,
+                      user_agent: str = "") -> str:
     job_id = uuid.uuid4().hex[:12]
     job = PrepareJob(job_id=job_id, imdb_id=imdb_id, media_type=media_type,
-                     season=season, episode=episode)
+                     season=season, episode=episode,
+                     browser_caps=_parse_browser_caps(user_agent))
     with _jobs_lock:
         _jobs[job_id] = job
     t = threading.Thread(target=_run_job, args=(job,), daemon=True)
@@ -226,7 +259,8 @@ def _run_job(job: PrepareJob) -> None:
         job.message = "Looking for a web-compatible version…"
 
         candidates = find_web_candidates(
-            job.imdb_id, job.media_type, job.season, job.episode
+            job.imdb_id, job.media_type, job.season, job.episode,
+            browser_caps=job.browser_caps,
         )
         if not candidates:
             job.status = JobStatus.ERROR

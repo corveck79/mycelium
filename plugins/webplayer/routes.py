@@ -24,6 +24,7 @@ def web_player_prepare():
         media_type = d["media_type"],
         season     = d.get("season"),
         episode    = d.get("episode"),
+        user_agent = request.headers.get("User-Agent", ""),
     )
     return jsonify(job_id=job_id)
 
