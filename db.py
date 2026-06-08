@@ -291,6 +291,15 @@ CREATE TABLE IF NOT EXISTS createtorrent_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_createtorrent_ts ON createtorrent_log(ts);
+
+CREATE TABLE IF NOT EXISTS playback_positions (
+    user_id    INTEGER NOT NULL,
+    token      TEXT    NOT NULL,
+    position_s REAL    NOT NULL DEFAULT 0,
+    duration_s REAL,
+    updated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    PRIMARY KEY (user_id, token)
+);
 """
 
 
@@ -1627,3 +1636,27 @@ def get_createtorrent_log(since_ts: float) -> list[tuple[float, str]]:
             (since_ts,),
         ).fetchall()
     return [(r["ts"], r["reason"]) for r in rows]
+
+
+def save_playback_position(user_id: int, token: str,
+                           position_s: float, duration_s: float | None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO playback_positions (user_id, token, position_s, duration_s, updated_at)
+               VALUES (?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%S','now'))
+               ON CONFLICT(user_id, token) DO UPDATE SET
+                 position_s = excluded.position_s,
+                 duration_s = excluded.duration_s,
+                 updated_at = excluded.updated_at""",
+            (user_id, token, position_s, duration_s),
+        )
+        conn.commit()
+
+
+def get_playback_position(user_id: int, token: str) -> float | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT position_s FROM playback_positions WHERE user_id=? AND token=?",
+            (user_id, token),
+        ).fetchone()
+    return row["position_s"] if row else None
