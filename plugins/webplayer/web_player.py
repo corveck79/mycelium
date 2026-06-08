@@ -26,6 +26,7 @@ PLAYER_TMP_DIR       = Path("/tmp/mycelium-player")
 SEGMENT_WAIT_COUNT   = 3
 SEGMENT_WAIT_TIMEOUT = 90
 SESSION_IDLE_CLEANUP = 1800
+CDN_URL_MAX_AGE_S    = 1800   # refresh TorBox signed URL after 30 minutes
 
 _BROWSER_AUDIO_OK    = {"aac"}   # vorbis/opus not reliable in mpegts HLS
 _NO_BROWSER_VIDEO_RE = re.compile(r"\b(av1|vp9|vp8)\b", re.IGNORECASE)
@@ -185,8 +186,9 @@ def get_job(job_id: str) -> PrepareJob | None:
 
 # ── Pipeline ───────────────────────────────────────────────────────────────────
 
-def _get_cdn_url(stream: torrentio.TorrentioStream) -> str | None:
-    """Resolve a TorrentioStream to a TorBox CDN URL.
+def _get_cdn_url(stream: torrentio.TorrentioStream,
+                 ) -> tuple[str | None, int | None, int | None]:
+    """Resolve a TorrentioStream to (cdn_url, torrent_id, file_id).
 
     The caller guarantees that either:
     - the hash is already in the user's TorBox library, OR
@@ -204,8 +206,7 @@ def _get_cdn_url(stream: torrentio.TorrentioStream) -> str | None:
             torrent_id = (result or {}).get("torrent_id") or (result or {}).get("id")
         except torbox.RateLimited:
             log.warning("web_player: TorBox rate-limited on add_magnet")
-            return None
-        # Cached torrents become ready in seconds, not minutes.
+            return None, None, None
         item = torbox.wait_until_ready(stream.info_hash, timeout=60,
                                        torrent_id=torrent_id)
     elif not torbox._is_ready(item):
@@ -213,7 +214,7 @@ def _get_cdn_url(stream: torrentio.TorrentioStream) -> str | None:
                                        torrent_id=item.get("id"))
 
     if not item:
-        return None
+        return None, None, None
 
     torrent_id = item.get("id")
     files      = item.get("files") or []
@@ -221,16 +222,16 @@ def _get_cdn_url(stream: torrentio.TorrentioStream) -> str | None:
         fresh = torbox.find_by_id(torrent_id)
         files = (fresh or {}).get("files") or []
     if not files:
-        return None
+        return None, None, None
 
-    # Pick the largest video file.
     _VIDEO_EXT = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts"}
     videos  = [f for f in files
                if Path(f.get("name") or "").suffix.lower() in _VIDEO_EXT] or files
     main    = max(videos, key=lambda f: f.get("size") or 0)
     file_id = main.get("id")
 
-    return _request_dl(torrent_id, file_id)
+    url = _request_dl(torrent_id, file_id)
+    return url, torrent_id, file_id
 
 
 def _request_dl(torrent_id: int, file_id: int) -> str | None:
@@ -294,9 +295,11 @@ def _run_job(job: PrepareJob) -> None:
 
         # Probe each candidate; skip any that turn out to be HDR after all
         # (name-based filter may miss unlabelled HDR releases).
-        cdn_url   = None
-        file_info = None
+        cdn_url     = None
+        file_info   = None
         session_key = None
+        torrent_id  = None
+        file_id     = None
         for candidate in ([best] + [c for c in candidates if c is not best]):
             # Only use instantly-available content.
             _hash = candidate.info_hash
@@ -311,7 +314,13 @@ def _run_job(job: PrepareJob) -> None:
             with _direct_lock:
                 existing_direct = _direct_sessions.get(_hash)
             if existing_direct:
-                log.info("web_player: reusing active direct session hash=%s", _hash)
+                age = time.monotonic() - existing_direct.started_at
+                if age > CDN_URL_MAX_AGE_S:
+                    log.info("web_player: CDN URL stale (%.0fs), refreshing hash=%s",
+                             age, _hash)
+                    _refresh_direct_cdn_url(existing_direct)
+                else:
+                    log.info("web_player: reusing active direct session hash=%s", _hash)
                 job.token       = _hash
                 job.file_info   = existing_direct.file_info
                 job.cdn_url     = None
@@ -340,7 +349,7 @@ def _run_job(job: PrepareJob) -> None:
 
             job.status  = JobStatus.MATERIALIZING
             job.message = "Fetching via TorBox…"
-            _cdn = _get_cdn_url(candidate)
+            _cdn, _torrent_id, _file_id = _get_cdn_url(candidate)
             if not _cdn:
                 log.warning("web_player: requestdl failed for hash=%s, skipping", _hash)
                 continue
@@ -348,6 +357,8 @@ def _run_job(job: PrepareJob) -> None:
             # Skip probe — serve directly and let the browser decide.
             # ffprobe runs lazily only if HLS fallback is triggered.
             cdn_url     = _cdn
+            torrent_id  = _torrent_id
+            file_id     = _file_id
             file_info   = _file_info_from_candidate(candidate)
             session_key = _hash
             break
@@ -363,7 +374,8 @@ def _run_job(job: PrepareJob) -> None:
         job.status  = JobStatus.PREPARING
         job.message = "Preparing for playback…"
 
-        _start_direct(session_key, file_info, cdn_url)
+        _start_direct(session_key, file_info, cdn_url,
+                      torrent_id=torrent_id, file_id=file_id)
         job.token       = session_key
         job.stream_type = "direct"
         job.stream_url  = f"/stream/{session_key}/direct"
@@ -443,6 +455,8 @@ class DirectSession:
     content_type: str
     cdn_url:      str
     file_info:    dict
+    torrent_id:   int | None = None
+    file_id:      int | None = None
     converting:   bool  = False   # True once HLS fallback has been triggered
     started_at:   float = field(default_factory=time.monotonic)
     last_request: float = field(default_factory=time.monotonic)
@@ -471,9 +485,25 @@ def get_direct_session(token: str) -> DirectSession | None:
         return _direct_sessions.get(token)
 
 
-def _start_direct(token: str, file_info: dict, cdn_url: str) -> DirectSession:
+def _refresh_direct_cdn_url(session: DirectSession) -> None:
+    """Fetch a fresh TorBox signed URL for an existing direct session in-place."""
+    if session.torrent_id is None or session.file_id is None:
+        return
+    new_url = _request_dl(session.torrent_id, session.file_id)
+    if new_url:
+        session.cdn_url    = new_url
+        session.started_at = time.monotonic()
+        log.info("web_player: refreshed CDN URL for token=%s", session.token)
+    else:
+        log.warning("web_player: CDN URL refresh failed for token=%s", session.token)
+
+
+def _start_direct(token: str, file_info: dict, cdn_url: str,
+                  torrent_id: int | None = None,
+                  file_id:    int | None = None) -> DirectSession:
     session = DirectSession(token=token, content_type=_content_type_for(file_info),
-                            cdn_url=cdn_url, file_info=file_info)
+                            cdn_url=cdn_url, file_info=file_info,
+                            torrent_id=torrent_id, file_id=file_id)
     session.start_heartbeat()
     with _direct_lock:
         _direct_sessions[token] = session
