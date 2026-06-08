@@ -68,6 +68,8 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
   const [jumping,     setJumping]     = useState(false)
   const [converting,  setConverting]  = useState(false)
   const [hlsReady,    setHlsReady]    = useState(false)
+  const [hlsUrl,      setHlsUrl]      = useState<string | null>(null)
+  const [hlsError,    setHlsError]    = useState<string | null>(null)
   const pollHlsRef = useRef<ReturnType<typeof setInterval>>()
 
   const prepareMutation = useMutation({
@@ -110,12 +112,21 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
           headers: { 'X-CSRFToken': document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '' },
         })
         pollHlsRef.current = setInterval(async () => {
-          const r = await fetch(`/stream/${tok}/hls/playlist.m3u8`)
-          if (r.ok) {
-            clearInterval(pollHlsRef.current)
-            setConverting(false)
-            setHlsReady(true)
-          }
+          try {
+            const r = await fetch(`/stream/${tok}/hls-status`)
+            if (!r.ok) return
+            const d = await r.json()
+            if (d.status === 'ready') {
+              clearInterval(pollHlsRef.current)
+              setHlsUrl(d.url)
+              setConverting(false)
+              setHlsReady(true)
+            } else if (d.status === 'error') {
+              clearInterval(pollHlsRef.current)
+              setConverting(false)
+              setHlsError(d.error || 'Conversion failed — use Jellyfin')
+            }
+          } catch {}
         }, 1000)
       }
       return
@@ -152,12 +163,21 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
           headers: { 'X-CSRFToken': document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '' },
         })
         pollHlsRef.current = setInterval(async () => {
-          const r = await fetch(`/stream/${tok}/hls/playlist.m3u8`)
-          if (r.ok) {
-            clearInterval(pollHlsRef.current)
-            setConverting(false)
-            setHlsReady(true)
-          }
+          try {
+            const r = await fetch(`/stream/${tok}/hls-status`)
+            if (!r.ok) return
+            const d = await r.json()
+            if (d.status === 'ready') {
+              clearInterval(pollHlsRef.current)
+              setHlsUrl(d.url)
+              setConverting(false)
+              setHlsReady(true)
+            } else if (d.status === 'error') {
+              clearInterval(pollHlsRef.current)
+              setConverting(false)
+              setHlsError(d.error || 'Conversion failed — use Jellyfin')
+            }
+          } catch {}
         }, 1000)
       }
     }, { once: true })
@@ -193,8 +213,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
 
   // Wire HLS.js once the automatic fallback conversion is done
   useEffect(() => {
-    const tok = status?.token
-    if (!hlsReady || !videoRef.current || !tok) return
+    if (!hlsReady || !videoRef.current || !hlsUrl) return
     const video = videoRef.current
     const hls = new Hls({ enableWorker: false })
     hls.on(Hls.Events.ERROR, (_e, data) => {
@@ -203,7 +222,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
       else hls.destroy()
     })
     hls.attachMedia(video)
-    hls.loadSource(`/stream/${tok}/hls/playlist.m3u8`)
+    hls.loadSource(hlsUrl)
     hlsRef.current = hls
     video.play().catch(() => {})
     return () => hls.destroy()
@@ -357,12 +376,21 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
         {/* Player */}
         {status?.status === 'ready' && (
           <div className="bg-black rounded-xl overflow-hidden shadow-2xl">
-            {converting && (
+            {(converting || hlsError) && (
               <div className="absolute inset-0 z-10 bg-black/80 flex flex-col items-center justify-center gap-3">
-                <p className="text-white text-sm font-medium">Switching to compatible mode…</p>
-                <div className="w-32 h-1 bg-zinc-700 rounded-full overflow-hidden">
-                  <div className="h-full bg-indigo-500 rounded-full animate-pulse w-1/2" />
-                </div>
+                {hlsError ? (
+                  <>
+                    <p className="text-red-400 text-sm font-medium">Playback failed</p>
+                    <p className="text-zinc-300 text-xs max-w-xs text-center">{hlsError}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-white text-sm font-medium">Switching to compatible mode…</p>
+                    <div className="w-32 h-1 bg-zinc-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-indigo-500 rounded-full animate-pulse w-1/2" />
+                    </div>
+                  </>
+                )}
               </div>
             )}
             <video

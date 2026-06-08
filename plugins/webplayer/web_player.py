@@ -12,6 +12,7 @@ from pathlib import Path
 
 import requests as req_lib
 
+import db
 import health_cache
 import settings as _settings
 import subtitles as _subtitles
@@ -340,13 +341,18 @@ def _run_job(job: PrepareJob) -> None:
 
 # ── FFprobe ────────────────────────────────────────────────────────────────────
 
-def _probe(cdn_url: str) -> dict:
-    result = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json",
-         "-show_streams", "-show_format", cdn_url],
-        capture_output=True, timeout=20,
-    )
-    data    = json.loads(result.stdout)
+def _probe(cdn_url: str) -> dict | None:
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json",
+             "-show_streams", "-show_format", cdn_url],
+            capture_output=True, timeout=20,
+        )
+        data    = json.loads(result.stdout)
+    except Exception as exc:
+        log.warning("web_player: ffprobe failed: %s", exc)
+        return None
+
     streams = data.get("streams", [])
 
     video = next((s for s in streams if s["codec_type"] == "video"), {})
@@ -476,34 +482,48 @@ def _file_info_from_candidate(candidate) -> dict:
 
 
 def _do_hls_conversion(token: str, file_info: dict) -> None:
+    tmp_dir = PLAYER_TMP_DIR / token
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     try:
         s = get_direct_session(token)
         cdn_url = s.cdn_url if s else None
         if not cdn_url:
             log.warning("web_player: HLS fallback — no CDN URL for token=%s", token)
+            (tmp_dir / "hls_error.txt").write_text("Session expired — please reopen the player")
             return
         # Probe now if we skipped it during direct play (lazy path).
         if not file_info.get('audio_tracks'):
             log.info("web_player: lazy ffprobe for HLS fallback token=%s", token)
-            file_info = _probe(cdn_url)
+            probed = _probe(cdn_url)
+            if probed is None:
+                log.warning("web_player: ffprobe failed for token=%s", token)
+                (tmp_dir / "hls_error.txt").write_text("Could not read file info — use Jellyfin")
+                return
+            file_info = probed
             s = get_direct_session(token)
             if s:
                 s.file_info = file_info
-        tmp_dir = PLAYER_TMP_DIR / token
-        tmp_dir.mkdir(parents=True, exist_ok=True)
         session = _start_hls(token, cdn_url, file_info, tmp_dir)
         if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
             session.proc.terminate()
             log.warning("web_player: HLS fallback timed out token=%s", token)
+            (tmp_dir / "hls_error.txt").write_text("FFmpeg timed out — use Jellyfin for this file")
             return
+        multi_audio = len(file_info.get("audio_tracks", [])) > 1
+        playlist = "master.m3u8" if multi_audio else "playlist.m3u8"
+        (tmp_dir / "hls_ready.txt").write_text(playlist)
         threading.Thread(
             target=_extract_subtitles,
-            args=(cdn_url, file_info["subtitle_tracks"], token, tmp_dir),
+            args=(cdn_url, file_info.get("subtitle_tracks", []), token, tmp_dir),
             daemon=True,
         ).start()
-        log.info("web_player: HLS fallback ready token=%s", token)
+        log.info("web_player: HLS fallback ready token=%s playlist=%s", token, playlist)
     except Exception:
         log.exception("web_player: HLS fallback crashed token=%s", token)
+        try:
+            (tmp_dir / "hls_error.txt").write_text("Internal error during conversion")
+        except Exception:
+            pass
 
 
 # ── HLS session ────────────────────────────────────────────────────────────────

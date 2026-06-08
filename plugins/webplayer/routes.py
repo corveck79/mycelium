@@ -80,6 +80,20 @@ def stream_convert_hls(token: str):
     return jsonify(ok=True)
 
 
+@bp.get("/stream/<token>/hls-status")
+def stream_hls_status(token: str):
+    """Poll this after triggering convert-hls to find out when HLS is ready."""
+    tmp_dir    = web_player.PLAYER_TMP_DIR / token
+    error_file = tmp_dir / "hls_error.txt"
+    ready_file = tmp_dir / "hls_ready.txt"
+    if error_file.exists():
+        return jsonify(status="error", error=error_file.read_text().strip())
+    if ready_file.exists():
+        playlist = ready_file.read_text().strip()
+        return jsonify(status="ready", url=f"/stream/{token}/hls/{playlist}")
+    return jsonify(status="converting")
+
+
 @bp.get("/stream/<token>/direct")
 def stream_direct(token: str):
     s = web_player.get_direct_session(token)
