@@ -84,10 +84,12 @@ def _web_score(stream: torrentio.TorrentioStream,
     if is_aac:             score += 50   # direct play audio, no transcode needed
     if is_h264 and is_aac: score += 50   # perfect combo: zero server work
 
-    # Browser-specific: penalise HEVC when the browser can't hardware-decode it.
-    # Firefox has no HEVC at all; Chrome on Linux usually lacks hardware decode.
+    # Hard-block HEVC for browsers that can't hardware-decode it.
+    # Firefox has no HEVC; Chrome on Linux lacks hardware HEVC decode.
+    # NAS CPUs cannot transcode HEVC to H264 in real time, so there is
+    # no point selecting HEVC for these browsers at all.
     if not caps.get("hevc_ok", True) and _HEVC_NAME_RE.search(blob):
-        score -= 200  # still selectable as last resort, but strongly avoided
+        return -1
 
     if _BAD_AUDIO_RE.search(blob): score -= 150  # DTS/TrueHD/Atmos: no browser support, always transcode
     if stream.seeders > 10:        score += 10
@@ -726,9 +728,9 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
 
     Strategy:
     - H.264: mpegts segments, video copy, audio copy-or-aac. Near-zero NAS CPU.
-    - HEVC:  fMP4 segments, video copy, audio copy-or-aac. Near-zero NAS CPU.
-             Safari plays HEVC natively; Chrome/Edge use hardware decoding.
-    - AV1/VP9/VP8: transcode to H.264 mpegts (rare, heavy but unavoidable).
+    - HEVC/other: transcode to H.264 mpegts, ultrafast preset, 720p cap.
+                  Only reached for hevc_ok browsers (Safari/Chrome-Windows);
+                  Firefox/Chrome-Linux reject HEVC at the scoring stage.
 
     seek_offset > 0 = fast keyframe seek in input before generating segments.
     """
@@ -737,8 +739,7 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
 
     # Video encoding strategy:
     # H.264:      copy into mpegts (zero CPU, universally supported).
-    # HEVC/other: transcode to H.264 mpegts (Firefox has no HEVC, fMP4 unreliable).
-    #             preset fast + crf 22 gives good quality at moderate CPU cost.
+    # HEVC/other: transcode to H.264 mpegts, ultrafast, 720p cap (NAS CPU budget).
     video_codec = (file_info.get("video_codec") or "h264").lower()
     _H264_OK    = {"h264", "avc"}
     use_fmp4    = False
@@ -749,8 +750,15 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         v_enc      = ["-c:v", "copy"]
         mode_label = "ts-copy"
     else:
-        v_enc      = ["-c:v", "libx264", "-preset", "fast", "-crf", "22", "-pix_fmt", "yuv420p"]
-        mode_label = f"ts-x264(from {video_codec})"
+        # Transcode HEVC/other to H264 mpegts.
+        # ultrafast preset is essential on NAS hardware: a weak CPU cannot
+        # sustain real-time HEVC decode + H264 encode at "fast" or above.
+        # Scale to 720p when source is taller to further reduce encoder load.
+        src_height = file_info.get("height") or 0
+        scale      = ["-vf", "scale=-2:720"] if src_height > 720 else []
+        v_enc      = scale + ["-c:v", "libx264", "-preset", "ultrafast",
+                               "-crf", "23", "-pix_fmt", "yuv420p"]
+        mode_label = f"ts-x264-ultrafast(from {video_codec})"
 
     # -ss BEFORE -i = fast keyframe seek.
     input_args = (["-ss", f"{seek_offset:.3f}"] if seek_offset > 0 else []) + ["-i", cdn_url]
