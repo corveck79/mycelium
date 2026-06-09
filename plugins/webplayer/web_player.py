@@ -72,7 +72,7 @@ def _web_score(stream: torrentio.TorrentioStream,
 
     score = 0
     if stream.quality == "1080p":   score += 100
-    elif stream.quality == "2160p": score += 80
+    elif stream.quality == "2160p": return -1   # 4K = altijd HEVC + groot, niet geschikt voor web
     elif stream.quality == "720p":  score += 50
 
     if torrentio._WEBDL_RE.search(blob): score += 40
@@ -88,7 +88,7 @@ def _web_score(stream: torrentio.TorrentioStream,
     if not caps.get("hevc_ok", True) and _HEVC_NAME_RE.search(blob):
         score -= 200  # still selectable as last resort, but strongly avoided
 
-    if _BAD_AUDIO_RE.search(blob): score -= 40  # DTS/TrueHD always needs transcode
+    if _BAD_AUDIO_RE.search(blob): score -= 150  # DTS/TrueHD/Atmos: no browser support, always transcode
     if stream.seeders > 10:        score += 10
 
     # Smaller = faster initial buffering.
@@ -729,7 +729,7 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         # Output 0: video only
         cmd += [
             "-map", "0:v:0", *v_enc,
-            "-hls_time", "6", "-hls_list_size", "0",
+            "-hls_time", "2", "-hls_list_size", "0",
             "-hls_flags", "independent_segments",
             "-hls_segment_type", seg_type,
             "-hls_segment_filename", str(tmp_dir / f"seg_v%05d.{seg_ext}"),
@@ -740,7 +740,7 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         for i, track in enumerate(audio_tracks):
             cmd += [
                 "-map", f"0:a:{i}", *_audio_copy_or_transcode(track, 0),
-                "-hls_time", "6", "-hls_list_size", "0",
+                "-hls_time", "2", "-hls_list_size", "0",
                 "-hls_flags", "independent_segments",
                 "-hls_segment_type", seg_type,
                 "-hls_segment_filename", str(tmp_dir / f"seg_a{i}_%05d.{seg_ext}"),
@@ -788,7 +788,7 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
             "-map", "0:v:0",
             *((["-map", "0:a:0"] + a_args) if track else ["-an"]),
             *v_enc,
-            "-hls_time", "6", "-hls_list_size", "0",
+            "-hls_time", "2", "-hls_list_size", "0",
             "-hls_flags", "independent_segments",
             "-hls_segment_type", seg_type,
             "-hls_segment_filename", str(tmp_dir / f"seg%05d.{seg_ext}"),
