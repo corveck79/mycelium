@@ -11,6 +11,7 @@ from enum import Enum
 from pathlib import Path
 
 import requests as req_lib
+import requests.exceptions as _req_exc
 
 import db
 import health_cache
@@ -109,17 +110,23 @@ def find_web_candidates(imdb_id: str, media_type: str,
     seen: set[str] = set()
 
     if _settings.get("ZILEAN_ENABLED", False) and health_cache.is_up("zilean"):
-        for s in zilean.fetch_streams(imdb_id, season=season, episode=episode):
-            if s.info_hash not in seen:
-                seen.add(s.info_hash)
-                streams.append(s)
+        try:
+            for s in zilean.fetch_streams(imdb_id, season=season, episode=episode):
+                if s.info_hash not in seen:
+                    seen.add(s.info_hash)
+                    streams.append(s)
+        except Exception as exc:
+            log.warning("web_player: zilean fetch failed: %s", exc)
 
     if health_cache.is_up("torrentio"):
         kind = "movie" if media_type == "movie" else "series"
-        for s in torrentio.fetch_streams(kind, imdb_id, season=season, episode=episode):
-            if s.info_hash not in seen:
-                seen.add(s.info_hash)
-                streams.append(s)
+        try:
+            for s in torrentio.fetch_streams(kind, imdb_id, season=season, episode=episode):
+                if s.info_hash not in seen:
+                    seen.add(s.info_hash)
+                    streams.append(s)
+        except Exception as exc:
+            log.warning("web_player: torrentio fetch failed: %s", exc)
 
     scored = sorted(
         ((s, _web_score(s, browser_caps)) for s in streams
@@ -205,7 +212,10 @@ def _get_cdn_url(stream: torrentio.TorrentioStream,
             result     = torbox.add_magnet(stream.magnet, reason="web_player")
             torrent_id = (result or {}).get("torrent_id") or (result or {}).get("id")
         except torbox.RateLimited:
-            log.warning("web_player: TorBox rate-limited on add_magnet")
+            log.warning("web_player: TorBox rate-limited on add_magnet hash=%s", stream.info_hash)
+            return None, None, None
+        except (RuntimeError, _req_exc.RequestException) as exc:
+            log.warning("web_player: add_magnet failed for hash=%s: %s", stream.info_hash, exc)
             return None, None, None
         item = torbox.wait_until_ready(stream.info_hash, timeout=60,
                                        torrent_id=torrent_id)
@@ -270,17 +280,30 @@ def _run_job(job: PrepareJob) -> None:
 
         # Priority 1: already in user's TorBox library (instant CDN URL).
         best = None
-        for c in candidates:
-            if torbox.find_by_hash(c.info_hash):
-                best = c
-                log.info("web_player: found in TorBox library hash=%s", c.info_hash)
-                break
+        try:
+            for c in candidates:
+                if torbox.find_by_hash(c.info_hash):
+                    best = c
+                    log.info("web_player: found in TorBox library hash=%s", c.info_hash)
+                    break
+        except (torbox.RateLimited, RuntimeError, _req_exc.RequestException) as exc:
+            log.warning("web_player: library lookup failed: %s", exc)
 
         # Priority 2: TorBox has it cached (instant add, no download wait).
         if best is None:
-            hashes      = [c.info_hash for c in candidates]
-            cached_set  = torbox.check_cached(hashes)
-            by_hash     = {c.info_hash: c for c in candidates}
+            hashes = [c.info_hash for c in candidates]
+            try:
+                cached_set = torbox.check_cached(hashes)
+            except torbox.RateLimited:
+                log.warning("web_player: TorBox rate-limited on check_cached")
+                job.status = JobStatus.ERROR
+                job.error  = "TorBox rate limit hit. Wait a moment and try again."
+                return
+            except (RuntimeError, _req_exc.RequestException) as exc:
+                log.warning("web_player: check_cached failed: %s", exc)
+                job.status = JobStatus.ERROR
+                job.error  = "TorBox temporarily unavailable. Try again in a moment."
+                return
             # Pick the highest-scored cached candidate (candidates already sorted).
             for c in candidates:
                 if c.info_hash in cached_set:
@@ -303,9 +326,16 @@ def _run_job(job: PrepareJob) -> None:
         for candidate in ([best] + [c for c in candidates if c is not best]):
             # Only use instantly-available content.
             _hash = candidate.info_hash
-            if not torbox.find_by_hash(_hash):
-                hashes = [_hash]
-                if _hash not in torbox.check_cached(hashes):
+            try:
+                in_library = torbox.find_by_hash(_hash)
+            except (torbox.RateLimited, RuntimeError, _req_exc.RequestException):
+                in_library = None
+            if not in_library:
+                try:
+                    single_cached = torbox.check_cached([_hash])
+                except (torbox.RateLimited, RuntimeError, _req_exc.RequestException):
+                    single_cached = set()
+                if _hash not in single_cached:
                     continue
 
             log.info("web_player: selected %r hash=%s", candidate.title, _hash)
@@ -382,10 +412,14 @@ def _run_job(job: PrepareJob) -> None:
         job.status      = JobStatus.READY
         job.message     = "Ready"
 
-    except Exception:
+    except torbox.RateLimited:
+        log.warning("web_player: job %s hit TorBox rate limit", job.job_id)
+        job.status = JobStatus.ERROR
+        job.error  = "TorBox rate limit hit. Wait a moment and try again."
+    except Exception as exc:
         log.exception("web_player: prepare job %s crashed", job.job_id)
         job.status = JobStatus.ERROR
-        job.error  = "Internal error  -  check server logs."
+        job.error  = f"Internal error ({type(exc).__name__}: {exc})"
 
 
 # ── FFprobe ────────────────────────────────────────────────────────────────────
