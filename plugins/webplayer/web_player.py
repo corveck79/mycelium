@@ -123,7 +123,8 @@ def find_web_candidates(imdb_id: str, media_type: str,
     if health_cache.is_up("torrentio"):
         kind = "movie" if media_type == "movie" else "series"
         try:
-            for s in torrentio.fetch_streams(kind, imdb_id, season=season, episode=episode):
+            for s in torrentio.fetch_streams(kind, imdb_id, season=season,
+                                             episode=episode, timeout=12):
                 if s.info_hash not in seen:
                     seen.add(s.info_hash)
                     streams.append(s)
@@ -429,7 +430,9 @@ def _run_job(job: PrepareJob) -> None:
 def _probe(cdn_url: str) -> dict | None:
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
+            ["ffprobe", "-v", "quiet",
+             "-probesize", "10M", "-analyzeduration", "3M",
+             "-print_format", "json",
              "-show_streams", "-show_format", cdn_url],
             capture_output=True, timeout=20,
         )
@@ -598,14 +601,21 @@ def _do_hls_conversion(token: str, file_info: dict) -> None:
         if not file_info.get('audio_tracks'):
             log.info("web_player: lazy ffprobe for HLS fallback token=%s", token)
             probed = _probe(cdn_url)
-            if probed is None:
-                log.warning("web_player: ffprobe failed for token=%s", token)
-                (tmp_dir / "hls_error.txt").write_text("Could not read file info — use Jellyfin")
-                return
-            file_info = probed
-            s = get_direct_session(token)
-            if s:
-                s.file_info = file_info
+            if probed and probed.get('audio_tracks'):
+                file_info = probed
+                s = get_direct_session(token)
+                if s:
+                    s.file_info = file_info
+            else:
+                # Probe failed or returned no audio — use safe defaults so
+                # we can still produce a watchable stream.
+                log.warning("web_player: ffprobe returned no audio for token=%s, using defaults", token)
+                file_info = dict(file_info,
+                                 video_codec=file_info.get('video_codec') or 'unknown',
+                                 audio_tracks=[{"index": 0, "codec": "unknown",
+                                                "language": "und", "title": "",
+                                                "channels": 2}],
+                                 subtitle_tracks=[])
         session = _start_hls(token, cdn_url, file_info, tmp_dir)
         if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
             session.proc.terminate()

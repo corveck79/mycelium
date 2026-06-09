@@ -43,7 +43,10 @@ interface JobStatus {
 function _browserCanPlay(fileInfo: FileInfo | undefined): boolean {
   if (!fileInfo) return false
   const codec = (fileInfo.video_codec || '').toLowerCase()
-  // Let the browser try H.264 and HEVC directly; onerror handles failure.
+  // Unknown codec (release name had no codec tag): try direct play and let
+  // video.onerror handle failure. Avoids unnecessary HLS for H264 releases
+  // that are simply not labelled.
+  if (!codec || codec === 'unknown') return true
   return codec === 'h264' || codec === 'avc' || codec === 'hevc' || codec === 'h265'
 }
 
