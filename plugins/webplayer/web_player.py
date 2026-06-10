@@ -865,18 +865,13 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         mode_label = "ts-copy"
     elif _vaapi_ok:
         # Hardware transcode via Intel QuickSync VA-API.
-        # Decode HEVC in GPU, encode H264 in GPU.
-        # Use hwdownload+software scale+hwupload instead of scale_vaapi to avoid
-        # VPP pipeline failures on 10-bit HEVC sources (e.g. Apollo Lake J3455).
+        # Decode HEVC in GPU, convert pixel format on CPU (handles 10-bit),
+        # re-upload, encode H264 in GPU. No scaling - original resolution.
         hw_pre = ["-hwaccel", "vaapi",
                   "-hwaccel_device", _VAAPI_DEV,
                   "-hwaccel_output_format", "vaapi"]
-        if src_height > 720:
-            vf_scale = ["-vf", "hwdownload,format=nv12,scale=-2:720,hwupload"]
-        else:
-            # Still need nv12 conversion for 10-bit sources before h264_vaapi.
-            vf_scale = ["-vf", "hwdownload,format=nv12,hwupload"]
-        v_enc  = vf_scale + ["-c:v", "h264_vaapi", "-qp", "23"]
+        v_enc  = ["-vf", "hwdownload,format=nv12,hwupload",
+                  "-c:v", "h264_vaapi", "-qp", "23"]
         mode_label = f"ts-vaapi(from {video_codec})"
     else:
         # Software fallback: ultrafast + 720p cap.
