@@ -742,8 +742,8 @@ def _do_hls_conversion(token: str, file_info: dict) -> None:
                     log.warning("web_player: ffmpeg stderr tail: %s", detail)
                 except Exception:
                     pass
-            msg = "FFmpeg crashed — use Jellyfin for this file" if rc is not None else \
-                  "FFmpeg timed out — use Jellyfin for this file"
+            msg = (f"FFmpeg failed (rc={rc}) — use Jellyfin for this file" if rc is not None and rc != 0
+                   else "FFmpeg timed out — use Jellyfin for this file")
             (tmp_dir / "hls_error.txt").write_text(f"{msg}\n{detail}" if detail else msg)
             return
         multi_audio = len(file_info.get("audio_tracks", [])) > 1
@@ -999,17 +999,32 @@ def _wait_segments(tmp_dir: Path, count: int, timeout: float,
                    proc: subprocess.Popen | None = None) -> bool:
     """Wait until at least `count` segments exist (either .ts or .m4s).
 
-    If proc is given and exits before enough segments are produced, return
-    False immediately so the caller can report a meaningful error instead of
-    waiting out the full timeout.
+    If proc is given and exits with a non-zero code before enough segments
+    are produced, return False immediately so the caller can surface the error
+    without waiting out the full timeout.
+
+    A zero exit code (success) is not treated as failure — ffmpeg can finish
+    normally (short files, copy mode) before we've polled enough segments.
+    In that case we do one final re-count before returning False on timeout.
     """
     deadline = time.monotonic() + timeout
+    exited_ok = False
     while time.monotonic() < deadline:
         found = len(list(tmp_dir.glob("seg*.ts"))) + len(list(tmp_dir.glob("seg*.m4s")))
         if found >= count:
             return True
-        if proc is not None and proc.poll() is not None:
-            return False
+        if proc is not None:
+            rc = proc.poll()
+            if rc is not None and rc != 0:
+                return False
+            if rc == 0:
+                exited_ok = True
+        if exited_ok:
+            # Process exited cleanly; do a final count after a short pause
+            # to capture any segments written just before ffmpeg closed files.
+            time.sleep(0.2)
+            found = len(list(tmp_dir.glob("seg*.ts"))) + len(list(tmp_dir.glob("seg*.m4s")))
+            return found >= count
         time.sleep(0.5)
     return False
 
@@ -1020,8 +1035,13 @@ def _wait_segments_pattern(tmp_dir: Path, pattern: str, count: int, timeout: flo
     while time.monotonic() < deadline:
         if len(list(tmp_dir.glob(pattern))) >= count:
             return True
-        if proc is not None and proc.poll() is not None:
-            return False
+        if proc is not None:
+            rc = proc.poll()
+            if rc is not None and rc != 0:
+                return False
+            if rc == 0:
+                time.sleep(0.2)
+                return len(list(tmp_dir.glob(pattern))) >= count
         time.sleep(0.5)
     return False
 
