@@ -276,6 +276,20 @@ def _run_job(job: PrepareJob) -> None:
             job.imdb_id, job.media_type, job.season, job.episode,
             browser_caps=job.browser_caps,
         )
+
+        # If the browser's codec filter excluded everything (e.g. only HEVC
+        # releases are cached in TorBox for this title), fall back to HEVC.
+        # The HLS path will transcode at ultrafast + 720p.
+        hevc_fallback = False
+        if not candidates and not job.browser_caps.get("hevc_ok", True):
+            log.info("web_player: no H264 candidates for %s, trying HEVC fallback",
+                     job.imdb_id)
+            candidates = find_web_candidates(
+                job.imdb_id, job.media_type, job.season, job.episode,
+                browser_caps={"hevc_ok": True},
+            )
+            hevc_fallback = bool(candidates)
+
         if not candidates:
             job.status = JobStatus.ERROR
             job.error  = "No web-compatible version found. Use Jellyfin."
@@ -405,7 +419,8 @@ def _run_job(job: PrepareJob) -> None:
         job.file_info = file_info
 
         job.status  = JobStatus.PREPARING
-        job.message = "Preparing for playback…"
+        job.message = ("No H264 found — transcoding HEVC to 720p…"
+                       if hevc_fallback else "Preparing for playback…")
 
         _start_direct(session_key, file_info, cdn_url,
                       torrent_id=torrent_id, file_id=file_id)
