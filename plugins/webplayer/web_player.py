@@ -29,6 +29,28 @@ SEGMENT_WAIT_TIMEOUT = 90
 SESSION_IDLE_CLEANUP = 1800
 CDN_URL_MAX_AGE_S    = 1800   # refresh TorBox signed URL after 30 minutes
 
+_VAAPI_DEV = "/dev/dri/renderD128"
+_vaapi_ok  = False   # updated by _init_vaapi() in background thread
+
+
+def _init_vaapi() -> None:
+    global _vaapi_ok
+    if not Path(_VAAPI_DEV).exists():
+        log.info("web_player: VA-API device not found — software transcode only")
+        return
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, timeout=6,
+        )
+        _vaapi_ok = b"h264_vaapi" in r.stdout
+        log.info("web_player: VA-API h264_vaapi=%s", _vaapi_ok)
+    except Exception as exc:
+        log.debug("web_player: VA-API probe failed: %s", exc)
+
+
+threading.Thread(target=_init_vaapi, daemon=True).start()
+
 _BROWSER_AUDIO_OK    = {"aac"}   # vorbis/opus not reliable in mpegts HLS
 _NO_BROWSER_VIDEO_RE = re.compile(r"\b(av1|vp9|vp8)\b", re.IGNORECASE)
 _HDR_NAME_RE         = re.compile(r"\bhdr10\+|\bhdr10plus\b|\bhdr10\b|\bhdr\b|\bhlg\b|\bpq10\b", re.IGNORECASE)
@@ -745,10 +767,10 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
     """Start (or restart) HLS segmentation.
 
     Strategy:
-    - H.264: mpegts segments, video copy, audio copy-or-aac. Near-zero NAS CPU.
-    - HEVC/other: transcode to H.264 mpegts, ultrafast preset, 720p cap.
-                  Only reached for hevc_ok browsers (Safari/Chrome-Windows);
-                  Firefox/Chrome-Linux reject HEVC at the scoring stage.
+    - H.264: mpegts segments, video copy, audio copy-or-aac. Near-zero CPU.
+    - HEVC/other + VA-API available: hardware decode+encode via Intel QSV.
+      Near-zero CPU, near-realtime. 720p cap when source > 720p.
+    - HEVC/other + no VA-API: software ultrafast + 720p cap (last resort).
 
     seek_offset > 0 = fast keyframe seek in input before generating segments.
     """
@@ -764,22 +786,33 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
     seg_type    = "mpegts"
     seg_ext     = "ts"
 
+    src_height = file_info.get("height") or 0
+
     if video_codec in _H264_OK:
         v_enc      = ["-c:v", "copy"]
+        hw_pre     = []
         mode_label = "ts-copy"
+    elif _vaapi_ok:
+        # Hardware transcode via Intel QuickSync VA-API.
+        # Decode HEVC in GPU, scale to 720p if needed, encode to H264 in GPU.
+        # Near-zero CPU — eliminates the "can't keep up" issue on NAS hardware.
+        hw_pre = ["-hwaccel", "vaapi",
+                  "-hwaccel_device", _VAAPI_DEV,
+                  "-hwaccel_output_format", "vaapi"]
+        scale  = ["-vf", "scale_vaapi=w=-2:h=720"] if src_height > 720 else []
+        v_enc  = scale + ["-c:v", "h264_vaapi", "-qp", "23"]
+        mode_label = f"ts-vaapi(from {video_codec})"
     else:
-        # Transcode HEVC/other to H264 mpegts.
-        # ultrafast preset is essential on NAS hardware: a weak CPU cannot
-        # sustain real-time HEVC decode + H264 encode at "fast" or above.
-        # Scale to 720p when source is taller to further reduce encoder load.
-        src_height = file_info.get("height") or 0
+        # Software fallback: ultrafast + 720p cap.
+        hw_pre     = []
         scale      = ["-vf", "scale=-2:720"] if src_height > 720 else []
         v_enc      = scale + ["-c:v", "libx264", "-preset", "ultrafast",
                                "-crf", "23", "-pix_fmt", "yuv420p"]
         mode_label = f"ts-x264-ultrafast(from {video_codec})"
 
-    # -ss BEFORE -i = fast keyframe seek.
-    input_args = (["-ss", f"{seek_offset:.3f}"] if seek_offset > 0 else []) + ["-i", cdn_url]
+    # hwaccel args must come before -ss and -i.
+    seek_args  = ["-ss", f"{seek_offset:.3f}"] if seek_offset > 0 else []
+    input_args = hw_pre + seek_args + ["-i", cdn_url]
 
     if multi_audio:
         # Multi-audio: video-only output + one output per audio track,
