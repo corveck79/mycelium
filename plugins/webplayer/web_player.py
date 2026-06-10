@@ -698,6 +698,15 @@ def _file_info_from_candidate(candidate) -> dict:
 def _do_hls_conversion(token: str, file_info: dict) -> None:
     tmp_dir = PLAYER_TMP_DIR / token
     tmp_dir.mkdir(parents=True, exist_ok=True)
+    # Remove stale files from previous (crashed/incomplete) transcode runs so
+    # _wait_segments doesn't return True on old segments while the new ffmpeg
+    # is still starting up.
+    for _pat in ("seg*.ts", "seg*.m4s", "seg_*_*.ts", "seg_*_*.m4s"):
+        for _f in tmp_dir.glob(_pat):
+            _f.unlink(missing_ok=True)
+    for _name in ("playlist.m3u8", "video.m3u8", "master.m3u8",
+                  "hls_ready.txt", "hls_error.txt"):
+        (tmp_dir / _name).unlink(missing_ok=True)
     try:
         s = get_direct_session(token)
         cdn_url = s.cdn_url if s else None
@@ -718,10 +727,24 @@ def _do_hls_conversion(token: str, file_info: dict) -> None:
             if s:
                 s.file_info = file_info
         session = _start_hls(token, cdn_url, file_info, tmp_dir)
-        if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
+        if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT,
+                              proc=session.proc):
+            rc = session.proc.poll()
             session.proc.terminate()
-            log.warning("web_player: HLS fallback timed out token=%s", token)
-            (tmp_dir / "hls_error.txt").write_text("FFmpeg timed out — use Jellyfin for this file")
+            log.warning("web_player: HLS fallback failed token=%s rc=%s", token, rc)
+            # Surface the last lines of ffmpeg stderr so we can diagnose.
+            err_log = tmp_dir / "ffmpeg.log"
+            detail  = ""
+            if err_log.exists():
+                try:
+                    lines  = err_log.read_text(errors="replace").strip().splitlines()
+                    detail = " | ".join(lines[-6:]) if lines else ""
+                    log.warning("web_player: ffmpeg stderr tail: %s", detail)
+                except Exception:
+                    pass
+            msg = "FFmpeg crashed — use Jellyfin for this file" if rc is not None else \
+                  "FFmpeg timed out — use Jellyfin for this file"
+            (tmp_dir / "hls_error.txt").write_text(f"{msg}\n{detail}" if detail else msg)
             return
         multi_audio = len(file_info.get("audio_tracks", [])) > 1
         playlist = "master.m3u8" if multi_audio else "playlist.m3u8"
@@ -922,7 +945,8 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
 
         # Wait for first video segments before writing master playlist
         _wait_segments_pattern(tmp_dir, f"seg_v*.{seg_ext}",
-                               SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT)
+                               SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT,
+                               proc=proc)
 
         # Write master.m3u8
         lines  = ["#EXTM3U"]
@@ -971,22 +995,33 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
     return session
 
 
-def _wait_segments(tmp_dir: Path, count: int, timeout: float) -> bool:
-    """Wait until at least `count` segments exist (either .ts or .m4s)."""
+def _wait_segments(tmp_dir: Path, count: int, timeout: float,
+                   proc: subprocess.Popen | None = None) -> bool:
+    """Wait until at least `count` segments exist (either .ts or .m4s).
+
+    If proc is given and exits before enough segments are produced, return
+    False immediately so the caller can report a meaningful error instead of
+    waiting out the full timeout.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         found = len(list(tmp_dir.glob("seg*.ts"))) + len(list(tmp_dir.glob("seg*.m4s")))
         if found >= count:
             return True
+        if proc is not None and proc.poll() is not None:
+            return False
         time.sleep(0.5)
     return False
 
 
-def _wait_segments_pattern(tmp_dir: Path, pattern: str, count: int, timeout: float) -> bool:
+def _wait_segments_pattern(tmp_dir: Path, pattern: str, count: int, timeout: float,
+                           proc: subprocess.Popen | None = None) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if len(list(tmp_dir.glob(pattern))) >= count:
             return True
+        if proc is not None and proc.poll() is not None:
+            return False
         time.sleep(0.5)
     return False
 
