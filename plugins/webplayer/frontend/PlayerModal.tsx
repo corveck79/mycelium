@@ -43,11 +43,17 @@ interface JobStatus {
 function _browserCanPlay(fileInfo: FileInfo | undefined): boolean {
   if (!fileInfo) return false
   const codec = (fileInfo.video_codec || '').toLowerCase()
-  // Unknown codec (release name had no codec tag): try direct play and let
-  // video.onerror handle failure. Avoids unnecessary HLS for H264 releases
-  // that are simply not labelled.
+  // Unknown codec: try direct play and let video.onerror handle failure.
   if (!codec || codec === 'unknown') return true
-  return codec === 'h264' || codec === 'avc' || codec === 'hevc' || codec === 'h265'
+  if (codec === 'h264' || codec === 'avc') return true
+  if (codec === 'hevc' || codec === 'h265') {
+    // Only attempt direct HEVC play if the browser actually supports it.
+    // Firefox and Chrome on Linux do not; Safari and Chrome on Mac/Windows do.
+    const v = document.createElement('video')
+    return v.canPlayType('video/mp4; codecs="hvc1"') !== '' ||
+           v.canPlayType('video/mp4; codecs="hev1"') !== ''
+  }
+  return false
 }
 
 export default function PlayerModal({ imdb_id, media_type, title, season, episode, onClose }: {
