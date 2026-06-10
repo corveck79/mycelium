@@ -456,16 +456,34 @@ def _run_job(job: PrepareJob) -> None:
         job.file_info = file_info
 
         job.status  = JobStatus.PREPARING
-        job.message = ("No H264 found -- transcoding HEVC to 720p…"
-                       if hevc_fallback else "Preparing for playback…")
+        job.message = ("No H264 found - transcoding HEVC to 720p..."
+                       if hevc_fallback else "Preparing for playback...")
 
         _start_direct(session_key, file_info, cdn_url,
                       torrent_id=torrent_id, file_id=file_id)
-        job.token       = session_key
-        job.stream_type = "direct"
-        job.stream_url  = f"/stream/{session_key}/direct"
-        job.status      = JobStatus.READY
-        job.message     = "Ready"
+        job.token = session_key
+
+        if hevc_fallback:
+            # Browser cannot play HEVC natively. Run HLS conversion now so the
+            # frontend receives a working HLS URL instead of a direct HEVC URL
+            # that the browser will reject with a black screen.
+            _do_hls_conversion(session_key, file_info)
+            tmp_dir  = PLAYER_TMP_DIR / session_key
+            err_file = tmp_dir / "hls_error.txt"
+            rdy_file = tmp_dir / "hls_ready.txt"
+            if err_file.exists():
+                job.status = JobStatus.ERROR
+                job.error  = err_file.read_text()
+                return
+            playlist = rdy_file.read_text().strip() if rdy_file.exists() else "playlist.m3u8"
+            job.stream_type = "hls"
+            job.stream_url  = f"/stream/{session_key}/hls/{playlist}"
+        else:
+            job.stream_type = "direct"
+            job.stream_url  = f"/stream/{session_key}/direct"
+
+        job.status  = JobStatus.READY
+        job.message = "Ready"
 
     except torbox.RateLimited:
         log.warning("web_player: job %s hit TorBox rate limit", job.job_id)
