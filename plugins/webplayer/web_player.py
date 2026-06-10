@@ -36,17 +36,32 @@ _vaapi_ok  = False   # updated by _init_vaapi() in background thread
 def _init_vaapi() -> None:
     global _vaapi_ok
     if not Path(_VAAPI_DEV).exists():
-        log.info("web_player: VA-API device not found — software transcode only")
+        log.info("web_player: VA-API device not found - software transcode only")
         return
     try:
+        # Actually test-encode a tiny frame to confirm the iHD driver is usable,
+        # not just that h264_vaapi is compiled in.
         r = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-encoders"],
-            capture_output=True, timeout=6,
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-init_hw_device", f"vaapi=va:{_VAAPI_DEV}",
+                "-f", "lavfi", "-i", "color=black:s=128x128:d=0.04",
+                "-vf", "format=nv12,hwupload",
+                "-c:v", "h264_vaapi",
+                "-f", "null", "-",
+            ],
+            capture_output=True, timeout=15,
         )
-        _vaapi_ok = b"h264_vaapi" in r.stdout
-        log.info("web_player: VA-API h264_vaapi=%s", _vaapi_ok)
+        _vaapi_ok = r.returncode == 0
+        if _vaapi_ok:
+            log.info("web_player: VA-API hardware transcode available (%s)", _VAAPI_DEV)
+        else:
+            log.warning(
+                "web_player: VA-API test failed (rc=%d) - software transcode only\n%s",
+                r.returncode, r.stderr.decode(errors="replace"),
+            )
     except Exception as exc:
-        log.debug("web_player: VA-API probe failed: %s", exc)
+        log.warning("web_player: VA-API probe failed: %s - software transcode only", exc)
 
 
 threading.Thread(target=_init_vaapi, daemon=True).start()
