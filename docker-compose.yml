@@ -14,9 +14,6 @@ services:
       - LISTEN_PORT=8088
     devices:
       - /dev/dri:/dev/dri
-    group_add:
-      - render
-      - video
     volumes:
       - ./data:/data
       - ./static/jellyfin-splash.png:/app/static/jellyfin-splash.png:ro
