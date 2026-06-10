@@ -394,7 +394,7 @@ def _run_job(job: PrepareJob) -> None:
 
             log.info("web_player: selected %r hash=%s", candidate.title, _hash)
 
-            # Reuse an active direct session (always prefer direct play).
+            # Reuse an active direct session (prefer direct play for non-HEVC).
             with _direct_lock:
                 existing_direct = _direct_sessions.get(_hash)
             if existing_direct:
@@ -403,13 +403,51 @@ def _run_job(job: PrepareJob) -> None:
                     log.info("web_player: CDN URL stale (%.0fs), refreshing hash=%s",
                              age, _hash)
                     _refresh_direct_cdn_url(existing_direct)
-                else:
+
+                if existing_direct.file_info.get('video_codec') != 'hevc':
                     log.info("web_player: reusing active direct session hash=%s", _hash)
-                job.token       = _hash
-                job.file_info   = existing_direct.file_info
-                job.cdn_url     = None
-                job.stream_type = "direct"
-                job.stream_url  = f"/stream/{_hash}/direct"
+                    job.token       = _hash
+                    job.file_info   = existing_direct.file_info
+                    job.cdn_url     = None
+                    job.stream_type = "direct"
+                    job.stream_url  = f"/stream/{_hash}/direct"
+                    job.status      = JobStatus.READY
+                    job.message     = "Ready"
+                    return
+
+                # HEVC: check for an existing HLS session first.
+                with _sessions_lock:
+                    existing_hls = _sessions.get(_hash)
+                if existing_hls and existing_hls.proc.poll() is None:
+                    log.info("web_player: reusing active HLS session for HEVC hash=%s", _hash)
+                    multi_audio = len(existing_hls.file_info.get("audio_tracks", [])) > 1
+                    job.token       = _hash
+                    job.file_info   = existing_hls.file_info
+                    job.cdn_url     = existing_hls.cdn_url
+                    job.stream_type = "hls"
+                    job.stream_url  = (f"/stream/{_hash}/hls/master.m3u8" if multi_audio
+                                       else f"/stream/{_hash}/hls/playlist.m3u8")
+                    job.status      = JobStatus.READY
+                    job.message     = "Ready"
+                    return
+
+                # HEVC without an HLS session - run conversion on the existing direct session.
+                log.info("web_player: transcoding HEVC direct session to HLS hash=%s", _hash)
+                job.token    = _hash
+                job.file_info = existing_direct.file_info
+                job.status   = JobStatus.PREPARING
+                job.message  = "Transcoding HEVC to 720p..."
+                _do_hls_conversion(_hash, existing_direct.file_info)
+                tmp_dir  = PLAYER_TMP_DIR / _hash
+                err_file = tmp_dir / "hls_error.txt"
+                rdy_file = tmp_dir / "hls_ready.txt"
+                if err_file.exists():
+                    job.status = JobStatus.ERROR
+                    job.error  = err_file.read_text()
+                    return
+                playlist = rdy_file.read_text().strip() if rdy_file.exists() else "playlist.m3u8"
+                job.stream_type = "hls"
+                job.stream_url  = f"/stream/{_hash}/hls/{playlist}"
                 job.status      = JobStatus.READY
                 job.message     = "Ready"
                 return
@@ -455,18 +493,18 @@ def _run_job(job: PrepareJob) -> None:
         job.cdn_url   = cdn_url
         job.file_info = file_info
 
+        # Always transcode HEVC to HLS - browsers cannot reliably decode raw HEVC
+        # from a CDN MP4 regardless of whether they claim codec support.
+        needs_hls = hevc_fallback or file_info.get('video_codec') == 'hevc'
+
         job.status  = JobStatus.PREPARING
-        job.message = ("No H264 found - transcoding HEVC to 720p..."
-                       if hevc_fallback else "Preparing for playback...")
+        job.message = "Transcoding HEVC to 720p..." if needs_hls else "Preparing for playback..."
 
         _start_direct(session_key, file_info, cdn_url,
                       torrent_id=torrent_id, file_id=file_id)
         job.token = session_key
 
-        if hevc_fallback:
-            # Browser cannot play HEVC natively. Run HLS conversion now so the
-            # frontend receives a working HLS URL instead of a direct HEVC URL
-            # that the browser will reject with a black screen.
+        if needs_hls:
             _do_hls_conversion(session_key, file_info)
             tmp_dir  = PLAYER_TMP_DIR / session_key
             err_file = tmp_dir / "hls_error.txt"
