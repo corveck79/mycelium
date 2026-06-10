@@ -601,21 +601,14 @@ def _do_hls_conversion(token: str, file_info: dict) -> None:
         if not file_info.get('audio_tracks'):
             log.info("web_player: lazy ffprobe for HLS fallback token=%s", token)
             probed = _probe(cdn_url)
-            if probed and probed.get('audio_tracks'):
-                file_info = probed
-                s = get_direct_session(token)
-                if s:
-                    s.file_info = file_info
-            else:
-                # Probe failed or returned no audio — use safe defaults so
-                # we can still produce a watchable stream.
-                log.warning("web_player: ffprobe returned no audio for token=%s, using defaults", token)
-                file_info = dict(file_info,
-                                 video_codec=file_info.get('video_codec') or 'unknown',
-                                 audio_tracks=[{"index": 0, "codec": "unknown",
-                                                "language": "und", "title": "",
-                                                "channels": 2}],
-                                 subtitle_tracks=[])
+            if probed is None:
+                log.warning("web_player: ffprobe failed for token=%s", token)
+                (tmp_dir / "hls_error.txt").write_text("Could not read file info — use Jellyfin")
+                return
+            file_info = probed
+            s = get_direct_session(token)
+            if s:
+                s.file_info = file_info
         session = _start_hls(token, cdn_url, file_info, tmp_dir)
         if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
             session.proc.terminate()

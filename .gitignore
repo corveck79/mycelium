@@ -7,7 +7,8 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/src/plugins/
-static/app/
+# static/app/ is tracked so `git pull` is enough to update the frontend
+# without a separate build step on the NAS.
 # Runtime data: DB, media, .strm files, backups. NEVER track these: a
 # `git reset --hard` would otherwise wipe the live database.
 data/
