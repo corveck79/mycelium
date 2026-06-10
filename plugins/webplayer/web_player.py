@@ -11,7 +11,9 @@ from enum import Enum
 from pathlib import Path
 
 import requests as req_lib
+import requests.exceptions as _req_exc
 
+import db
 import health_cache
 import settings as _settings
 import subtitles as _subtitles
@@ -25,17 +27,78 @@ PLAYER_TMP_DIR       = Path("/tmp/mycelium-player")
 SEGMENT_WAIT_COUNT   = 3
 SEGMENT_WAIT_TIMEOUT = 90
 SESSION_IDLE_CLEANUP = 1800
+CDN_URL_MAX_AGE_S    = 1800   # refresh TorBox signed URL after 30 minutes
+
+_VAAPI_DEV = "/dev/dri/renderD128"
+_vaapi_ok  = False   # updated by _init_vaapi() in background thread
+
+
+def _init_vaapi() -> None:
+    global _vaapi_ok
+    if not Path(_VAAPI_DEV).exists():
+        log.info("web_player: VA-API device not found - software transcode only")
+        return
+    try:
+        # Actually test-encode a tiny frame to confirm the iHD driver is usable,
+        # not just that h264_vaapi is compiled in.
+        r = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-init_hw_device", f"vaapi=va:{_VAAPI_DEV}",
+                "-f", "lavfi", "-i", "color=black:s=128x128:d=0.04",
+                "-vf", "format=nv12,hwupload",
+                "-c:v", "h264_vaapi",
+                "-f", "null", "-",
+            ],
+            capture_output=True, timeout=15,
+        )
+        _vaapi_ok = r.returncode == 0
+        if _vaapi_ok:
+            log.info("web_player: VA-API hardware transcode available (%s)", _VAAPI_DEV)
+        else:
+            log.warning(
+                "web_player: VA-API test failed (rc=%d) - software transcode only\n%s",
+                r.returncode, r.stderr.decode(errors="replace"),
+            )
+    except Exception as exc:
+        log.warning("web_player: VA-API probe failed: %s - software transcode only", exc)
+
+
+threading.Thread(target=_init_vaapi, daemon=True).start()
 
 _BROWSER_AUDIO_OK    = {"aac"}   # vorbis/opus not reliable in mpegts HLS
 _NO_BROWSER_VIDEO_RE = re.compile(r"\b(av1|vp9|vp8)\b", re.IGNORECASE)
 _HDR_NAME_RE         = re.compile(r"\bhdr10\+|\bhdr10plus\b|\bhdr10\b|\bhdr\b|\bhlg\b|\bpq10\b", re.IGNORECASE)
+_HEVC_NAME_RE        = re.compile(r"\b(x265|hevc|h\.?265)\b", re.IGNORECASE)
 _AAC_SAMPLE_RATE     = "48000"   # browsers require consistent sample rate in TS
+_H264_RE             = re.compile(r"\bx264\b|\bh\.?264\b|\bavc\b", re.IGNORECASE)
+_AAC_NAME_RE         = re.compile(r"\baac\b", re.IGNORECASE)
+_BAD_AUDIO_RE        = re.compile(r"\bdts\b|\btruehd\b|\batmos\b|\bdts.?hd\b|\bdts.?ma\b", re.IGNORECASE)
 _TEXT_SUB_CODECS  = {"subrip", "ass", "ssa", "webvtt", "mov_text", "srt"}
 
 
-# ── Torrent selection ──────────────────────────────────────────────────────────
+def _parse_browser_caps(user_agent: str) -> dict:
+    """Derive codec capabilities from User-Agent string.
 
-def _web_score(stream: torrentio.TorrentioStream) -> int:
+    Used to tune candidate scoring per browser:
+    - Firefox has no HEVC playback support (always needs server transcode).
+    - Chrome/Edge on desktop support HEVC via hardware, but not guaranteed on Linux.
+    - Safari supports HEVC natively.
+    """
+    ua = (user_agent or "").lower()
+    is_firefox = "firefox/" in ua
+    # Chromium on Linux rarely has HEVC hardware decode; desktop Windows/Mac usually does.
+    is_linux   = "linux" in ua and "android" not in ua
+    is_chrome  = ("chrome/" in ua or "chromium/" in ua) and "edg" not in ua
+    hevc_ok    = not is_firefox and not (is_chrome and is_linux)
+    return {"hevc_ok": hevc_ok}
+
+
+# -- Torrent selection ---------------------------------------------------------------
+
+def _web_score(stream: torrentio.TorrentioStream,
+               caps: dict | None = None) -> int:
+    caps = caps or {}
     blob = f"{stream.name} {stream.title}"
     if torrentio._DV_RE.search(blob):      return -1  # Dolby Vision: browser-incompatible
     if _NO_BROWSER_VIDEO_RE.search(blob):  return -1  # AV1/VP9/VP8: no browser HLS support
@@ -46,50 +109,74 @@ def _web_score(stream: torrentio.TorrentioStream) -> int:
         return -1
 
     score = 0
-    if stream.quality == "1080p":                     score += 100
-    elif stream.quality == "2160p":                   score += 80   # 4K SDR remux: fine for browsers
-    elif stream.quality == "720p":                    score += 50
-    if torrentio._WEBDL_RE.search(blob):              score += 40
-    if torrentio._HEVC_RE.search(blob):               score += 20  # smaller file, same quality
-    if stream.seeders > 10:                           score += 10
+    if stream.quality == "1080p":   score += 100
+    elif stream.quality == "2160p": return -1   # 4K = altijd HEVC + groot, niet geschikt voor web
+    elif stream.quality == "720p":  score += 50
+
+    if torrentio._WEBDL_RE.search(blob): score += 40
+
+    is_h264 = bool(_H264_RE.search(blob))
+    is_aac  = bool(_AAC_NAME_RE.search(blob))
+    if is_h264:            score += 100  # direct play in every browser
+    if is_aac:             score += 50   # direct play audio, no transcode needed
+    if is_h264 and is_aac: score += 50   # perfect combo: zero server work
+
+    # Hard-block HEVC for browsers that can't hardware-decode it.
+    # Firefox has no HEVC; Chrome on Linux lacks hardware HEVC decode.
+    # NAS CPUs cannot transcode HEVC to H264 in real time, so there is
+    # no point selecting HEVC for these browsers at all.
+    if not caps.get("hevc_ok", True) and _HEVC_NAME_RE.search(blob):
+        return -1
+
+    if _BAD_AUDIO_RE.search(blob): score -= 150  # DTS/TrueHD/Atmos: no browser support, always transcode
+    if stream.seeders > 10:        score += 10
 
     # Smaller = faster initial buffering.
-    if   0 < stream.size_gb < 0.5:  score += 55
-    elif stream.size_gb     < 2:    score += 40
-    elif stream.size_gb     < 4:    score += 30
-    elif stream.size_gb     < 8:    score += 18
-    elif stream.size_gb     < 12:   score += 8
+    if   0 < stream.size_gb < 0.5: score += 55
+    elif stream.size_gb     < 2:   score += 40
+    elif stream.size_gb     < 4:   score += 30
+    elif stream.size_gb     < 8:   score += 18
+    elif stream.size_gb     < 12:  score += 8
 
     return score
 
 
 def find_web_candidates(imdb_id: str, media_type: str,
                         season: int | None = None,
-                        episode: int | None = None) -> list[torrentio.TorrentioStream]:
+                        episode: int | None = None,
+                        browser_caps: dict | None = None) -> list[torrentio.TorrentioStream]:
     streams: list[torrentio.TorrentioStream] = []
     seen: set[str] = set()
 
     if _settings.get("ZILEAN_ENABLED", False) and health_cache.is_up("zilean"):
-        for s in zilean.fetch_streams(imdb_id, season=season, episode=episode):
-            if s.info_hash not in seen:
-                seen.add(s.info_hash)
-                streams.append(s)
+        try:
+            for s in zilean.fetch_streams(imdb_id, season=season, episode=episode):
+                if s.info_hash not in seen:
+                    seen.add(s.info_hash)
+                    streams.append(s)
+        except Exception as exc:
+            log.warning("web_player: zilean fetch failed: %s", exc)
 
     if health_cache.is_up("torrentio"):
         kind = "movie" if media_type == "movie" else "series"
-        for s in torrentio.fetch_streams(kind, imdb_id, season=season, episode=episode):
-            if s.info_hash not in seen:
-                seen.add(s.info_hash)
-                streams.append(s)
+        try:
+            for s in torrentio.fetch_streams(kind, imdb_id, season=season,
+                                             episode=episode, timeout=12):
+                if s.info_hash not in seen:
+                    seen.add(s.info_hash)
+                    streams.append(s)
+        except Exception as exc:
+            log.warning("web_player: torrentio fetch failed: %s", exc)
 
     scored = sorted(
-        ((s, _web_score(s)) for s in streams if _web_score(s) >= 0),
+        ((s, _web_score(s, browser_caps)) for s in streams
+         if _web_score(s, browser_caps) >= 0),
         key=lambda x: x[1], reverse=True,
     )
     return [s for s, _ in scored]
 
 
-# ── Job lifecycle ──────────────────────────────────────────────────────────────
+# -- Job lifecycle ------------------------------------------------------------------
 
 class JobStatus(str, Enum):
     SEARCHING     = "searching"
@@ -102,18 +189,21 @@ class JobStatus(str, Enum):
 
 @dataclass
 class PrepareJob:
-    job_id:     str
-    imdb_id:    str
-    media_type: str
-    season:     int | None
-    episode:    int | None
-    status:     JobStatus = JobStatus.SEARCHING
-    message:    str = ""
-    stream_url: str | None = None
-    cdn_url:    str | None = None
-    file_info:  dict | None = None
-    error:      str | None = None
-    _thread:    threading.Thread = field(default=None, repr=False)
+    job_id:       str
+    imdb_id:      str
+    media_type:   str
+    season:       int | None
+    episode:      int | None
+    browser_caps: dict = field(default_factory=dict)
+    status:       JobStatus = JobStatus.SEARCHING
+    message:      str = ""
+    token:        str | None = None
+    stream_url:   str | None = None
+    stream_type:  str = "hls"
+    cdn_url:      str | None = None
+    file_info:    dict | None = None
+    error:        str | None = None
+    _thread:      threading.Thread = field(default=None, repr=False)
 
 
 _jobs: dict[str, PrepareJob] = {}
@@ -122,10 +212,12 @@ _jobs_lock = threading.Lock()
 
 def start_prepare_job(imdb_id: str, media_type: str,
                       season: int | None = None,
-                      episode: int | None = None) -> str:
+                      episode: int | None = None,
+                      user_agent: str = "") -> str:
     job_id = uuid.uuid4().hex[:12]
     job = PrepareJob(job_id=job_id, imdb_id=imdb_id, media_type=media_type,
-                     season=season, episode=episode)
+                     season=season, episode=episode,
+                     browser_caps=_parse_browser_caps(user_agent))
     with _jobs_lock:
         _jobs[job_id] = job
     t = threading.Thread(target=_run_job, args=(job,), daemon=True)
@@ -139,10 +231,11 @@ def get_job(job_id: str) -> PrepareJob | None:
         return _jobs.get(job_id)
 
 
-# ── Pipeline ───────────────────────────────────────────────────────────────────
+# -- Pipeline -----------------------------------------------------------------------
 
-def _get_cdn_url(stream: torrentio.TorrentioStream) -> str | None:
-    """Resolve a TorrentioStream to a TorBox CDN URL.
+def _get_cdn_url(stream: torrentio.TorrentioStream,
+                 ) -> tuple[str | None, int | None, int | None]:
+    """Resolve a TorrentioStream to (cdn_url, torrent_id, file_id).
 
     The caller guarantees that either:
     - the hash is already in the user's TorBox library, OR
@@ -159,9 +252,11 @@ def _get_cdn_url(stream: torrentio.TorrentioStream) -> str | None:
             result     = torbox.add_magnet(stream.magnet, reason="web_player")
             torrent_id = (result or {}).get("torrent_id") or (result or {}).get("id")
         except torbox.RateLimited:
-            log.warning("web_player: TorBox rate-limited on add_magnet")
-            return None
-        # Cached torrents become ready in seconds, not minutes.
+            log.warning("web_player: TorBox rate-limited on add_magnet hash=%s", stream.info_hash)
+            return None, None, None
+        except (RuntimeError, _req_exc.RequestException) as exc:
+            log.warning("web_player: add_magnet failed for hash=%s: %s", stream.info_hash, exc)
+            return None, None, None
         item = torbox.wait_until_ready(stream.info_hash, timeout=60,
                                        torrent_id=torrent_id)
     elif not torbox._is_ready(item):
@@ -169,7 +264,7 @@ def _get_cdn_url(stream: torrentio.TorrentioStream) -> str | None:
                                        torrent_id=item.get("id"))
 
     if not item:
-        return None
+        return None, None, None
 
     torrent_id = item.get("id")
     files      = item.get("files") or []
@@ -177,16 +272,16 @@ def _get_cdn_url(stream: torrentio.TorrentioStream) -> str | None:
         fresh = torbox.find_by_id(torrent_id)
         files = (fresh or {}).get("files") or []
     if not files:
-        return None
+        return None, None, None
 
-    # Pick the largest video file.
     _VIDEO_EXT = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts"}
     videos  = [f for f in files
                if Path(f.get("name") or "").suffix.lower() in _VIDEO_EXT] or files
     main    = max(videos, key=lambda f: f.get("size") or 0)
     file_id = main.get("id")
 
-    return _request_dl(torrent_id, file_id)
+    url = _request_dl(torrent_id, file_id)
+    return url, torrent_id, file_id
 
 
 def _request_dl(torrent_id: int, file_id: int) -> str | None:
@@ -215,8 +310,23 @@ def _run_job(job: PrepareJob) -> None:
         job.message = "Looking for a web-compatible version…"
 
         candidates = find_web_candidates(
-            job.imdb_id, job.media_type, job.season, job.episode
+            job.imdb_id, job.media_type, job.season, job.episode,
+            browser_caps=job.browser_caps,
         )
+
+        # If the browser's codec filter excluded everything (e.g. only HEVC
+        # releases are cached in TorBox for this title), fall back to HEVC.
+        # The HLS path will transcode at ultrafast + 720p.
+        hevc_fallback = False
+        if not candidates and not job.browser_caps.get("hevc_ok", True):
+            log.info("web_player: no H264 candidates for %s, trying HEVC fallback",
+                     job.imdb_id)
+            candidates = find_web_candidates(
+                job.imdb_id, job.media_type, job.season, job.episode,
+                browser_caps={"hevc_ok": True},
+            )
+            hevc_fallback = bool(candidates)
+
         if not candidates:
             job.status = JobStatus.ERROR
             job.error  = "No web-compatible version found. Use Jellyfin."
@@ -224,17 +334,30 @@ def _run_job(job: PrepareJob) -> None:
 
         # Priority 1: already in user's TorBox library (instant CDN URL).
         best = None
-        for c in candidates:
-            if torbox.find_by_hash(c.info_hash):
-                best = c
-                log.info("web_player: found in TorBox library hash=%s", c.info_hash)
-                break
+        try:
+            for c in candidates:
+                if torbox.find_by_hash(c.info_hash):
+                    best = c
+                    log.info("web_player: found in TorBox library hash=%s", c.info_hash)
+                    break
+        except (torbox.RateLimited, RuntimeError, _req_exc.RequestException) as exc:
+            log.warning("web_player: library lookup failed: %s", exc)
 
         # Priority 2: TorBox has it cached (instant add, no download wait).
         if best is None:
-            hashes      = [c.info_hash for c in candidates]
-            cached_set  = torbox.check_cached(hashes)
-            by_hash     = {c.info_hash: c for c in candidates}
+            hashes = [c.info_hash for c in candidates]
+            try:
+                cached_set = torbox.check_cached(hashes)
+            except torbox.RateLimited:
+                log.warning("web_player: TorBox rate-limited on check_cached")
+                job.status = JobStatus.ERROR
+                job.error  = "TorBox rate limit hit. Wait a moment and try again."
+                return
+            except (RuntimeError, _req_exc.RequestException) as exc:
+                log.warning("web_player: check_cached failed: %s", exc)
+                job.status = JobStatus.ERROR
+                job.error  = "TorBox temporarily unavailable. Try again in a moment."
+                return
             # Pick the highest-scored cached candidate (candidates already sorted).
             for c in candidates:
                 if c.info_hash in cached_set:
@@ -249,27 +372,56 @@ def _run_job(job: PrepareJob) -> None:
 
         # Probe each candidate; skip any that turn out to be HDR after all
         # (name-based filter may miss unlabelled HDR releases).
-        cdn_url   = None
-        file_info = None
+        cdn_url     = None
+        file_info   = None
         session_key = None
+        torrent_id  = None
+        file_id     = None
         for candidate in ([best] + [c for c in candidates if c is not best]):
             # Only use instantly-available content.
             _hash = candidate.info_hash
-            if not torbox.find_by_hash(_hash):
-                hashes = [_hash]
-                if _hash not in torbox.check_cached(hashes):
+            try:
+                in_library = torbox.find_by_hash(_hash)
+            except (torbox.RateLimited, RuntimeError, _req_exc.RequestException):
+                in_library = None
+            if not in_library:
+                try:
+                    single_cached = torbox.check_cached([_hash])
+                except (torbox.RateLimited, RuntimeError, _req_exc.RequestException):
+                    single_cached = set()
+                if _hash not in single_cached:
                     continue
 
             log.info("web_player: selected %r hash=%s", candidate.title, _hash)
 
-            # Reuse an active session without re-probing (skip if HDR was detected).
+            # Reuse an active direct session (always prefer direct play).
+            with _direct_lock:
+                existing_direct = _direct_sessions.get(_hash)
+            if existing_direct:
+                age = time.monotonic() - existing_direct.started_at
+                if age > CDN_URL_MAX_AGE_S:
+                    log.info("web_player: CDN URL stale (%.0fs), refreshing hash=%s",
+                             age, _hash)
+                    _refresh_direct_cdn_url(existing_direct)
+                else:
+                    log.info("web_player: reusing active direct session hash=%s", _hash)
+                job.token       = _hash
+                job.file_info   = existing_direct.file_info
+                job.cdn_url     = None
+                job.stream_type = "direct"
+                job.stream_url  = f"/stream/{_hash}/direct"
+                job.status      = JobStatus.READY
+                job.message     = "Ready"
+                return
+
+            # Reuse an active HLS session without re-probing (skip if HDR).
             with _sessions_lock:
                 existing = _sessions.get(_hash)
             if existing and existing.proc.poll() is None:
                 if existing.file_info.get("is_hdr"):
                     log.warning("web_player: skipping HDR cached session hash=%s", _hash)
                     continue
-                log.info("web_player: reusing active session hash=%s", _hash)
+                log.info("web_player: reusing active HLS session hash=%s", _hash)
                 multi_audio   = len(existing.file_info.get("audio_tracks", [])) > 1
                 job.file_info = existing.file_info
                 job.cdn_url   = existing.cdn_url
@@ -281,81 +433,66 @@ def _run_job(job: PrepareJob) -> None:
 
             job.status  = JobStatus.MATERIALIZING
             job.message = "Fetching via TorBox…"
-            _cdn = _get_cdn_url(candidate)
+            _cdn, _torrent_id, _file_id = _get_cdn_url(candidate)
             if not _cdn:
                 log.warning("web_player: requestdl failed for hash=%s, skipping", _hash)
                 continue
 
-            job.status  = JobStatus.PROBING
-            job.message = "Reading file info…"
-            _info = _probe(_cdn)
-
-            if _info.get("is_hdr"):
-                log.warning("web_player: probe detected HDR for hash=%s, skipping", _hash)
-                continue
-
+            # Skip probe -- serve directly and let the browser decide.
+            # ffprobe runs lazily only if HLS fallback is triggered.
             cdn_url     = _cdn
-            file_info   = _info
+            torrent_id  = _torrent_id
+            file_id     = _file_id
+            file_info   = _file_info_from_candidate(candidate)
             session_key = _hash
             break
 
         if not cdn_url or not file_info or not session_key:
             job.status = JobStatus.ERROR
-            job.error  = "No SDR version available for web playback. Use Jellyfin."
+            job.error  = "No instantly available version found. Use Jellyfin."
             return
 
         job.cdn_url   = cdn_url
         job.file_info = file_info
 
         job.status  = JobStatus.PREPARING
-        job.message = "Preparing for playback…"
+        job.message = ("No H264 found -- transcoding HEVC to 720p…"
+                       if hevc_fallback else "Preparing for playback…")
 
-        tmp_dir = PLAYER_TMP_DIR / session_key
-        tmp_dir.mkdir(parents=True, exist_ok=True)
+        _start_direct(session_key, file_info, cdn_url,
+                      torrent_id=torrent_id, file_id=file_id)
+        job.token       = session_key
+        job.stream_type = "direct"
+        job.stream_url  = f"/stream/{session_key}/direct"
+        job.status      = JobStatus.READY
+        job.message     = "Ready"
 
-        multi_audio = len(file_info["audio_tracks"]) > 1
-
-        # Start subtitle fetch in parallel with FFmpeg so they finish together.
-        sub_thread = threading.Thread(
-            target=_subtitles_task,
-            args=(cdn_url, file_info, job.imdb_id, job.media_type,
-                  job.season, job.episode, session_key, tmp_dir),
-            daemon=True,
-        )
-        sub_thread.start()
-
-        session = _start_hls(session_key, cdn_url, file_info, tmp_dir)
-
-        if not multi_audio:
-            if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
-                session.proc.terminate()
-                job.status = JobStatus.ERROR
-                job.error  = "Timeout: FFmpeg produced no segments."
-                return
-
-        # Wait for subtitles (max 15s)  -  usually done by the time FFmpeg is ready.
-        sub_thread.join(timeout=15)
-
-        job.status     = JobStatus.READY
-        job.message    = "Ready"
-        job.stream_url = (f"/stream/{session_key}/hls/master.m3u8" if multi_audio
-                          else f"/stream/{session_key}/hls/playlist.m3u8")
-
-    except Exception:
+    except torbox.RateLimited:
+        log.warning("web_player: job %s hit TorBox rate limit", job.job_id)
+        job.status = JobStatus.ERROR
+        job.error  = "TorBox rate limit hit. Wait a moment and try again."
+    except Exception as exc:
         log.exception("web_player: prepare job %s crashed", job.job_id)
         job.status = JobStatus.ERROR
-        job.error  = "Internal error  -  check server logs."
+        job.error  = f"Internal error ({type(exc).__name__}: {exc})"
 
 
-# ── FFprobe ────────────────────────────────────────────────────────────────────
+# -- FFprobe ------------------------------------------------------------------------
 
-def _probe(cdn_url: str) -> dict:
-    result = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json",
-         "-show_streams", "-show_format", cdn_url],
-        capture_output=True, timeout=20,
-    )
-    data    = json.loads(result.stdout)
+def _probe(cdn_url: str) -> dict | None:
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet",
+             "-probesize", "10M", "-analyzeduration", "3M",
+             "-print_format", "json",
+             "-show_streams", "-show_format", cdn_url],
+            capture_output=True, timeout=20,
+        )
+        data    = json.loads(result.stdout)
+    except Exception as exc:
+        log.warning("web_player: ffprobe failed: %s", exc)
+        return None
+
     streams = data.get("streams", [])
 
     video = next((s for s in streams if s["codec_type"] == "video"), {})
@@ -369,7 +506,7 @@ def _probe(cdn_url: str) -> dict:
     _HDR_TRANSFERS = {"smpte2084", "arib-std-b67", "smpte428"}
     color_transfer  = video.get("color_transfer", "")
     is_hdr          = color_transfer in _HDR_TRANSFERS
-
+    fmt_name        = data.get("format", {}).get("format_name", "")
     return {
         "duration_s":      float(data.get("format", {}).get("duration", 0)),
         "video_codec":     video.get("codec_name", "unknown"),
@@ -377,6 +514,7 @@ def _probe(cdn_url: str) -> dict:
         "height":          video.get("height"),
         "is_hdr":          is_hdr,
         "color_transfer":  color_transfer,
+        "container":       fmt_name,
         "audio_tracks":    [
             {"index": i, "codec": t["codec_name"],
              "language": _tag(t, "language", "und"),
@@ -393,7 +531,160 @@ def _probe(cdn_url: str) -> dict:
     }
 
 
-# ── HLS session ────────────────────────────────────────────────────────────────
+# -- Direct play -------------------------------------------------------------------
+
+def _content_type_for(file_info: dict) -> str:
+    fmt = file_info.get("container", "")
+    if "matroska" in fmt or "webm" in fmt:
+        return "video/x-matroska"
+    return "video/mp4"
+
+
+@dataclass
+class DirectSession:
+    token:        str
+    content_type: str
+    cdn_url:      str
+    file_info:    dict
+    torrent_id:   int | None = None
+    file_id:      int | None = None
+    converting:   bool  = False   # True once HLS fallback has been triggered
+    started_at:   float = field(default_factory=time.monotonic)
+    last_request: float = field(default_factory=time.monotonic)
+    _hb:          threading.Thread = field(default=None, repr=False)
+
+    def touch(self):
+        self.last_request = time.monotonic()
+
+    def start_heartbeat(self):
+        def _beat():
+            while True:
+                time.sleep(60)
+                if time.monotonic() - self.last_request > SESSION_IDLE_CLEANUP:
+                    break
+                db.touch_virtual_item(self.token)
+        self._hb = threading.Thread(target=_beat, daemon=True)
+        self._hb.start()
+
+
+_direct_sessions: dict[str, DirectSession] = {}
+_direct_lock = threading.Lock()
+
+
+def get_direct_session(token: str) -> DirectSession | None:
+    with _direct_lock:
+        return _direct_sessions.get(token)
+
+
+def _refresh_direct_cdn_url(session: DirectSession) -> None:
+    """Fetch a fresh TorBox signed URL for an existing direct session in-place."""
+    if session.torrent_id is None or session.file_id is None:
+        return
+    new_url = _request_dl(session.torrent_id, session.file_id)
+    if new_url:
+        session.cdn_url    = new_url
+        session.started_at = time.monotonic()
+        log.info("web_player: refreshed CDN URL for token=%s", session.token)
+    else:
+        log.warning("web_player: CDN URL refresh failed for token=%s", session.token)
+
+
+def _start_direct(token: str, file_info: dict, cdn_url: str,
+                  torrent_id: int | None = None,
+                  file_id:    int | None = None) -> DirectSession:
+    session = DirectSession(token=token, content_type=_content_type_for(file_info),
+                            cdn_url=cdn_url, file_info=file_info,
+                            torrent_id=torrent_id, file_id=file_id)
+    session.start_heartbeat()
+    with _direct_lock:
+        _direct_sessions[token] = session
+    log.info("web_player: direct play session started token=%s", token)
+    return session
+
+
+def start_hls_conversion(token: str) -> bool:
+    """Trigger HLS pipeline for an active direct session (browser couldn't play it)."""
+    s = get_direct_session(token)
+    if not s:
+        return False
+    if s.converting:
+        return True  # already in progress -- idempotent
+    s.converting = True
+    threading.Thread(target=_do_hls_conversion, args=(token, s.file_info),
+                     daemon=True).start()
+    return True
+
+
+def _file_info_from_candidate(candidate) -> dict:
+    """Minimal file_info derived from torrent name -- no ffprobe needed."""
+    blob = f"{candidate.name} {candidate.title}".lower()
+    codec = 'unknown'
+    if 'x265' in blob or 'hevc' in blob or 'h265' in blob:
+        codec = 'hevc'
+    elif 'x264' in blob or 'h264' in blob or 'avc' in blob:
+        codec = 'h264'
+    height = {'2160p': 2160, '1080p': 1080, '720p': 720, '480p': 480}.get(
+        candidate.quality or '', 0)
+    container = 'matroska' if ('.mkv' in blob or blob.split().count('mkv') > 0) else 'mp4'
+    return {
+        'video_codec':      codec,
+        'height':           height,
+        'width':            0,
+        'duration_s':       0,
+        'is_hdr':           False,
+        'color_transfer':   '',
+        'container':        container,
+        'audio_tracks':     [],
+        'subtitle_tracks':  [],
+    }
+
+
+def _do_hls_conversion(token: str, file_info: dict) -> None:
+    tmp_dir = PLAYER_TMP_DIR / token
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        s = get_direct_session(token)
+        cdn_url = s.cdn_url if s else None
+        if not cdn_url:
+            log.warning("web_player: HLS fallback -- no CDN URL for token=%s", token)
+            (tmp_dir / "hls_error.txt").write_text("Session expired -- please reopen the player")
+            return
+        # Probe now if we skipped it during direct play (lazy path).
+        if not file_info.get('audio_tracks'):
+            log.info("web_player: lazy ffprobe for HLS fallback token=%s", token)
+            probed = _probe(cdn_url)
+            if probed is None:
+                log.warning("web_player: ffprobe failed for token=%s", token)
+                (tmp_dir / "hls_error.txt").write_text("Could not read file info -- use Jellyfin")
+                return
+            file_info = probed
+            s = get_direct_session(token)
+            if s:
+                s.file_info = file_info
+        session = _start_hls(token, cdn_url, file_info, tmp_dir)
+        if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
+            session.proc.terminate()
+            log.warning("web_player: HLS fallback timed out token=%s", token)
+            (tmp_dir / "hls_error.txt").write_text("FFmpeg timed out -- use Jellyfin for this file")
+            return
+        multi_audio = len(file_info.get("audio_tracks", [])) > 1
+        playlist = "master.m3u8" if multi_audio else "playlist.m3u8"
+        (tmp_dir / "hls_ready.txt").write_text(playlist)
+        threading.Thread(
+            target=_extract_subtitles,
+            args=(cdn_url, file_info.get("subtitle_tracks", []), token, tmp_dir),
+            daemon=True,
+        ).start()
+        log.info("web_player: HLS fallback ready token=%s playlist=%s", token, playlist)
+    except Exception:
+        log.exception("web_player: HLS fallback crashed token=%s", token)
+        try:
+            (tmp_dir / "hls_error.txt").write_text("Internal error during conversion")
+        except Exception:
+            pass
+
+
+# -- HLS session -------------------------------------------------------------------
 
 @dataclass
 class HLSSession:
@@ -491,10 +782,10 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
     """Start (or restart) HLS segmentation.
 
     Strategy:
-    - H.264: mpegts segments, video copy, audio copy-or-aac. Near-zero NAS CPU.
-    - HEVC:  fMP4 segments, video copy, audio copy-or-aac. Near-zero NAS CPU.
-             Safari plays HEVC natively; Chrome/Edge use hardware decoding.
-    - AV1/VP9/VP8: transcode to H.264 mpegts (rare, heavy but unavoidable).
+    - H.264: mpegts segments, video copy, audio copy-or-aac. Near-zero CPU.
+    - HEVC/other + VA-API available: hardware decode+encode via Intel QSV.
+      Near-zero CPU, near-realtime. 720p cap when source > 720p.
+    - HEVC/other + no VA-API: software ultrafast + 720p cap (last resort).
 
     seek_offset > 0 = fast keyframe seek in input before generating segments.
     """
@@ -503,23 +794,40 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
 
     # Video encoding strategy:
     # H.264:      copy into mpegts (zero CPU, universally supported).
-    # HEVC/other: transcode to H.264 mpegts (Firefox has no HEVC, fMP4 unreliable).
-    #             preset fast + crf 22 gives good quality at moderate CPU cost.
+    # HEVC/other: transcode to H.264 mpegts, ultrafast, 720p cap (NAS CPU budget).
     video_codec = (file_info.get("video_codec") or "h264").lower()
     _H264_OK    = {"h264", "avc"}
     use_fmp4    = False
     seg_type    = "mpegts"
     seg_ext     = "ts"
 
+    src_height = file_info.get("height") or 0
+
     if video_codec in _H264_OK:
         v_enc      = ["-c:v", "copy"]
+        hw_pre     = []
         mode_label = "ts-copy"
+    elif _vaapi_ok:
+        # Hardware transcode via Intel QuickSync VA-API.
+        # Decode HEVC in GPU, scale to 720p if needed, encode to H264 in GPU.
+        # Near-zero CPU -- eliminates the "can't keep up" issue on NAS hardware.
+        hw_pre = ["-hwaccel", "vaapi",
+                  "-hwaccel_device", _VAAPI_DEV,
+                  "-hwaccel_output_format", "vaapi"]
+        scale  = ["-vf", "scale_vaapi=w=-2:h=720"] if src_height > 720 else []
+        v_enc  = scale + ["-c:v", "h264_vaapi", "-qp", "23"]
+        mode_label = f"ts-vaapi(from {video_codec})"
     else:
-        v_enc      = ["-c:v", "libx264", "-preset", "fast", "-crf", "22", "-pix_fmt", "yuv420p"]
-        mode_label = f"ts-x264(from {video_codec})"
+        # Software fallback: ultrafast + 720p cap.
+        hw_pre     = []
+        scale      = ["-vf", "scale=-2:720"] if src_height > 720 else []
+        v_enc      = scale + ["-c:v", "libx264", "-preset", "ultrafast",
+                               "-crf", "23", "-pix_fmt", "yuv420p"]
+        mode_label = f"ts-x264-ultrafast(from {video_codec})"
 
-    # -ss BEFORE -i = fast keyframe seek.
-    input_args = (["-ss", f"{seek_offset:.3f}"] if seek_offset > 0 else []) + ["-i", cdn_url]
+    # hwaccel args must come before -ss and -i.
+    seek_args  = ["-ss", f"{seek_offset:.3f}"] if seek_offset > 0 else []
+    input_args = hw_pre + seek_args + ["-i", cdn_url]
 
     if multi_audio:
         # Multi-audio: video-only output + one output per audio track,
@@ -529,18 +837,18 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         # Output 0: video only
         cmd += [
             "-map", "0:v:0", *v_enc,
-            "-hls_time", "6", "-hls_list_size", "0",
+            "-hls_time", "2", "-hls_list_size", "0",
             "-hls_flags", "independent_segments",
             "-hls_segment_type", seg_type,
             "-hls_segment_filename", str(tmp_dir / f"seg_v%05d.{seg_ext}"),
         ]
         cmd.append(str(tmp_dir / "video.m3u8"))
 
-        # Outputs 1…N: one audio stream each
+        # Outputs 1...N: one audio stream each
         for i, track in enumerate(audio_tracks):
             cmd += [
                 "-map", f"0:a:{i}", *_audio_copy_or_transcode(track, 0),
-                "-hls_time", "6", "-hls_list_size", "0",
+                "-hls_time", "2", "-hls_list_size", "0",
                 "-hls_flags", "independent_segments",
                 "-hls_segment_type", seg_type,
                 "-hls_segment_filename", str(tmp_dir / f"seg_a{i}_%05d.{seg_ext}"),
@@ -588,7 +896,7 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
             "-map", "0:v:0",
             *((["-map", "0:a:0"] + a_args) if track else ["-an"]),
             *v_enc,
-            "-hls_time", "6", "-hls_list_size", "0",
+            "-hls_time", "2", "-hls_list_size", "0",
             "-hls_flags", "independent_segments",
             "-hls_segment_type", seg_type,
             "-hls_segment_filename", str(tmp_dir / f"seg%05d.{seg_ext}"),
@@ -629,7 +937,7 @@ def _wait_segments_pattern(tmp_dir: Path, pattern: str, count: int, timeout: flo
     return False
 
 
-# ── Subtitles ──────────────────────────────────────────────────────────────────
+# -- Subtitles ---------------------------------------------------------------------
 
 def _extract_subtitles(cdn_url: str, sub_tracks: list,
                        token: str, tmp_dir: Path) -> None:
@@ -741,10 +1049,11 @@ def list_subtitles(token: str) -> list[dict]:
     return out
 
 
-# ── Cleanup ────────────────────────────────────────────────────────────────────
+# -- Cleanup -----------------------------------------------------------------------
 
 def cleanup_idle_sessions() -> None:
     cutoff = time.monotonic() - SESSION_IDLE_CLEANUP
+
     with _sessions_lock:
         stale = [t for t, s in _sessions.items() if s.last_request < cutoff]
     for token in stale:
@@ -753,5 +1062,11 @@ def cleanup_idle_sessions() -> None:
         if session:
             session.proc.terminate()
             shutil.rmtree(session.tmp_dir, ignore_errors=True)
-            log.info("web_player: cleaned up idle session token=%s", token)
+            log.info("web_player: cleaned up idle HLS session token=%s", token)
 
+    with _direct_lock:
+        stale_direct = [t for t, s in _direct_sessions.items() if s.last_request < cutoff]
+    for token in stale_direct:
+        with _direct_lock:
+            _direct_sessions.pop(token, None)
+        log.info("web_player: cleaned up idle direct session token=%s", token)

@@ -19,22 +19,35 @@ const STEPS = ['searching', 'materializing', 'probing', 'preparing'] as const
 
 interface AudioTrack { index: number; codec: string; language: string; title: string }
 interface FileInfo {
-  duration_s:    number
-  video_codec:   string
-  width:         number
-  height:        number
-  is_hdr:        boolean
-  audio_tracks:  AudioTrack[]
+  duration_s:      number
+  video_codec:     string
+  container:       string
+  width:           number
+  height:          number
+  is_hdr:          boolean
+  audio_tracks:    AudioTrack[]
   subtitle_tracks: any[]
 }
 
 interface JobStatus {
-  status:      'searching' | 'materializing' | 'probing' | 'preparing' | 'ready' | 'error'
-  message:     string
-  stream_url?: string
-  cdn_url?:    string
-  file_info?:  FileInfo
-  error?:      string
+  status:       'searching' | 'materializing' | 'probing' | 'preparing' | 'ready' | 'error'
+  message:      string
+  token?:       string
+  stream_url?:  string
+  stream_type?: 'direct' | 'hls'
+  cdn_url?:     string
+  file_info?:   FileInfo
+  error?:       string
+}
+
+function _browserCanPlay(fileInfo: FileInfo | undefined): boolean {
+  if (!fileInfo) return false
+  const codec = (fileInfo.video_codec || '').toLowerCase()
+  // Unknown codec (release name had no codec tag): try direct play and let
+  // video.onerror handle failure. Avoids unnecessary HLS for H264 releases
+  // that are simply not labelled.
+  if (!codec || codec === 'unknown') return true
+  return codec === 'h264' || codec === 'avc' || codec === 'hevc' || codec === 'h265'
 }
 
 export default function PlayerModal({ imdb_id, media_type, title, season, episode, onClose }: {
@@ -56,6 +69,11 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
   const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null)
   const [jumpMin,     setJumpMin]     = useState('')
   const [jumping,     setJumping]     = useState(false)
+  const [converting,  setConverting]  = useState(false)
+  const [hlsReady,    setHlsReady]    = useState(false)
+  const [hlsUrl,      setHlsUrl]      = useState<string | null>(null)
+  const [hlsError,    setHlsError]    = useState<string | null>(null)
+  const pollHlsRef = useRef<ReturnType<typeof setInterval>>()
 
   const prepareMutation = useMutation({
     mutationFn: () =>
@@ -80,9 +98,42 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
   useEffect(() => {
     if (status?.status !== 'ready' || !status.stream_url || !videoRef.current) return
 
-    const video = videoRef.current
+    const video    = videoRef.current
+    const fileInfo = status.file_info
+    const isDirect = status.stream_type === 'direct' && _browserCanPlay(fileInfo)
 
-    if (Hls.isSupported()) {
+    if (isDirect) {
+      video.src = status.stream_url!
+    } else if (!isDirect && status.stream_type === 'direct') {
+      // Browser can't handle the codec/container -- skip to HLS immediately
+      if (!hlsReady) {
+        setConverting(true)
+        const tok = status.token!
+        fetch(`/stream/${tok}/convert-hls`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'X-CSRFToken': document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '' },
+        })
+        pollHlsRef.current = setInterval(async () => {
+          try {
+            const r = await fetch(`/stream/${tok}/hls-status`)
+            if (!r.ok) return
+            const d = await r.json()
+            if (d.status === 'ready') {
+              clearInterval(pollHlsRef.current)
+              setHlsUrl(d.url)
+              setConverting(false)
+              setHlsReady(true)
+            } else if (d.status === 'error') {
+              clearInterval(pollHlsRef.current)
+              setConverting(false)
+              setHlsError(d.error || 'Conversion failed -- use Jellyfin')
+            }
+          } catch {}
+        }, 1000)
+      }
+      return
+    } else if (Hls.isSupported()) {
       const hls = new Hls({ enableWorker: false })
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (!data.fatal) return
@@ -94,7 +145,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
         }
       })
       hls.attachMedia(video)
-      hls.loadSource(status.stream_url)
+      hls.loadSource(status.stream_url!)
       hlsRef.current = hls
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // Safari: native HLS
@@ -104,6 +155,35 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
     }
 
     video.addEventListener('loadedmetadata', () => video.play(), { once: true })
+
+    video.addEventListener('error', () => {
+      if (isDirect && !hlsReady) {
+        setConverting(true)
+        const tok = status.token!
+        fetch(`/stream/${tok}/convert-hls`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'X-CSRFToken': document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '' },
+        })
+        pollHlsRef.current = setInterval(async () => {
+          try {
+            const r = await fetch(`/stream/${tok}/hls-status`)
+            if (!r.ok) return
+            const d = await r.json()
+            if (d.status === 'ready') {
+              clearInterval(pollHlsRef.current)
+              setHlsUrl(d.url)
+              setConverting(false)
+              setHlsReady(true)
+            } else if (d.status === 'error') {
+              clearInterval(pollHlsRef.current)
+              setConverting(false)
+              setHlsError(d.error || 'Conversion failed -- use Jellyfin')
+            }
+          } catch {}
+        }, 1000)
+      }
+    }, { once: true })
 
     video.addEventListener('play', () => {
       if (traktEnabled) {
@@ -130,8 +210,26 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
       }
       hlsRef.current?.destroy()
       clearInterval(saveTimer.current)
+      clearInterval(pollHlsRef.current)
     }
   }, [status?.status])
+
+  // Wire HLS.js once the automatic fallback conversion is done
+  useEffect(() => {
+    if (!hlsReady || !videoRef.current || !hlsUrl) return
+    const video = videoRef.current
+    const hls = new Hls({ enableWorker: false })
+    hls.on(Hls.Events.ERROR, (_e, data) => {
+      if (!data.fatal) return
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError()
+      else hls.destroy()
+    })
+    hls.attachMedia(video)
+    hls.loadSource(hlsUrl)
+    hlsRef.current = hls
+    video.play().catch(() => {})
+    return () => hls.destroy()
+  }, [hlsReady])
 
   // Reload Hls.js (or native video) with a new source URL  -  used after seek restart.
   const reloadHls = useCallback((url: string) => {
@@ -281,6 +379,23 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
         {/* Player */}
         {status?.status === 'ready' && (
           <div className="bg-black rounded-xl overflow-hidden shadow-2xl">
+            {(converting || hlsError) && (
+              <div className="absolute inset-0 z-10 bg-black/80 flex flex-col items-center justify-center gap-3">
+                {hlsError ? (
+                  <>
+                    <p className="text-red-400 text-sm font-medium">Playback failed</p>
+                    <p className="text-zinc-300 text-xs max-w-xs text-center">{hlsError}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-white text-sm font-medium">Switching to compatible mode…</p>
+                    <div className="w-32 h-1 bg-zinc-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-indigo-500 rounded-full animate-pulse w-1/2" />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             <video
               ref={videoRef}
               controls
@@ -294,7 +409,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
                 )}
                 <span>{fileInfo.video_codec?.toUpperCase()}</span>
 
-                {fileInfo.audio_tracks?.length > 1 && (
+                {fileInfo.audio_tracks?.length > 1 && status?.stream_type !== 'direct' && (
                   <select
                     onChange={e => {
                       if (hlsRef.current) hlsRef.current.audioTrack = +e.target.value

@@ -1,4 +1,4 @@
-# ── Stage 1: build the React + Vite frontend ─────────────────────────────────
+# -- Stage 1: build the React + Vite frontend -----------------------------------------
 FROM node:22-alpine AS frontend
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
@@ -7,7 +7,7 @@ COPY frontend/ ./
 COPY plugins/ /plugins/
 RUN npm run build
 
-# ── Stage 3: Python runtime ──────────────────────────────────────────────────
+# -- Stage 3: Python runtime ----------------------------------------------------------
 FROM python:3.12-slim
 
 ARG BUILD_VERSION=dev
@@ -19,11 +19,20 @@ LABEL org.opencontainers.image.title="mycelium" \
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     LISTEN_HOST=0.0.0.0 \
-    LISTEN_PORT=8088
+    LISTEN_PORT=8088 \
+    LIBVA_DRIVER_NAME=iHD
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# Add non-free repo for Intel VA-API driver (iHD = Gen8+, includes J3455/J4125)
+RUN echo "deb http://deb.debian.org/debian bookworm contrib non-free non-free-firmware" \
+        > /etc/apt/sources.list.d/non-free.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libva2 \
+        libva-drm2 \
+        intel-media-va-driver \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -36,6 +45,8 @@ COPY templates/ ./templates/
 COPY docs/ ./docs/
 # Built SPA from stage 1 (Vite writes to ../static/app relative to frontend/)
 COPY --from=frontend /static/app/ ./static/app/
+# Also copy pre-built SPA if present (skips npm build when static/app/ is tracked)
+COPY static/ ./static/
 
 EXPOSE 8088
 
