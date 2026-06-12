@@ -176,9 +176,9 @@ if [ "$spore_replaced" = "1" ]; then
     # back to EAC3. Plex still thinks audio is PCM so it sends pcm_s16le decoder
     # hint and does NOT start EAE. CDN has EAC3 -> eac3_eae auto-selected ->
     # fails without watchfolder. Treat as EAE-needed so force-copy fires below.
-    if [ "$_is_pcm" = "1" ] && [ "$cdn_audio_codec" = "eac3" ] && [ "$_audio_output_is_copy" = "0" ]; then
+    if [ "$_is_pcm" = "1" ] && [ "$_audio_output_is_copy" = "0" ]; then
         _needs_eae=1
-        echo "$(date '+%H:%M:%S') WRAP stale PCM + EAC3 CDN: force audio copy (no EAE session)" >> "$SPORE_LOG"
+        echo "$(date '+%H:%M:%S') WRAP stale PCM metadata: force audio copy (cdn_audio_codec=${cdn_audio_codec:-unknown})" >> "$SPORE_LOG"
     fi
     if [ "$_needs_eae" = "0" ]; then
         _after_i=0
