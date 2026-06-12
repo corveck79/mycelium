@@ -794,21 +794,12 @@ def make_stub_mkv(title: str, quality: str | None = None,
             width, height = 854, 480
 
     if codec_id is None:
-        # VP8 is used as a placeholder codec. Design goals:
-        #   1. Forces video transcoding: no Plex client profile includes VP8 for
-        #      Direct Play, so Plex always calls the transcoder (wrapper runs).
-        #   2. Allows Direct Stream audio: when stub audio is EAC3 5.1 (see below),
-        #      Plex negotiates EAC3 copy output for compatible clients (Shield TV,
-        #      AV receivers). The wrapper forces video copy, audio is already copy.
-        #      FFmpeg progress reports codec=eac3 -- Plex ACCEPTS this because it
-        #      itself negotiated Direct Stream EAC3, so no codec mismatch kill.
-        #   3. No EAE needed: Direct Stream audio = no audio decode = no EAE.
-        #      EAE IPC latency issue (session killed after ~5s) is avoided entirely.
-        #
-        # Why NOT quality-based HEVC/H264 as stub codec:
-        #   HEVC 4K + EAC3 5.1 on Shield TV with AV receiver = Full Direct Play.
-        #   Wrapper is never called. Empty stub Cluster is served -> black screen.
-        codec_id = "V_VP8"
+        # Use quality-based codec so Direct Stream clients (Linux HTPC etc.) get
+        # the matching codec from the CDN, preventing Plex from killing the session
+        # for a video codec mismatch. VP8 caused such a mismatch: Plex negotiated
+        # VP8 Direct Stream with the Linux client, but the CDN has HEVC/H264, so
+        # Plex killed immediately.
+        codec_id = _codec_id_for_quality(quality)
 
     # EBML header
     ebml_data = (
@@ -837,7 +828,7 @@ def make_stub_mkv(title: str, quality: str | None = None,
     # Plex can apply tone-mapping for SDR clients. Skipped for VP8 placeholder
     # stubs (HDR10 in a VP8 track is meaningless; the wrapper forces video copy so
     # the actual CDN HDR10 signal passes through untouched regardless).
-    is_4k = (width >= 3840) and codec_id.startswith("V_MPEGH/ISO/HEVC")
+    is_4k = (width >= 3840) and codec_id.startswith("V_MPEGH/ISO/HEVC")  # HDR10 only for HEVC 4K
     if is_4k:
         # MKV Colour element with BT.2020 + SMPTE ST 2084 PQ (HDR10)
         colour_data = (
@@ -887,16 +878,12 @@ def make_stub_mkv(title: str, quality: str | None = None,
             )
             next_num += 1
     else:
-        # EAC3 5.1 placeholder. Works in tandem with the V_VP8 video stub:
-        #   - V_VP8 video: Plex must transcode (no client Direct Plays VP8),
-        #     so the transcoder wrapper is always invoked.
+        # EAC3 5.1 placeholder.
         #   - A_EAC3 6ch: Plex chooses Direct Stream audio (copy output) for
         #     clients that support EAC3 passthrough (Shield TV + AV receiver via
-        #     eARC). No EAE is started. No audio decode needed.
-        #   - Wrapper forces video copy (VP8 -> CDN HEVC). Audio was already copy.
-        #   - FFmpeg progress reports codec=eac3 for audio. Plex ACCEPTS this
-        #     because it negotiated Direct Stream EAC3 itself -- no codec mismatch,
-        #     session is not killed, segments are produced and played.
+        #     eARC). No EAE needed. Audio packets copied from CDN.
+        #   - For clients that transcode (MiTV -> AC3), EAE decodes EAC3 via
+        #     eac3_eae IPC. The wrapper keeps -eae_prefix for transcode sessions.
         tracks_data += _ebml_audio_track_entry(
             track_num=2, codec_mkv="A_EAC3", lang="und",
             channels=6, sample_rate=48000.0, is_default=True,
@@ -974,8 +961,8 @@ def _write_spore_stubs(strm_path: Path, token: str,
         try:
             stub = make_stub_mkv(title, quality)
             mkv_path.write_bytes(stub)
-            log.debug("Spore: wrote stub MKV %s (%d bytes, codec=V_VP8 audio=A_EAC3-6ch)",
-                      mkv_path.name, len(stub))
+            log.debug("Spore: wrote stub MKV %s (%d bytes, quality=%s audio=A_EAC3-6ch)",
+                      mkv_path.name, len(stub), quality or "?")
         except Exception as exc:
             log.warning("Spore: could not write stub MKV %s: %s", mkv_path, exc)
             return
@@ -1100,12 +1087,10 @@ def regenerate_spore_stubs(token: str | None = None) -> dict:
                 duration_sec=dur,
                 audio_tracks=None,
                 subtitle_tracks=sub_tracks,
-                # video_codec_private intentionally omitted: stub uses V_VP8 codec,
-                # HEVC/H264 SPS/PPS extradata is meaningless for VP8 tracks.
             )
             mkv_path.write_bytes(stub)
-            log.info("Spore: regenerated stub %s (codec=V_VP8 subs=%d)",
-                     mkv_path.name, len(sub_tracks or []))
+            log.info("Spore: regenerated stub %s (quality=%s subs=%d)",
+                     mkv_path.name, item.get("quality") or "?", len(sub_tracks or []))
             regenerated += 1
         except Exception as exc:
             log.warning("Spore regenerate: failed for %s: %s", strm_path.name, exc)
@@ -1137,18 +1122,9 @@ def update_stub_from_probe(token: str, audio_streams: list[dict],
     if not mkv_path.parent.exists():
         return False
 
-    # video_codec_private (avcC/hvcC SPS/PPS) is intentionally NOT included:
-    # the stub always uses V_VP8 as video codec (forces transcoding on all clients,
-    # prevents Full Direct Play). HEVC/H264 SPS/PPS is meaningless in a VP8 track
-    # and would confuse Plex's video analysis. The actual video codec/profile is
-    # irrelevant for playback because the transcoder wrapper always forces video copy
-    # (CDN HEVC/H264 packets pass through unchanged).
-    #
     # Keep audio_tracks=None so make_stub_mkv uses the A_EAC3 6ch placeholder.
-    # Real audio tracks would allow Plex to choose Direct Play on Shield/Android
-    # (VP8 + EAC3 forces video-transcode + Direct-Stream-audio, which is what we
-    # want; real EAC3 tracks without VP8 force would still trigger Direct Play with
-    # some quality settings).
+    # video_codec_private (avcC/hvcC SPS/PPS) is not passed: the probe-derived
+    # codec_private would be passed via update_stub_from_probe once available.
     subtitle_tracks = [
         {
             "codec":    s.get("codec_name", "subrip"),
@@ -1180,7 +1156,7 @@ def update_stub_from_probe(token: str, audio_streams: list[dict],
             duration_sec=duration_s or 7200.0,
             audio_tracks=None,
             subtitle_tracks=subtitle_tracks or None,
-            # video_codec_private omitted: stub uses V_VP8, HEVC SPS/PPS irrelevant
+            # video_codec_private omitted: updated via update_stub_from_probe
         )
         mkv_path.write_bytes(stub)
         log.info(
