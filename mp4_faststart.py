@@ -170,18 +170,24 @@ def build_and_cache(cdn_url: str, token: str) -> bool:
             head = req_lib.head(cdn_url, timeout=_CONNECT_TIMEOUT, allow_redirects=True)
             cdn_size = int(head.headers["Content-Length"])
 
-            # ftyp: first box (always small)
-            ftyp_raw = _get(cdn_url, 0, 63)
-            _, ftyp_size, _ = _box_header(ftyp_raw, 0)
+            # ftyp: first box — read header to get actual size, then fetch full box
+            ftyp_hdr = _get(cdn_url, 0, 15)
+            _, ftyp_size, _ = _box_header(ftyp_hdr, 0)
+            ftyp_raw = _get(cdn_url, 0, ftyp_size - 1)
             ftyp = ftyp_raw[:ftyp_size]
 
             # Locate moov by scanning box headers
             result = _locate_moov(cdn_url, cdn_size)
+            def _atomic_write(dest: Path, data: bytes) -> None:
+                tmp = dest.with_suffix(".tmp")
+                tmp.write_bytes(data)
+                tmp.replace(dest)
+
             if result is None:
                 # Not an MP4 (likely MKV): write redirect sentinel so spore-stream
                 # issues a 302 to CDN directly. FFmpeg reads MKV from byte 0, no seeking.
                 meta = struct.pack(">QQQQ", 0, 0, cdn_size, 0)
-                path.write_bytes(meta)
+                _atomic_write(path, meta)
                 log.info("FastStart: non-MP4 CDN for token=%s, stored redirect sentinel", token)
                 return True
 
@@ -190,7 +196,7 @@ def build_and_cache(cdn_url: str, token: str) -> bool:
             if moov_offset == ftyp_size:
                 # Already fast-start: sentinel with moov_size=0 signals direct CDN redirect
                 meta = struct.pack(">QQQQ", ftyp_size, 0, cdn_size, moov_offset)
-                path.write_bytes(meta)
+                _atomic_write(path, meta)
                 log.info("FastStart: already fast-start for token=%s, stored sentinel", token)
                 return True
 
@@ -204,7 +210,7 @@ def build_and_cache(cdn_url: str, token: str) -> bool:
 
             # .fsh: [8B ftyp_size][8B moov_size][8B cdn_size][8B moov_offset][header...]
             meta = struct.pack(">QQQQ", ftyp_size, moov_size, cdn_size, moov_offset)
-            path.write_bytes(meta + header)
+            _atomic_write(path, meta + header)
 
             log.info(
                 "FastStart: cached token=%s ftyp=%d moov=%d moov_offset=%d cdn_size=%d",

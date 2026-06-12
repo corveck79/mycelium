@@ -354,8 +354,11 @@ def _migrate() -> None:
             ("spore_tracks", "TEXT"),
         ]:
             if col not in vi_cols:
-                conn.execute(f"ALTER TABLE virtual_items ADD COLUMN {col} {typedef}")
-                log.info("Migration: added virtual_items.%s", col)
+                try:
+                    conn.execute(f"ALTER TABLE virtual_items ADD COLUMN {col} {typedef}")
+                    log.info("Migration: added virtual_items.%s", col)
+                except Exception as _e:
+                    log.warning("Migration: could not add virtual_items.%s: %s", col, _e)
 
         req_cols = {r["name"] for r in conn.execute("PRAGMA table_info(requests)")}
         if "tmdb_id" not in req_cols:

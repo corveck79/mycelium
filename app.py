@@ -494,8 +494,8 @@ def health_simple():
     try:
         db.get_recent(1)
         return jsonify(status="ok")
-    except Exception as exc:
-        return jsonify(status="degraded", error=str(exc)[:120]), 503
+    except Exception:
+        return jsonify(status="degraded"), 503
 
 
 @app.get("/metrics")
@@ -571,6 +571,7 @@ def webhook():
 def torbox_webhook():
     """Endpoint for TorBox to push completion notifications.
     Triggers strm_generator to catch the newly-ready torrent."""
+    _check_auth()
     payload = request.get_json(silent=True) or {}
     log.info("TorBox webhook: %s", payload)
     threading.Thread(target=strm_generator.run_and_refresh, name="torbox-push", daemon=True).start()
@@ -632,8 +633,12 @@ def setup_save():
     if db.user_count() > 0 and not auth.is_admin():
         return jsonify(error="unauthorized"), 401
     import settings as _settings
+    _allowed_keys = {k for g in _settings.SETTING_GROUPS for k in g["keys"]} | {"SETUP_COMPLETE"}
     saved = 0
     for key, value in request.form.items():
+        if key not in _allowed_keys:
+            log.warning("setup_save: rejected unknown key %r", key)
+            continue
         # Treat empty strings as "clear override"
         if value == "":
             _settings.set(key, None)
@@ -917,12 +922,15 @@ def api_generate_nfos():
 
 @app.post("/ui/api/repair-strms")
 @_csrf.exempt
+@auth.require_auth
 def ui_api_repair_strms():
     """Scan movie .strm files for expired direct TorBox CDN URLs and repair them.
     Files with a catbox token → left alone. Files with a direct URL:
       - if a virtual_item exists for that imdb_id → rewrite to catbox proxy URL
       - otherwise → delete the .strm and immediately requeue via processor
     """
+    if not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
     result = strm_generator.repair_expired_strms(media_type="movie")
     return jsonify(**result)
 

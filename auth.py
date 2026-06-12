@@ -173,6 +173,7 @@ def is_admin() -> bool:
 def attempt_login(username: str, password: str) -> bool:
     """Authenticate against either the users table (multi-user) or the
     legacy single-user AUTH_USERNAME/AUTH_PASSWORD_HASH settings."""
+    session.clear()
     # Try DB-backed user first
     try:
         import db
@@ -194,6 +195,7 @@ def attempt_login(username: str, password: str) -> bool:
     if _verify_password(password):
         session["user"] = expected_user
         session["role"] = "admin"
+        session.pop("user_id", None)
         return True
     return False
 

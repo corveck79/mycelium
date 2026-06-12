@@ -97,7 +97,6 @@ def add_magnet(magnet: str, timeout: int = 30, reason: str = "unknown") -> dict:
         log.warning("createtorrent [%s] SKIPPED  -  per-minute burst %d/%d reached",
                     reason, usage_min["count"], _CREATETORRENT_LIMIT_MIN)
         raise RateLimited()
-    _record_createtorrent(reason)
     log.info("createtorrent [%s] (%d/60h, %d/10m): %s",
              reason, usage_hour["count"] + 1, usage_min["count"] + 1, magnet[:80])
     resp = requests.post(url, headers=_headers(), data={"magnet": magnet}, timeout=timeout)
@@ -107,6 +106,7 @@ def add_magnet(magnet: str, timeout: int = 30, reason: str = "unknown") -> dict:
                     reason, retry_after)
         raise RateLimited()
     resp.raise_for_status()
+    _record_createtorrent(reason)
     payload = resp.json() or {}
     if not payload.get("success", False):
         # DUPLICATE_ITEM means the torrent is already in TorBox  -  treat as success
@@ -324,7 +324,7 @@ def _is_ready(item: dict) -> bool:
     if item.get("download_finished"):
         return True
     state = (item.get("download_state") or "").lower()
-    return state in ("cached", "completed", "uploading", "metaDL_done")
+    return state in ("cached", "completed", "uploading", "metadl_done")
 
 
 def wait_until_ready(info_hash: str, timeout: int | None = None,

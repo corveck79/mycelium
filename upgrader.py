@@ -196,13 +196,17 @@ def run_pack_consolidation() -> int:
             item = torbox.wait_until_ready(pack.info_hash)
             if not item:
                 continue
-            # Remove old per-episode strms (let strm_generator rebuild from pack)
+            # Write pack strms first; only remove old files if new ones were created.
+            new_count = strm_generator.process_torrent(item)
+            if not new_count:
+                log.warning("Pack consolidation: process_torrent wrote 0 strms for %s S%02d — keeping old strms",
+                            title, season)
+                continue
             for s in strms:
                 try:
                     s.unlink()
                 except Exception:
                     pass
-            strm_generator.process_torrent(item)
             db.log_activity("consolidated", f"{title} S{season:02d}",
                             f"{len(strms)} episodes → 1 pack ({pack.quality})", True)
             consolidated += 1

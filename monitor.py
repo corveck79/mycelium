@@ -97,6 +97,7 @@ def _sync_wanted(imdb_id: str, tmdb_id: int, title: str, seasons: list[int],
                 db.mark_episode_status(imdb_id, season, ep_num, "found")
             else:
                 db.upsert_wanted_episode(imdb_id, tmdb_id, title, season, ep_num, air_date)
+                db.mark_episode_status(imdb_id, season, ep_num, "wanted")
 
 
 def run_series_check() -> None:

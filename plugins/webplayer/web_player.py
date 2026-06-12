@@ -761,6 +761,12 @@ def _do_hls_conversion(token: str, file_info: dict) -> None:
             (tmp_dir / "hls_error.txt").write_text("Internal error during conversion")
         except Exception:
             pass
+        # Clean up tmp_dir if no session was registered (avoids permanent leak).
+        import shutil as _shutil
+        with _sessions_lock:
+            registered = token in _sessions
+        if not registered:
+            _shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 # ── HLS session ────────────────────────────────────────────────────────────────
@@ -940,7 +946,11 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         log.info("web_player: FFmpeg multi-audio/%s token=%s seek=%.1f",
                  mode_label, token, seek_offset)
         stderr_log = open(tmp_dir / "ffmpeg.log", "w")
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=stderr_log)
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=stderr_log)
+        except Exception:
+            stderr_log.close()
+            raise
 
         session = HLSSession(token=token, proc=proc, tmp_dir=tmp_dir,
                              cdn_url=cdn_url, file_info=file_info)
@@ -989,7 +999,11 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         log.info("web_player: FFmpeg single-audio/%s token=%s seek=%.1f",
                  mode_label, token, seek_offset)
         stderr_log = open(tmp_dir / "ffmpeg.log", "w")
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=stderr_log)
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=stderr_log)
+        except Exception:
+            stderr_log.close()
+            raise
 
         session = HLSSession(token=token, proc=proc, tmp_dir=tmp_dir,
                              cdn_url=cdn_url, file_info=file_info)
@@ -1175,6 +1189,14 @@ def cleanup_idle_sessions() -> None:
             session = _sessions.pop(token, None)
         if session:
             session.proc.terminate()
+            try:
+                session.proc.wait(timeout=5)
+            except Exception:
+                session.proc.kill()
+                try:
+                    session.proc.wait(timeout=2)
+                except Exception:
+                    pass
             shutil.rmtree(session.tmp_dir, ignore_errors=True)
             log.info("web_player: cleaned up idle HLS session token=%s", token)
 

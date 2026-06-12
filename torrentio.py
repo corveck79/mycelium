@@ -109,7 +109,7 @@ def _looks_like_season_pack(title: str, season: int | None) -> bool:
         return True
     if "season" in blob:
         return True
-    if re.search(rf"s0?{season}(?!e\d)", blob, re.IGNORECASE):
+    if re.search(rf"s0*{season}(?!\d)(?!e\d)", blob, re.IGNORECASE):
         return True
     return False
 

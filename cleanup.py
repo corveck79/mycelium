@@ -197,11 +197,12 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
     to_try = cached[:1] or candidates[:1]
 
     winner: TorrentioStream | None = None
+    winner_item: dict | None = None
     rate_limited = False
     for stream in to_try:
         try:
             torbox.add_magnet(stream.magnet, reason="cleanup-repair")
-            torbox.wait_until_ready(stream.info_hash)
+            winner_item = torbox.wait_until_ready(stream.info_hash)
             winner = stream
             break
         except Exception as exc:
@@ -214,14 +215,19 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
         log.warning("Rate limited by TorBox for '%s'  -  will retry next cleanup run", title)
         raise _RateLimitedError()
 
-    if winner:
+    if winner and winner_item:
+        # Write new strm(s) first; only then remove old files to avoid a window with no strm.
+        new_count = strm_generator.process_torrent(winner_item)
+        if not new_count:
+            log.warning("Repair '%s': process_torrent wrote 0 strms — keeping old strm", title)
+            return "failed"
         try:
-            path.unlink()
+            path.unlink(missing_ok=True)
             path.with_suffix(".nfo").unlink(missing_ok=True)
             strm_generator._delete_spore_stubs(path)
         except Exception:
             pass
-        log.info("Repaired '%s': deleted strm, added new torrent %s", title, winner.info_hash)
+        log.info("Repaired '%s': wrote %d new strm(s), replaced torrent %s", title, new_count, winner.info_hash)
         db.insert_repair_item(run_id, str(path), title, media_type, torrent_id,
                               winner.info_hash, "repaired", None)
         return "repaired"
