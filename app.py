@@ -72,6 +72,8 @@ APP_VERSION = "0.5.1-dev"
 with open(_path.join(_path.dirname(__file__), "releases.json"), encoding="utf-8") as _f:
     RELEASES: list[dict] = _json.load(_f)
 
+db.init()
+
 import settings as _settings_mod
 import os as _os
 LITE_MODE: bool = (
@@ -132,8 +134,6 @@ limiter = Limiter(
     default_limits=[],  # opt-in per route
     storage_uri="memory://",
 )
-
-db.init()
 
 import plugin_loader
 if not LITE_MODE:

@@ -297,11 +297,11 @@ CREATE INDEX IF NOT EXISTS idx_createtorrent_ts ON createtorrent_log(ts);
 def init() -> None:
     # PRAGMAs are applied in _raw_connect() on every new thread-local connection.
     with _connect() as conn:
-        _dedup_requests(conn)
         for stmt in _DDL.split(";"):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(stmt)
+        _dedup_requests(conn)
         conn.commit()
     _migrate()
     integrity_check()
