@@ -171,10 +171,82 @@ def _extract_year(name: str) -> int | None:
 # NFO sidecars, canonieke mapnamen, IMDB-titelherstel.
 # Alles hier raakt uitsluitend Jellyfin; Plex Spore stubs blijven onaangetast.
 
+def _fileinfo_xml(quality: str | None,
+                   audio_tracks: list[dict] | None = None,
+                   sub_tracks: list[dict] | None = None) -> str:
+    """Return a <fileinfo><streamdetails> XML block for Plex/Kodi NFO files.
+
+    Plex reads this to determine codec and make Direct Play / transcode decisions
+    without having to probe the actual file. Without this, Video=None and Plex
+    refuses to play .strm files (error 4294967283).
+
+    quality: '2160p', '1080p', '720p', or None (defaults to 1080p).
+    audio_tracks / sub_tracks: real tracks from CDN probe; falls back to defaults.
+    """
+    q = (quality or "").lower()
+    if "2160" in q or "4k" in q or "uhd" in q:
+        v_codec, v_w, v_h = "hevc", 3840, 2160
+    elif "720" in q:
+        v_codec, v_w, v_h = "h264", 1280, 720
+    else:
+        v_codec, v_w, v_h = "h264", 1920, 1080
+
+    video_xml = (
+        "      <video>\n"
+        f"        <codec>{v_codec}</codec>\n"
+        f"        <width>{v_w}</width>\n"
+        f"        <height>{v_h}</height>\n"
+        "      </video>\n"
+    )
+
+    audio_xml = ""
+    if audio_tracks:
+        for at in audio_tracks:
+            codec   = (at.get("codec") or at.get("codec_name") or "eac3").lower()
+            ch      = int(at.get("channels") or 6)
+            lang    = ((at.get("tags") or {}).get("language") or at.get("language") or "und")[:3]
+            audio_xml += (
+                "      <audio>\n"
+                f"        <codec>{codec}</codec>\n"
+                f"        <channels>{ch}</channels>\n"
+                f"        <language>{lang}</language>\n"
+                "      </audio>\n"
+            )
+    else:
+        audio_xml = (
+            "      <audio>\n"
+            "        <codec>eac3</codec>\n"
+            "        <channels>6</channels>\n"
+            "        <language>und</language>\n"
+            "      </audio>\n"
+        )
+
+    sub_xml = ""
+    for st in (sub_tracks or []):
+        lang = ((st.get("tags") or {}).get("language") or st.get("language") or "und")[:3]
+        sub_xml += (
+            "      <subtitle>\n"
+            f"        <language>{lang}</language>\n"
+            "      </subtitle>\n"
+        )
+
+    return (
+        "  <fileinfo>\n"
+        "    <streamdetails>\n"
+        f"{video_xml}"
+        f"{audio_xml}"
+        f"{sub_xml}"
+        "    </streamdetails>\n"
+        "  </fileinfo>\n"
+    )
+
+
 def _write_nfo(strm_path: Path, imdb_id: str | None, tmdb_id: int | None = None,
-               media_type: str = "movie", nfo_path: Path | None = None) -> None:
-    """Write a Kodi/Jellyfin NFO sidecar. nfo_path overrides the default
-    (strm_path.with_suffix('.nfo')) so callers can write tvshow.nfo anywhere."""
+               media_type: str = "movie", nfo_path: Path | None = None,
+               quality: str | None = None) -> None:
+    """Write a Kodi/Jellyfin/Plex NFO sidecar. nfo_path overrides the default
+    (strm_path.with_suffix('.nfo')) so callers can write tvshow.nfo anywhere.
+    Includes <fileinfo><streamdetails> so Plex knows the codec for Direct Play."""
     if not imdb_id and not tmdb_id:
         return
     nfo_path = nfo_path or strm_path.with_suffix(".nfo")
@@ -184,23 +256,29 @@ def _write_nfo(strm_path: Path, imdb_id: str | None, tmdb_id: int | None = None,
     year = int(m.group(1)) if m else None
     title = _YEAR_RE.sub("", strm_path.parent.name).replace("()", "").strip() if m else strm_path.parent.name
 
+    fileinfo = _fileinfo_xml(quality)
+
+    uid_tags = ""
+    if imdb_id:
+        uid_tags += f'  <uniqueid type="imdb" default="true">{imdb_id}</uniqueid>\n'
+    if tmdb_id:
+        uid_tags += f'  <uniqueid type="tmdb">{tmdb_id}</uniqueid>\n'
+
     if media_type == "movie":
         year_tag = f"\n  <year>{year}</year>" if year else ""
-        uid_tags = ""
-        if imdb_id:
-            uid_tags += f'  <uniqueid type="imdb" default="true">{imdb_id}</uniqueid>\n'
-        if tmdb_id:
-            uid_tags += f'  <uniqueid type="tmdb">{tmdb_id}</uniqueid>\n'
         content = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-            f"<movie>\n  <title>{title}</title>{year_tag}\n{uid_tags}</movie>\n"
+            f"<movie>\n  <title>{title}</title>{year_tag}\n{uid_tags}{fileinfo}</movie>\n"
+        )
+    elif media_type == "episode":
+        # Per-episode NFO: Plex uses this to read <fileinfo> codec data for .strm playback
+        # Season/episode numbers are encoded in the filename (SxxExx); we just need fileinfo
+        content = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            f"<episodedetails>\n{uid_tags}{fileinfo}</episodedetails>\n"
         )
     else:
-        uid_tags = ""
-        if imdb_id:
-            uid_tags += f'  <uniqueid type="imdb" default="true">{imdb_id}</uniqueid>\n'
-        if tmdb_id:
-            uid_tags += f'  <uniqueid type="tmdb">{tmdb_id}</uniqueid>\n'
+        # tvshow.nfo - no fileinfo needed (Plex reads episode NFOs for codec info)
         content = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             f"<tvshow>\n  <title>{title}</title>\n{uid_tags}</tvshow>\n"
@@ -210,6 +288,70 @@ def _write_nfo(strm_path: Path, imdb_id: str | None, tmdb_id: int | None = None,
         log.info("Wrote NFO: %s", nfo_path)
     except Exception as exc:
         log.warning("Could not write NFO %s: %s", nfo_path, exc)
+
+
+def update_nfo_streamdetails(strm_path: Path, quality: str | None,
+                              audio_tracks: list[dict], sub_tracks: list[dict]) -> bool:
+    """Update or add <fileinfo><streamdetails> in an existing NFO with real track info.
+
+    Called after CDN probe so Plex gets accurate codec, language, and channel info.
+    Rewrites the <fileinfo> block in-place; preserves all other NFO content.
+    Returns True if the NFO was updated.
+    """
+    nfo_path = strm_path.with_suffix(".nfo")
+    if not nfo_path.exists():
+        return False
+    try:
+        text = nfo_path.read_text(encoding="utf-8")
+        new_fileinfo = _fileinfo_xml(quality, audio_tracks, sub_tracks)
+        # Remove existing <fileinfo>...</fileinfo> block if present
+        import re as _re
+        text = _re.sub(r'\s*<fileinfo>.*?</fileinfo>\s*', '\n', text,
+                       flags=_re.DOTALL)
+        # Insert before closing tag (</movie>, </tvshow>, </episodedetails>)
+        text = _re.sub(r'(</(?:movie|tvshow|episodedetails)>)',
+                       f"{new_fileinfo}\\1", text)
+        nfo_path.write_text(text, encoding="utf-8")
+        log.debug("NFO streamdetails updated: %s", nfo_path.name)
+        return True
+    except Exception as exc:
+        log.warning("Could not update NFO streamdetails %s: %s", nfo_path, exc)
+        return False
+
+
+def backfill_nfo_streamdetails() -> dict:
+    """Add/update <fileinfo> in all existing NFO files that lack codec info.
+
+    For items with probed spore_tracks: uses real audio/sub data.
+    For unprobed items: uses quality-based defaults (hevc/h264, EAC3 6ch).
+    Safe to run multiple times; skips items without a strm_path.
+    """
+    items = db.get_all_virtual_items()
+    updated = skipped = errors = 0
+    for item in items:
+        strm_path_str = item.get("strm_path")
+        if not strm_path_str:
+            skipped += 1
+            continue
+        strm_path = Path(strm_path_str)
+        if not strm_path.exists():
+            skipped += 1
+            continue
+        try:
+            quality = item.get("quality")
+            tracks = db.load_spore_tracks(item["token"]) or {}
+            audio  = tracks.get("audio") or []
+            subs   = tracks.get("subs") or []
+            if update_nfo_streamdetails(strm_path, quality, audio, subs):
+                updated += 1
+            else:
+                skipped += 1
+        except Exception as exc:
+            log.warning("backfill_nfo: error for %s: %s", strm_path_str, exc)
+            errors += 1
+    log.info("backfill_nfo_streamdetails: updated=%d skipped=%d errors=%d",
+             updated, skipped, errors)
+    return {"updated": updated, "skipped": skipped, "errors": errors}
 
 
 def _canonical_movie_folder(imdb_id: str, fallback_title: str | None = None,
@@ -619,7 +761,7 @@ def create_lazy_movie_strm(info_hash: str, magnet: str, title: str,
     if written:
         _write_spore_stubs(path, token, folder, quality, size_gb)
         if imdb_id or tmdb_id:
-            _write_nfo(path, imdb_id, tmdb_id)
+            _write_nfo(path, imdb_id, tmdb_id, quality=quality)
         if imdb_id:
             try:
                 import nfo_generator
@@ -684,6 +826,8 @@ def create_lazy_episode_strm(info_hash: str, magnet: str, title: str,
             tvshow_nfo = series_root / "tvshow.nfo"
             if not tvshow_nfo.exists():
                 _write_nfo(path, imdb_id, nfo_path=tvshow_nfo, media_type="series")
+            # Per-episode NFO with codec info so Plex can make playback decisions
+            _write_nfo(path, imdb_id, media_type="episode", quality=quality)
             try:
                 import nfo_generator
                 nfo_generator.fetch_images_for_folder(series_root, imdb_id, "tv")
@@ -1340,6 +1484,14 @@ def update_stub_from_probe(token: str, audio_streams: list[dict],
             "Spore: updated stub for token=%s with %d audio + %d subs",
             token, len(audio_streams), len(subtitle_tracks),
         )
+        # Also update the NFO sidecar so Plex sees the real codec / language info
+        # This applies to both stub MKV library and .strm library
+        try:
+            quality = item.get("quality")
+            update_nfo_streamdetails(strm_path, quality,
+                                     audio_tracks or [], subtitle_tracks or [])
+        except Exception as _nfo_exc:
+            log.debug("Spore: NFO update failed for token=%s: %s", token, _nfo_exc)
         return True
     except Exception as exc:
         log.warning("Spore: stub update failed for token=%s: %s", token, exc)

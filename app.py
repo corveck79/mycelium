@@ -2510,6 +2510,20 @@ def spore_minfo_api(token: str):
     return f"token={token}\n", 200, {"Content-Type": "text/plain"}
 
 
+@app.post("/ui/api/backfill-nfo")
+@auth.require_auth
+def ui_api_backfill_nfo():
+    """Add/update <fileinfo><streamdetails> in all existing NFO files.
+
+    For items with probed audio tracks: uses real codec/language data.
+    For unprobed items: uses quality-based defaults (hevc/h264, EAC3 6ch).
+    Safe to run multiple times. Triggers a Plex library refresh afterward if
+    PLEX_URL and PLEX_TOKEN are configured.
+    """
+    result = strm_generator.backfill_nfo_streamdetails()
+    return jsonify(result)
+
+
 @app.get("/ui/api/tmdb/find")
 @auth.require_auth
 def ui_api_tmdb_find():
