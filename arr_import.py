@@ -148,6 +148,15 @@ def import_sonarr(only_monitored: bool = True) -> dict:
                         seasons = list(range(1, (show.get("number_of_seasons") or 1) + 1))
                     else:
                         seasons = [1]
+
+                # --- FOOLPROOF TITLE INTERCEPT FOR SONARR ---
+                import re
+                if re.match(r'^tt\d{7,}$', title) and tmdb_id:
+                    show_info = tmdb.get_show_info(tmdb_id) or {}
+                    if show_info.get("name"):
+                        title = show_info["name"]
+                # --------------------------------------------
+
                 db.upsert_monitored_series(imdb_id, tmdb_id, title, seasons)
                 existing.add(imdb_id)
                 _status["added"] += 1

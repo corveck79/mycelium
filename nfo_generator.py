@@ -188,6 +188,7 @@ def generate_all() -> dict:
     items_by_title = {m["title"]: m["imdb_id"] for m in db.get_media_items()}
     # Secondary lookup: imdb_id → title (canonical)
     monitored_by_imdb = {s["imdb_id"]: s["title"] for s in db.get_all_monitored_series()}
+    series_by_title = {s["title"]: s["imdb_id"] for s in db.get_all_monitored_series()}
 
     movies = series = 0
 
@@ -244,7 +245,7 @@ def generate_all() -> dict:
             if nfo_path.exists():
                 continue
 
-            imdb_id = items_by_title.get(folder.name)
+            imdb_id = series_by_title.get(folder.name)
             if not imdb_id or imdb_id.startswith("unknown_"):
                 # Not in DB  -  try TMDB lookup so duplicate folders get the right ID
                 clean = _clean_for_tmdb(folder.name)

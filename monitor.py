@@ -58,12 +58,21 @@ def strm_exists_movie(title: str) -> bool:
 
 def add_series(imdb_id: str, title: str, seasons: list[int]) -> None:
     """Call this after a series is processed to start monitoring it."""
+    import re
     tmdb_id = tmdb.find_by_imdb(imdb_id, kind="tv")
+    
+    # --- FOOLPROOF TITLE INTERCEPT ---
+    # If the incoming title is just an IMDb ID, force a TMDB lookup to translate it.
+    if re.match(r'^tt\d{7,}$', title) and tmdb_id:
+        show_info = tmdb.get_show_info(tmdb_id) or {}
+        if show_info.get("name"):
+            title = show_info["name"]
+    # ---------------------------------
+
     db.upsert_monitored_series(imdb_id, tmdb_id, title, seasons)
     if tmdb_id:
         _sync_wanted(imdb_id, tmdb_id, title, seasons)
     log.info("Monitor: added series %s (%s), monitoring seasons %s", title, imdb_id, seasons)
-
 
 def _sync_wanted(imdb_id: str, tmdb_id: int, title: str, seasons: list[int],
                  monitor_mode: str = "all", since: str | None = None) -> None:
