@@ -5,6 +5,13 @@ import type { MediaType, TmdbItem } from '../types';
 import PosterGrid from '../components/PosterGrid';
 import DetailModal from '../components/DetailModal';
 import SectionHeader from '../components/SectionHeader';
+import RowExpandModal from '../components/RowExpandModal';
+
+interface Expanded {
+  title: string;
+  queryKey: unknown[];
+  fetchPage: (page: number) => Promise<TmdbItem[]>;
+}
 
 type Cat =
   | { kind: 'all'; window: 'day' | 'week' }
@@ -17,6 +24,7 @@ type Cat =
 export default function Discover() {
   const [detail, setDetail] = useState<{ id: number; type: MediaType } | null>(null);
   const [activeProvider, setActiveProvider] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<Expanded | null>(null);
 
   const open = (item: TmdbItem) => setDetail({ id: item.tmdb_id, type: item.media_type });
   const close = () => setDetail(null);
@@ -39,6 +47,13 @@ export default function Discover() {
               { label: 'Week', queryKey: ['trending', 'all', 'week'], fetcher: () => api.trending('all', 'week').then((r) => r.results) },
             ]}
             onItemClick={open}
+            onShowAll={() =>
+              setExpanded({
+                title: '🔥 Trending this week',
+                queryKey: ['trending-all', 'all', 'week'],
+                fetchPage: (page) => api.trending('all', 'week', page).then((r) => r.results),
+              })
+            }
           />
 
           <Row
@@ -50,6 +65,13 @@ export default function Discover() {
               { label: 'TV', queryKey: ['popular', 'tv'], fetcher: () => api.popular('tv').then((r) => r.results) },
             ]}
             onItemClick={open}
+            onShowAll={() =>
+              setExpanded({
+                title: '⭐ Popular movies',
+                queryKey: ['popular-all', 'movie'],
+                fetchPage: (page) => api.popular('movie', page).then((r) => r.results),
+              })
+            }
           />
 
           <Row
@@ -57,6 +79,13 @@ export default function Discover() {
             query={['now-playing']}
             fetcher={() => api.nowPlaying().then((r) => r.results)}
             onItemClick={open}
+            onShowAll={() =>
+              setExpanded({
+                title: '🎬 Now playing in theaters',
+                queryKey: ['now-playing-all'],
+                fetchPage: (page) => api.nowPlaying(page).then((r) => r.results),
+              })
+            }
           />
 
           <Row
@@ -64,6 +93,13 @@ export default function Discover() {
             query={['upcoming']}
             fetcher={() => api.upcoming().then((r) => r.results)}
             onItemClick={open}
+            onShowAll={() =>
+              setExpanded({
+                title: '📅 Upcoming',
+                queryKey: ['upcoming-all'],
+                fetchPage: (page) => api.upcoming(page).then((r) => r.results),
+              })
+            }
           />
 
           <Row
@@ -75,6 +111,41 @@ export default function Discover() {
               { label: 'TV', queryKey: ['top-rated', 'tv'], fetcher: () => api.topRated('tv').then((r) => r.results) },
             ]}
             onItemClick={open}
+            onShowAll={() =>
+              setExpanded({
+                title: '🏆 Top rated',
+                queryKey: ['top-rated-all', 'movie'],
+                fetchPage: (page) => api.topRated('movie', page).then((r) => r.results),
+              })
+            }
+          />
+
+          <Row
+            title="🎄 Christmas movies & shows"
+            query={['holiday', 'christmas']}
+            fetcher={() => api.holiday('christmas').then((r) => r.results)}
+            onItemClick={open}
+            onShowAll={() =>
+              setExpanded({
+                title: '🎄 Christmas movies & shows',
+                queryKey: ['holiday-all', 'christmas'],
+                fetchPage: (page) => api.holiday('christmas', page).then((r) => r.results),
+              })
+            }
+          />
+
+          <Row
+            title="🎃 Halloween movies & shows"
+            query={['holiday', 'halloween']}
+            fetcher={() => api.holiday('halloween').then((r) => r.results)}
+            onItemClick={open}
+            onShowAll={() =>
+              setExpanded({
+                title: '🎃 Halloween movies & shows',
+                queryKey: ['holiday-all', 'halloween'],
+                fetchPage: (page) => api.holiday('halloween', page).then((r) => r.results),
+              })
+            }
           />
         </>
       )}
@@ -85,6 +156,18 @@ export default function Discover() {
         onClose={close}
         onSelectItem={open}
       />
+      {expanded && (
+        <RowExpandModal
+          title={expanded.title}
+          queryKey={expanded.queryKey}
+          fetchPage={expanded.fetchPage}
+          onClose={() => setExpanded(null)}
+          onItemClick={(item) => {
+            setExpanded(null);
+            open(item);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -101,12 +184,14 @@ function Row({
   fetcher,
   toggles,
   onItemClick,
+  onShowAll,
 }: {
   title: string;
   query: readonly unknown[];
   fetcher: () => Promise<TmdbItem[]>;
   toggles?: ToggleSpec[];
   onItemClick: (item: TmdbItem) => void;
+  onShowAll?: () => void;
 }) {
   const [active, setActive] = useState<{ key: readonly unknown[]; fn: () => Promise<TmdbItem[]> }>(
     { key: query, fn: fetcher },
@@ -118,21 +203,28 @@ function Row({
       <SectionHeader
         title={title}
         action={
-          toggles &&
-          toggles.map((t) => (
-            <button
-              key={t.label}
-              type="button"
-              onClick={() => setActive({ key: t.queryKey, fn: t.fetcher })}
-              className={`text-xs px-3 py-1 rounded border ${
-                JSON.stringify(active.key) === JSON.stringify(t.queryKey)
-                  ? 'border-accent bg-accent/10 text-white'
-                  : 'border-border text-muted hover:text-white'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))
+          <>
+            {toggles &&
+              toggles.map((t) => (
+                <button
+                  key={t.label}
+                  type="button"
+                  onClick={() => setActive({ key: t.queryKey, fn: t.fetcher })}
+                  className={`text-xs px-3 py-1 rounded border ${
+                    JSON.stringify(active.key) === JSON.stringify(t.queryKey)
+                      ? 'border-accent bg-accent/10 text-white'
+                      : 'border-border text-muted hover:text-white'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            {onShowAll && (
+              <button type="button" onClick={onShowAll} className="text-xs text-muted hover:text-white">
+                Show all
+              </button>
+            )}
+          </>
         }
       />
       <PosterGrid items={data} loading={isLoading} onItemClick={onItemClick} />

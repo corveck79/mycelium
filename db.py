@@ -291,6 +291,25 @@ CREATE TABLE IF NOT EXISTS createtorrent_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_createtorrent_ts ON createtorrent_log(ts);
+
+CREATE TABLE IF NOT EXISTS content_blacklist (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT    NOT NULL,
+    tmdb_id     INTEGER NOT NULL,
+    title       TEXT    NOT NULL,
+    image       TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    UNIQUE(kind, tmdb_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_blacklist_kind ON content_blacklist(kind);
+
+CREATE TABLE IF NOT EXISTS favorite_actors (
+    tmdb_id      INTEGER PRIMARY KEY,
+    name         TEXT    NOT NULL,
+    profile_path TEXT,
+    created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
 """
 
 
@@ -1111,6 +1130,75 @@ def clear_failed_hash(info_hash: str) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM failed_hashes WHERE info_hash=?", (info_hash,))
         conn.commit()
+
+
+# ── content blacklist (movies/shows/actors) ───────────────────────────────────
+
+def add_content_blacklist(kind: str, tmdb_id: int, title: str, image: str | None = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO content_blacklist (kind, tmdb_id, title, image) VALUES (?, ?, ?, ?)
+               ON CONFLICT(kind, tmdb_id) DO UPDATE SET title=excluded.title, image=excluded.image""",
+            (kind, tmdb_id, title, image),
+        )
+        conn.commit()
+
+
+def remove_content_blacklist(kind: str, tmdb_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM content_blacklist WHERE kind=? AND tmdb_id=?", (kind, tmdb_id))
+        conn.commit()
+
+
+def get_content_blacklist(kind: str | None = None) -> list[dict]:
+    with _connect() as conn:
+        if kind:
+            rows = conn.execute(
+                "SELECT * FROM content_blacklist WHERE kind=? ORDER BY created_at DESC", (kind,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM content_blacklist ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_content_blacklist_ids(kind: str) -> set[int]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT tmdb_id FROM content_blacklist WHERE kind=?", (kind,)
+        ).fetchall()
+        return {r["tmdb_id"] for r in rows}
+
+
+# ── favorite actors (auto-request their new movies/shows) ─────────────────────
+
+def add_favorite_actor(tmdb_id: int, name: str, profile_path: str | None = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO favorite_actors (tmdb_id, name, profile_path) VALUES (?, ?, ?)
+               ON CONFLICT(tmdb_id) DO UPDATE SET name=excluded.name, profile_path=excluded.profile_path""",
+            (tmdb_id, name, profile_path),
+        )
+        conn.commit()
+
+
+def remove_favorite_actor(tmdb_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM favorite_actors WHERE tmdb_id=?", (tmdb_id,))
+        conn.commit()
+
+
+def get_favorite_actors() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute("SELECT * FROM favorite_actors ORDER BY created_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_favorite_actor_ids() -> set[int]:
+    with _connect() as conn:
+        rows = conn.execute("SELECT tmdb_id FROM favorite_actors").fetchall()
+        return {r["tmdb_id"] for r in rows}
 
 
 # ── webhook idempotency ───────────────────────────────────────────────────────

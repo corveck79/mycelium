@@ -375,13 +375,17 @@ def genres(media_type: str = "movie") -> list[dict]:
     if cached:
         try:
             payload = _json.loads(cached)
-            if _time.time() - payload.get("ts", 0) < 86400:
-                return payload.get("genres") or []
+            cached_genres = payload.get("genres") or []
+            if cached_genres and _time.time() - payload.get("ts", 0) < 86400:
+                return cached_genres
         except (ValueError, TypeError):
             pass
     data = _get(f"/genre/{media_type}/list")
-    result = (data or {}).get("genres") or []
-    db.set_setting(cache_key, _json.dumps({"ts": _time.time(), "genres": result}))
+    if data is None:
+        return []
+    result = data.get("genres") or []
+    if result:
+        db.set_setting(cache_key, _json.dumps({"ts": _time.time(), "genres": result}))
     return result
 
 
@@ -405,6 +409,57 @@ def discover_by_genre(media_type: str, genre_id: int, year_from: int | None = No
     if not data:
         return []
     return [_norm_item(i, media_type=media_type) for i in (data.get("results") or [])]
+
+
+def search_keyword(query: str) -> int | None:
+    """Resolve a free-text keyword (e.g. 'christmas') to its TMDB keyword ID.
+    Cached for a week in the settings table since these IDs never change."""
+    import json as _json
+    import time as _time
+    import db
+    cache_key = f"_tmdb_keyword_cache_{query}"
+    cached = db.get_setting(cache_key)
+    if cached:
+        try:
+            payload = _json.loads(cached)
+            if payload.get("id") and _time.time() - payload.get("ts", 0) < 604800:
+                return payload["id"]
+        except (ValueError, TypeError):
+            pass
+    data = _get("/search/keyword", params={"query": query})
+    if not data:
+        return None
+    results = data.get("results") or []
+    if not results:
+        return None
+    keyword_id = results[0].get("id")
+    db.set_setting(cache_key, _json.dumps({"ts": _time.time(), "id": keyword_id}))
+    return keyword_id
+
+
+def discover_by_keyword(media_type: str, keyword_id: int, page: int = 1, region: str = "NL",
+                         sort_by: str = "popularity.desc") -> list[dict]:
+    """Discover movies/tv tagged with a specific TMDB keyword (e.g. holiday themes)."""
+    params = {
+        "with_keywords": keyword_id,
+        "sort_by": sort_by,
+        "page": page,
+        "include_adult": "false",
+        "watch_region": region,
+    }
+    data = _get(f"/discover/{media_type}", params=params)
+    if not data:
+        return []
+    return [_norm_item(i, media_type=media_type) for i in (data.get("results") or [])]
+
+
+def credits_person_ids(media_type: str, tmdb_id: int) -> list[int]:
+    """Lightweight cast lookup: TMDB person IDs credited on a movie/tv item."""
+    kind = "movie" if media_type == "movie" else "tv"
+    data = _get(f"/{kind}/{tmdb_id}/credits")
+    if not data:
+        return []
+    return [c["id"] for c in (data.get("cast") or []) if c.get("id")]
 
 
 # ── Person search ─────────────────────────────────────────────────────────────

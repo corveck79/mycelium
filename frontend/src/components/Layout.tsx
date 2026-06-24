@@ -17,6 +17,7 @@ const navItems = [
 
 const adminItems = [
   { to: '/auto-approve', label: 'Auto-Approve', icon: '🤖' },
+  { to: '/blacklist', label: 'Blacklist', icon: '🚫' },
   { to: '/admin', label: 'Admin', icon: '⚙️' },
   { to: '/manual', label: 'Manual', icon: '📖' },
 ];
@@ -258,6 +259,7 @@ function Breadcrumb({ path }: { path: string }) {
     '/wanted': 'Wanted',
     '/settings': 'Settings',
     '/auto-approve': 'Auto-Approve',
+    '/blacklist': 'Blacklist',
     '/admin': 'Admin',
     '/manual': 'Manual',
     '/login': 'Sign in',

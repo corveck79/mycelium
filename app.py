@@ -1742,9 +1742,22 @@ def ui_api_discover_search():
     if not q:
         return jsonify(results=[])
     page = int(request.args.get("page") or "1")
-    results = tmdb.multi_search(q, page=page)
+    results = _filter_blacklisted(tmdb.multi_search(q, page=page))
     _enrich_library_status(results)
     return jsonify(results=results)
+
+
+def _filter_blacklisted(items: list[dict]) -> list[dict]:
+    """Drop movies/shows/people the user has blacklisted, so they stop showing
+    up in discover, search and recommendations."""
+    bl = {
+        "movie": db.get_content_blacklist_ids("movie"),
+        "tv": db.get_content_blacklist_ids("tv"),
+        "person": db.get_content_blacklist_ids("person"),
+    }
+    if not any(bl.values()):
+        return items
+    return [it for it in items if it.get("tmdb_id") not in bl.get(it.get("media_type"), set())]
 
 
 _STATUS_PRIORITY = {"success": 0, "available": 0, "wanted": 1, "pending": 2, "upcoming": 3, "failed": 4}
@@ -1818,7 +1831,8 @@ def _user_region() -> str:
 def ui_api_discover_trending():
     media = request.args.get("type", "all")  # all | movie | tv
     window = request.args.get("window", "week")  # day | week
-    results = tmdb.trending(media, window)
+    page = int(request.args.get("page") or "1")
+    results = _filter_blacklisted(tmdb.trending(media, window, page=page))
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1826,8 +1840,9 @@ def ui_api_discover_trending():
 @app.get("/ui/api/discover/popular")
 def ui_api_discover_popular():
     media = request.args.get("type", "movie")
+    page = int(request.args.get("page") or "1")
     region = _user_region()
-    results = tmdb.popular(media, region=region)
+    results = _filter_blacklisted(tmdb.popular(media, page=page, region=region))
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1835,30 +1850,34 @@ def ui_api_discover_popular():
 @app.get("/ui/api/discover/top-rated")
 def ui_api_discover_top_rated():
     media = request.args.get("type", "movie")
-    results = tmdb.top_rated(media)
+    page = int(request.args.get("page") or "1")
+    results = _filter_blacklisted(tmdb.top_rated(media, page=page))
     _enrich_library_status(results)
     return jsonify(results=results)
 
 
 @app.get("/ui/api/discover/now-playing")
 def ui_api_discover_now_playing():
+    page = int(request.args.get("page") or "1")
     region = _user_region()
-    results = tmdb.now_playing(region=region)
+    results = _filter_blacklisted(tmdb.now_playing(page=page, region=region))
     _enrich_library_status(results)
     return jsonify(results=results)
 
 
 @app.get("/ui/api/discover/upcoming")
 def ui_api_discover_upcoming():
+    page = int(request.args.get("page") or "1")
     region = _user_region()
-    results = tmdb.upcoming(region=region)
+    results = _filter_blacklisted(tmdb.upcoming(page=page, region=region))
     _enrich_library_status(results)
     return jsonify(results=results)
 
 
 @app.get("/ui/api/discover/on-the-air")
 def ui_api_discover_on_the_air():
-    results = tmdb.on_the_air()
+    page = int(request.args.get("page") or "1")
+    results = _filter_blacklisted(tmdb.on_the_air(page=page))
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1878,7 +1897,7 @@ def ui_api_discover_by_provider():
     sort = request.args.get("sort_by", "popularity.desc")
     if not pid:
         return jsonify(error="provider_id required"), 400
-    results = tmdb.discover_by_provider(media, pid, region=region, sort_by=sort)
+    results = _filter_blacklisted(tmdb.discover_by_provider(media, pid, region=region, sort_by=sort))
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1905,6 +1924,8 @@ def ui_api_discover_details():
                 ).fetchone()
             if row:
                 detail["library_status"] = row["status"]
+    detail["is_blacklisted"] = tmdb_id in db.get_content_blacklist_ids(media)
+    detail["recommendations"] = _filter_blacklisted(detail.get("recommendations") or [])
     return jsonify(detail)
 
 
@@ -1925,9 +1946,35 @@ def ui_api_discover_by_genre():
     page = int(request.args.get("page") or "1")
     region = _user_region()
     year_from, year_to = discover_prefs.effective_year_range(media, genre_id)
-    results = tmdb.discover_by_genre(media, genre_id, year_from, year_to, page=page, region=region)
+    results = _filter_blacklisted(
+        tmdb.discover_by_genre(media, genre_id, year_from, year_to, page=page, region=region))
     _enrich_library_status(results)
     return jsonify(results=results, year_from=year_from, year_to=year_to)
+
+
+HOLIDAY_THEMES = {
+    "christmas": "christmas",
+    "halloween": "halloween",
+}
+
+
+@app.get("/ui/api/discover/holiday")
+def ui_api_discover_holiday():
+    theme = request.args.get("theme", "christmas")
+    query = HOLIDAY_THEMES.get(theme)
+    if not query:
+        return jsonify(error="unknown theme"), 400
+    page = int(request.args.get("page") or "1")
+    region = _user_region()
+    keyword_id = tmdb.search_keyword(query)
+    if not keyword_id:
+        return jsonify(results=[])
+    movies = tmdb.discover_by_keyword("movie", keyword_id, page=page, region=region)
+    shows = tmdb.discover_by_keyword("tv", keyword_id, page=page, region=region)
+    results = sorted(movies + shows, key=lambda x: x.get("popularity") or 0, reverse=True)
+    results = _filter_blacklisted(results)
+    _enrich_library_status(results)
+    return jsonify(results=results)
 
 
 @app.get("/ui/api/discover/search-person")
@@ -1936,7 +1983,7 @@ def ui_api_discover_search_person():
     if not q:
         return jsonify(results=[])
     page = int(request.args.get("page") or "1")
-    return jsonify(results=tmdb.search_person(q, page=page))
+    return jsonify(results=_filter_blacklisted(tmdb.search_person(q, page=page)))
 
 
 @app.get("/ui/api/discover/person")
@@ -1947,7 +1994,10 @@ def ui_api_discover_person():
     detail = tmdb.person_details(person_id)
     if not detail:
         return jsonify(error="not found"), 404
+    detail["filmography"] = _filter_blacklisted(detail["filmography"])
     _enrich_library_status(detail["filmography"])
+    detail["is_blacklisted"] = person_id in db.get_content_blacklist_ids("person")
+    detail["is_favorite"] = person_id in db.get_favorite_actor_ids()
     return jsonify(detail)
 
 
@@ -1959,6 +2009,7 @@ def ui_api_discover_collection():
     detail = tmdb.collection_details(collection_id)
     if not detail:
         return jsonify(error="not found"), 404
+    detail["parts"] = _filter_blacklisted(detail["parts"])
     _enrich_library_status(detail["parts"])
     return jsonify(detail)
 
@@ -2001,6 +2052,52 @@ def ui_api_auto_approve_run_now():
         return jsonify(error="unauthorized"), 401
     threading.Thread(target=auto_approve.run, name="auto-approve-manual", daemon=True).start()
     return jsonify(status="started")
+
+
+@app.get("/ui/api/content-blacklist")
+def ui_api_content_blacklist_get():
+    kind = request.args.get("kind")
+    return jsonify(items=db.get_content_blacklist(kind))
+
+
+@app.post("/ui/api/content-blacklist")
+def ui_api_content_blacklist_add():
+    payload = request.get_json(silent=True) or {}
+    kind = payload.get("kind")
+    tmdb_id = payload.get("tmdb_id")
+    title = payload.get("title")
+    if kind not in ("movie", "tv", "person") or not tmdb_id or not title:
+        return jsonify(error="kind, tmdb_id and title required"), 400
+    db.add_content_blacklist(kind, int(tmdb_id), title, payload.get("image"))
+    return jsonify(status="added")
+
+
+@app.delete("/ui/api/content-blacklist/<kind>/<int:tmdb_id>")
+def ui_api_content_blacklist_remove(kind, tmdb_id):
+    db.remove_content_blacklist(kind, tmdb_id)
+    return jsonify(status="removed")
+
+
+@app.get("/ui/api/favorite-actors")
+def ui_api_favorite_actors_get():
+    return jsonify(items=db.get_favorite_actors())
+
+
+@app.post("/ui/api/favorite-actors")
+def ui_api_favorite_actors_add():
+    payload = request.get_json(silent=True) or {}
+    tmdb_id = payload.get("tmdb_id")
+    name = payload.get("name")
+    if not tmdb_id or not name:
+        return jsonify(error="tmdb_id and name required"), 400
+    db.add_favorite_actor(int(tmdb_id), name, payload.get("profile_path"))
+    return jsonify(status="added")
+
+
+@app.delete("/ui/api/favorite-actors/<int:tmdb_id>")
+def ui_api_favorite_actors_remove(tmdb_id):
+    db.remove_favorite_actor(tmdb_id)
+    return jsonify(status="removed")
 
 
 @app.post("/ui/api/discover/add")
@@ -2054,6 +2151,7 @@ def ui_api_discover_add_collection():
     detail = tmdb.collection_details(collection_id)
     if not detail:
         return jsonify(error="not found"), 404
+    _enrich_library_status(detail["parts"])
 
     user_rec = auth.current_user_record()
     queued, pending = [], []
