@@ -49,6 +49,7 @@ export interface TmdbDetail extends TmdbItem {
     poster_path: string | null;
     backdrop_path: string | null;
   } | null;
+  is_blacklisted?: boolean;
 }
 
 export interface Genre {
@@ -69,6 +70,7 @@ export interface AutoApproveRule {
   year_from: number | null;
   year_to: number | null;
   auto_request_trending: boolean;
+  min_votes: number | null;
 }
 
 export type AutoApproveRules = Record<string, AutoApproveRule>;
@@ -94,6 +96,26 @@ export interface PersonDetail {
   place_of_birth: string | null;
   known_for_department: string | null;
   filmography: FilmographyItem[];
+  is_blacklisted?: boolean;
+  is_favorite?: boolean;
+}
+
+export type BlacklistKind = 'movie' | 'tv' | 'person';
+
+export interface ContentBlacklistItem {
+  id: number;
+  kind: BlacklistKind;
+  tmdb_id: number;
+  title: string;
+  image: string | null;
+  created_at: string;
+}
+
+export interface FavoriteActor {
+  tmdb_id: number;
+  name: string;
+  profile_path: string | null;
+  created_at: string;
 }
 
 export interface Collection {

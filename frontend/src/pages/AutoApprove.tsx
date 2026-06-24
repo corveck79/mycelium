@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api';
-import type { AutoApproveRule, AutoApproveRules, Genre, MediaType } from '../types';
+import { api, tmdbImg } from '../api';
+import type { AutoApproveRule, AutoApproveRules, FavoriteActor, Genre, MediaType } from '../types';
 
 const EMPTY_RULE: AutoApproveRule = {
   enabled: false,
   year_from: null,
   year_to: null,
   auto_request_trending: false,
+  min_votes: null,
 };
 
 export default function AutoApprove() {
@@ -41,7 +42,67 @@ export default function AutoApprove() {
         ))}
       </div>
       <RuleTable mediaType={mediaType} />
+      <FavoriteActorsPanel />
     </div>
+  );
+}
+
+function FavoriteActorsPanel() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ['favorite-actors'],
+    queryFn: api.favoriteActors,
+  });
+  const removeMut = useMutation({
+    mutationFn: (tmdb_id: number) => api.favoriteActorRemove(tmdb_id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['favorite-actors'] }),
+  });
+
+  const actors = data?.items || [];
+
+  return (
+    <section className="border-t border-border pt-6">
+      <h2 className="text-lg font-bold mb-1">Favorite actors</h2>
+      <p className="text-sm text-muted mb-4">
+        Mycelium auto-requests recent and upcoming movies/shows for actors you favorite.
+        Use Search to find an actor, open their page, and click &quot;⭐ Favorite&quot;.
+      </p>
+      {isLoading ? (
+        <div className="text-muted text-sm">Loading...</div>
+      ) : actors.length === 0 ? (
+        <div className="text-muted text-sm">No favorite actors yet.</div>
+      ) : (
+        <div className="grid grid-cols-3 sm:grid-cols-6 md:grid-cols-8 gap-3">
+          {actors.map((a: FavoriteActor) => (
+            <div key={a.tmdb_id} className="text-left">
+              <div className="aspect-[2/3] rounded-md overflow-hidden bg-bg border border-border">
+                {tmdbImg.profile(a.profile_path) ? (
+                  <img
+                    src={tmdbImg.profile(a.profile_path)!}
+                    alt={a.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="text-xs text-muted p-2 text-center flex items-center justify-center h-full">
+                    {a.name}
+                  </div>
+                )}
+              </div>
+              <div className="text-[11px] mt-1 font-semibold leading-tight line-clamp-2">{a.name}</div>
+              <button
+                type="button"
+                onClick={() => removeMut.mutate(a.tmdb_id)}
+                disabled={removeMut.isPending}
+                className="mt-1 w-full text-[10px] px-1.5 py-1 rounded border border-red-600/50 text-red-400
+                            hover:bg-red-600/10 disabled:opacity-60"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -115,6 +176,7 @@ function RuleTable({ mediaType }: { mediaType: MediaType }) {
               <th className="text-center px-3 py-2">Auto-approve</th>
               <th className="text-center px-3 py-2">From</th>
               <th className="text-center px-3 py-2">To</th>
+              <th className="text-center px-3 py-2">Min votes</th>
               <th className="text-center px-3 py-2">Auto-fill trending</th>
             </tr>
           </thead>
@@ -148,6 +210,18 @@ function RuleTable({ mediaType }: { mediaType: MediaType }) {
                       value={rule.year_to ?? ''}
                       onChange={(e) =>
                         update(g.id, { year_to: e.target.value ? Number(e.target.value) : null })
+                      }
+                      className="w-20 bg-bg border border-border rounded px-1.5 py-1 text-xs text-center"
+                    />
+                  </td>
+                  <td className="text-center px-3 py-2">
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="default"
+                      value={rule.min_votes ?? ''}
+                      onChange={(e) =>
+                        update(g.id, { min_votes: e.target.value ? Number(e.target.value) : null })
                       }
                       className="w-20 bg-bg border border-border rounded px-1.5 py-1 text-xs text-center"
                     />

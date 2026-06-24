@@ -110,11 +110,23 @@ export default function DetailModal({
     onError: () => setAddStatus('error'),
   });
 
+  const collectionId = detail?.collection?.id;
+  const { data: collectionDetail } = useQuery({
+    queryKey: ['collection', collectionId],
+    queryFn: () => api.collectionDetails(collectionId!),
+    enabled: !!collectionId,
+  });
+  const collectionFullyRequested =
+    !!collectionDetail?.parts?.length && collectionDetail.parts.every((p) => !!p.library_status);
+
   const [collectionStatus, setCollectionStatus] = useState<'idle' | 'adding' | 'done' | 'error'>('idle');
   const collectionMutation = useMutation({
     mutationFn: () => api.addCollection(detail!.collection!.id),
     onMutate: () => setCollectionStatus('adding'),
-    onSuccess: () => setCollectionStatus('done'),
+    onSuccess: () => {
+      setCollectionStatus('done');
+      queryClient.invalidateQueries({ queryKey: ['collection', collectionId] });
+    },
     onError: () => setCollectionStatus('error'),
   });
 
@@ -122,6 +134,16 @@ export default function DetailModal({
     setSelectedSeasons((prev) =>
       prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n].sort((a, b) => a - b),
     );
+
+  const blacklistMutation = useMutation({
+    mutationFn: () =>
+      detail!.is_blacklisted
+        ? api.contentBlacklistRemove(detail!.media_type, detail!.tmdb_id)
+        : api.contentBlacklistAdd(detail!.media_type, detail!.tmdb_id, detail!.title, detail!.poster_path),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['detail', mediaType, tmdbId] });
+    },
+  });
 
   const watchlistMutation = useMutation({
     mutationFn: async () => {
@@ -246,14 +268,18 @@ export default function DetailModal({
                     <button
                       type="button"
                       onClick={() => collectionMutation.mutate()}
-                      disabled={collectionStatus === 'adding' || collectionStatus === 'done'}
+                      disabled={
+                        collectionStatus === 'adding' ||
+                        collectionStatus === 'done' ||
+                        collectionFullyRequested
+                      }
                       className="px-3 py-1.5 rounded-lg bg-accent hover:bg-accent/90 disabled:opacity-60
                                   font-semibold text-xs whitespace-nowrap"
                     >
                       {collectionStatus === 'adding'
                         ? 'Requesting...'
-                        : collectionStatus === 'done'
-                        ? 'Requested ✓'
+                        : collectionStatus === 'done' || collectionFullyRequested
+                        ? 'Already requested ✓'
                         : collectionStatus === 'error'
                         ? 'Retry'
                         : 'Request entire collection'}
@@ -365,6 +391,19 @@ export default function DetailModal({
                       IMDB
                     </a>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => blacklistMutation.mutate()}
+                    disabled={blacklistMutation.isPending}
+                    title="Stop getting this recommended or auto-requested"
+                    className={`px-4 py-2 rounded-lg border text-sm disabled:opacity-50 ${
+                      detail.is_blacklisted
+                        ? 'border-red-600 text-red-400 hover:bg-red-600/10'
+                        : 'border-border hover:bg-bg'
+                    }`}
+                  >
+                    {detail.is_blacklisted ? '✓ Blacklisted' : '🚫 Blacklist'}
+                  </button>
                 </div>
 
                 {detail.providers?.flatrate && detail.providers.flatrate.length > 0 && (

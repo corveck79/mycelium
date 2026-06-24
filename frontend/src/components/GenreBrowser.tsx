@@ -6,10 +6,12 @@ import PosterGrid from './PosterGrid';
 import SectionHeader from './SectionHeader';
 import DetailModal from './DetailModal';
 import GenreSettingsModal from './GenreSettingsModal';
+import RowExpandModal from './RowExpandModal';
 
 export default function GenreBrowser({ mediaType }: { mediaType: MediaType }) {
   const [detail, setDetail] = useState<{ id: number; type: MediaType } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [expanded, setExpanded] = useState<{ title: string; queryKey: unknown[]; fetchPage: (page: number) => Promise<TmdbItem[]> } | null>(null);
   const open = (item: TmdbItem) => setDetail({ id: item.tmdb_id, type: item.media_type });
 
   const { data: genresData, isLoading: genresLoading } = useQuery({
@@ -23,6 +25,7 @@ export default function GenreBrowser({ mediaType }: { mediaType: MediaType }) {
   });
 
   const visibleGenres = genresData?.genres || [];
+  const trendingTitle = `🔥 Trending ${mediaType === 'tv' ? 'shows' : 'movies'}`;
 
   return (
     <div className="space-y-8">
@@ -38,7 +41,24 @@ export default function GenreBrowser({ mediaType }: { mediaType: MediaType }) {
       </div>
 
       <section>
-        <SectionHeader title={`🔥 Trending ${mediaType === 'tv' ? 'shows' : 'movies'}`} />
+        <SectionHeader
+          title={trendingTitle}
+          action={
+            <button
+              type="button"
+              onClick={() =>
+                setExpanded({
+                  title: trendingTitle,
+                  queryKey: ['trending-all', mediaType, 'week'],
+                  fetchPage: (page) => api.trending(mediaType, 'week', page).then((r) => r.results),
+                })
+              }
+              className="text-xs text-muted hover:text-white"
+            >
+              Show all
+            </button>
+          }
+        />
         <PosterGrid items={trending} loading={trendingLoading} onItemClick={open} />
       </section>
 
@@ -50,7 +70,19 @@ export default function GenreBrowser({ mediaType }: { mediaType: MediaType }) {
         </div>
       ) : (
         visibleGenres.map((g) => (
-          <GenreRow key={g.id} mediaType={mediaType} genre={g} onItemClick={open} />
+          <GenreRow
+            key={g.id}
+            mediaType={mediaType}
+            genre={g}
+            onItemClick={open}
+            onShowAll={() =>
+              setExpanded({
+                title: g.name,
+                queryKey: ['by-genre-all', mediaType, g.id],
+                fetchPage: (page) => api.byGenre(mediaType, g.id, page).then((r) => r.results),
+              })
+            }
+          />
         ))
       )}
 
@@ -67,6 +99,18 @@ export default function GenreBrowser({ mediaType }: { mediaType: MediaType }) {
           onClose={() => setShowSettings(false)}
         />
       )}
+      {expanded && (
+        <RowExpandModal
+          title={expanded.title}
+          queryKey={expanded.queryKey}
+          fetchPage={expanded.fetchPage}
+          onClose={() => setExpanded(null)}
+          onItemClick={(item) => {
+            setExpanded(null);
+            open(item);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -75,10 +119,12 @@ function GenreRow({
   mediaType,
   genre,
   onItemClick,
+  onShowAll,
 }: {
   mediaType: MediaType;
   genre: Genre;
   onItemClick: (item: TmdbItem) => void;
+  onShowAll: () => void;
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ['by-genre', mediaType, genre.id],
@@ -87,7 +133,14 @@ function GenreRow({
   if (!isLoading && (!data || data.length === 0)) return null;
   return (
     <section>
-      <SectionHeader title={genre.name} />
+      <SectionHeader
+        title={genre.name}
+        action={
+          <button type="button" onClick={onShowAll} className="text-xs text-muted hover:text-white">
+            Show all
+          </button>
+        }
+      />
       <PosterGrid items={data} loading={isLoading} onItemClick={onItemClick} />
     </section>
   );

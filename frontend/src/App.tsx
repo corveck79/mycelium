@@ -10,6 +10,7 @@ import Settings from './pages/Settings';
 import Shows from './pages/Shows';
 import Movies from './pages/Movies';
 import AutoApprove from './pages/AutoApprove';
+import Blacklist from './pages/Blacklist';
 import Login from './pages/Login';
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="shows" element={<Shows />} />
         <Route path="movies" element={<Movies />} />
         <Route path="auto-approve" element={<AutoApprove />} />
+        <Route path="blacklist" element={<Blacklist />} />
         <Route path="requests" element={<Requests />} />
         <Route path="wanted" element={<Wanted />} />
         <Route path="settings" element={<Settings />} />

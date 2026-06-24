@@ -15,6 +15,9 @@ import type {
   TmdbPerson,
   PersonDetail,
   Collection,
+  BlacklistKind,
+  ContentBlacklistItem,
+  FavoriteActor,
 } from './types';
 
 const csrfToken = (): string => {
@@ -57,15 +60,15 @@ export const api = {
   // Discovery
   search: (q: string) =>
     http<{ results: TmdbItem[] }>(`/ui/api/discover/search?q=${encodeURIComponent(q)}`),
-  trending: (type: 'all' | 'movie' | 'tv' = 'all', window: 'day' | 'week' = 'week') =>
-    http<{ results: TmdbItem[] }>(`/ui/api/discover/trending?type=${type}&window=${window}`),
-  popular: (type: MediaType = 'movie') =>
-    http<{ results: TmdbItem[] }>(`/ui/api/discover/popular?type=${type}`),
-  topRated: (type: MediaType = 'movie') =>
-    http<{ results: TmdbItem[] }>(`/ui/api/discover/top-rated?type=${type}`),
-  nowPlaying: () => http<{ results: TmdbItem[] }>('/ui/api/discover/now-playing'),
-  upcoming: () => http<{ results: TmdbItem[] }>('/ui/api/discover/upcoming'),
-  onTheAir: () => http<{ results: TmdbItem[] }>('/ui/api/discover/on-the-air'),
+  trending: (type: 'all' | 'movie' | 'tv' = 'all', window: 'day' | 'week' = 'week', page = 1) =>
+    http<{ results: TmdbItem[] }>(`/ui/api/discover/trending?type=${type}&window=${window}&page=${page}`),
+  popular: (type: MediaType = 'movie', page = 1) =>
+    http<{ results: TmdbItem[] }>(`/ui/api/discover/popular?type=${type}&page=${page}`),
+  topRated: (type: MediaType = 'movie', page = 1) =>
+    http<{ results: TmdbItem[] }>(`/ui/api/discover/top-rated?type=${type}&page=${page}`),
+  nowPlaying: (page = 1) => http<{ results: TmdbItem[] }>(`/ui/api/discover/now-playing?page=${page}`),
+  upcoming: (page = 1) => http<{ results: TmdbItem[] }>(`/ui/api/discover/upcoming?page=${page}`),
+  onTheAir: (page = 1) => http<{ results: TmdbItem[] }>(`/ui/api/discover/on-the-air?page=${page}`),
   providers: (type: MediaType = 'movie') =>
     http<{ providers: Provider[] }>(`/ui/api/discover/providers?type=${type}`),
   byProvider: (type: MediaType, providerId: number, sortBy?: string) =>
@@ -105,6 +108,8 @@ export const api = {
     http<{ results: TmdbItem[]; year_from: number | null; year_to: number | null }>(
       `/ui/api/discover/by-genre?type=${type}&genre=${genreId}&page=${page}`,
     ),
+  holiday: (theme: 'christmas' | 'halloween', page = 1) =>
+    http<{ results: TmdbItem[] }>(`/ui/api/discover/holiday?theme=${theme}&page=${page}`),
   discoverPrefsGet: (type: MediaType = 'movie') =>
     http<DiscoverPrefs>(`/ui/api/discover-prefs?type=${type}`),
   discoverPrefsSet: (type: MediaType, prefs: DiscoverPrefs) =>
@@ -133,6 +138,29 @@ export const api = {
     }),
   autoApproveRunNow: () =>
     http<{ status: string }>('/ui/api/auto-approve-rules/run-now', { method: 'POST' }),
+
+  // Content blacklist (movies / shows / actors)
+  contentBlacklist: (kind?: BlacklistKind) =>
+    http<{ items: ContentBlacklistItem[] }>(
+      '/ui/api/content-blacklist' + (kind ? `?kind=${kind}` : ''),
+    ),
+  contentBlacklistAdd: (kind: BlacklistKind, tmdb_id: number, title: string, image: string | null) =>
+    http<{ status: string }>('/ui/api/content-blacklist', {
+      method: 'POST',
+      body: JSON.stringify({ kind, tmdb_id, title, image }),
+    }),
+  contentBlacklistRemove: (kind: BlacklistKind, tmdb_id: number) =>
+    http<{ status: string }>(`/ui/api/content-blacklist/${kind}/${tmdb_id}`, { method: 'DELETE' }),
+
+  // Favorite actors (auto-requests their recent/upcoming work)
+  favoriteActors: () => http<{ items: FavoriteActor[] }>('/ui/api/favorite-actors'),
+  favoriteActorAdd: (tmdb_id: number, name: string, profile_path: string | null) =>
+    http<{ status: string }>('/ui/api/favorite-actors', {
+      method: 'POST',
+      body: JSON.stringify({ tmdb_id, name, profile_path }),
+    }),
+  favoriteActorRemove: (tmdb_id: number) =>
+    http<{ status: string }>(`/ui/api/favorite-actors/${tmdb_id}`, { method: 'DELETE' }),
 
   // Watchlist
   watchlist: () => http<{ items: WatchlistItem[] }>('/ui/api/watchlist'),
