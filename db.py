@@ -384,6 +384,27 @@ def _migrate() -> None:
         if "library_click_jellyfin" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN library_click_jellyfin INTEGER NOT NULL DEFAULT 0")
             log.info("Migration: added users.library_click_jellyfin")
+        for col in ("trakt_username", "trakt_access_token", "trakt_refresh_token"):
+            if col not in user_cols:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
+                log.info("Migration: added users.%s", col)
+        if "trakt_token_expires" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN trakt_token_expires REAL")
+            log.info("Migration: added users.trakt_token_expires")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS trakt_watched (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                tmdb_id     INTEGER NOT NULL,
+                imdb_id     TEXT,
+                media_type  TEXT    NOT NULL,
+                season      INTEGER,
+                episode     INTEGER,
+                watched_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
+                UNIQUE(user_id, tmdb_id, media_type, season, episode)
+            )
+        """)
 
         conn.commit()
 
@@ -1365,6 +1386,46 @@ def touch_user_login(user_id: int) -> None:
 def delete_user(user_id: int) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+
+def upsert_trakt_watched(user_id: int, tmdb_id: int, media_type: str,
+                          imdb_id: str | None = None, season: int | None = None,
+                          episode: int | None = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO trakt_watched (user_id, tmdb_id, imdb_id, media_type, season, episode) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, tmdb_id, media_type, season, episode) DO UPDATE SET "
+            "imdb_id=COALESCE(excluded.imdb_id, imdb_id), "
+            "watched_at=strftime('%Y-%m-%d %H:%M:%S', 'now')",
+            (user_id, tmdb_id, imdb_id, media_type, season, episode),
+        )
+        conn.commit()
+
+
+def get_trakt_watched_movies(user_id: int) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT tmdb_id, imdb_id FROM trakt_watched WHERE user_id=? AND media_type='movie'",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_trakt_watched_episodes(user_id: int) -> dict[str, dict[str, list[int]]]:
+    """Return {imdb_id: {"season": [episode, ...]}} for a user's watched episodes."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT imdb_id, season, episode FROM trakt_watched "
+            "WHERE user_id=? AND media_type='episode' AND imdb_id IS NOT NULL "
+            "AND season IS NOT NULL AND episode IS NOT NULL",
+            (user_id,),
+        ).fetchall()
+    shows: dict[str, dict[str, list[int]]] = {}
+    for r in rows:
+        season_map = shows.setdefault(r["imdb_id"], {})
+        season_map.setdefault(str(r["season"]), []).append(r["episode"])
+    return shows
 
 
 def user_count() -> int:

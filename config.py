@@ -38,6 +38,15 @@ SEERR_API_KEY = _env("SEERR_API_KEY", "")
 
 TMDB_API_KEY = _env("TMDB_API_KEY", "")
 
+# Trakt.tv OAuth app credentials (create one at https://trakt.tv/oauth/applications).
+# Per-user access/refresh tokens are stored in the users table after the device-code
+# flow completes; these are only the app-level client id/secret.
+TRAKT_CLIENT_ID = _env("TRAKT_CLIENT_ID", "")
+TRAKT_CLIENT_SECRET = _env("TRAKT_CLIENT_SECRET", "")
+# Cap on how many watchlist items a single sync run will auto-request, so a huge
+# imported watchlist can't flood TorBox's createtorrent quota in one go.
+TRAKT_AUTO_REQUEST_CAP = _env_int("TRAKT_AUTO_REQUEST_CAP", 10)
+
 LISTEN_HOST = _env("LISTEN_HOST", "0.0.0.0")
 LISTEN_PORT = _env_int("LISTEN_PORT", 8088)
 
