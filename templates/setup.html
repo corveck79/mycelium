@@ -283,17 +283,48 @@
     <!-- Step 9: Zilean (Full only) -->
     <div class="step" data-step="9">
       <h2>Zilean</h2>
-      <p class="lede">Optional self-hosted torrent index (DMM-based). Faster than Torrentio for content in its index, no rate limits. Leave blank if you don't run one. &rarr; <a href="https://github.com/iPromKnight/zilean" target="_blank" style="color:var(--accent)">github.com/iPromKnight/zilean</a></p>
-      <div class="field">
-        <label>Zilean URL</label>
-        <input type="text" id="ZILEAN_URL" placeholder="http://10.0.0.10:8181">
-        <button type="button" class="test-btn" onclick="testConn('zilean')">Test connection</button>
-        <span id="r-zilean" class="test-result"></span>
+      <p class="lede">Optional self-hosted torrent index (DMM-based). Faster than Torrentio for content in its index, no rate limits. Leave everything blank/off if you don't want this. &rarr; <a href="https://github.com/iPromKnight/zilean" target="_blank" style="color:var(--accent)">github.com/iPromKnight/zilean</a></p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <label id="zl-tile-external" onclick="setZileanMode(false)" style="display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:8px;cursor:pointer;border:2px solid var(--accent);background:rgba(34,211,238,.07)">
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="radio" name="_zl_mode" value="external" checked style="accent-color:var(--accent)">
+            <span style="font-weight:700;font-size:13px;color:var(--text-bright)">External service</span>
+          </div>
+          <span style="font-size:11px;color:var(--muted);line-height:1.5">Point at your own Zilean + Postgres container (or one you already run).</span>
+        </label>
+        <label id="zl-tile-native" onclick="setZileanMode(true)" style="display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:8px;cursor:pointer;border:2px solid var(--border);background:transparent">
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="radio" name="_zl_mode" value="native" style="accent-color:var(--accent)">
+            <span style="font-weight:700;font-size:13px;color:var(--text-bright)">Native (built-in)</span>
+          </div>
+          <span style="font-size:11px;color:var(--muted);line-height:1.5">No separate container. Mycelium syncs the hashlist itself into a local index.</span>
+        </label>
       </div>
-      <label class="check-row" style="margin-top:8px">
-        <input type="checkbox" id="ZILEAN_ENABLED">
-        <span><span class="t">Enable Zilean</span><br><span class="d">Automatically checked when you enter a URL above.</span></span>
-      </label>
+      <input type="hidden" id="ZILEAN_MODE" value="external">
+
+      <div id="zl-external-fields">
+        <div class="field">
+          <label>Zilean URL</label>
+          <input type="text" id="ZILEAN_URL" placeholder="http://10.0.0.10:8181">
+          <button type="button" class="test-btn" onclick="testConn('zilean')">Test connection</button>
+          <span id="r-zilean" class="test-result"></span>
+        </div>
+        <label class="check-row" style="margin-top:8px">
+          <input type="checkbox" id="ZILEAN_ENABLED">
+          <span><span class="t">Enable Zilean</span><br><span class="d">Automatically checked when you enter a URL above.</span></span>
+        </label>
+      </div>
+
+      <div id="zl-native-fields" style="display:none">
+        <div class="alert alert-info" style="font-size:12px">
+          Mycelium will download the community DMM hashlist itself on a schedule  -  nothing else to configure here, just finish the wizard.
+          <br><br>
+          Already run an external Zilean with an existing index and don't want to re-scrape from scratch?
+          Finish the wizard as-is, then go to <b>Settings &rarr; Zilean native index</b> afterwards and use
+          <b>Import from Postgres</b> to pull your existing hashes straight from your external Zilean's database.
+        </div>
+      </div>
     </div>
 
     <!-- Step 10: Radarr / Sonarr (Full only) -->
@@ -367,6 +398,20 @@
     liteT.style.background  = lite ? 'rgba(34,211,238,.07)' : 'transparent';
     full.querySelector('input[type="radio"]').checked  = !lite;
     liteT.querySelector('input[type="radio"]').checked = lite;
+  }
+
+  function setZileanMode(native) {
+    document.getElementById('ZILEAN_MODE').value = native ? 'native' : 'external';
+    const ext = document.getElementById('zl-tile-external');
+    const nat = document.getElementById('zl-tile-native');
+    ext.style.borderColor = native ? 'var(--border)' : 'var(--accent)';
+    ext.style.background  = native ? 'transparent' : 'rgba(34,211,238,.07)';
+    nat.style.borderColor = native ? 'var(--accent)' : 'var(--border)';
+    nat.style.background  = native ? 'rgba(34,211,238,.07)' : 'transparent';
+    ext.querySelector('input[type="radio"]').checked = !native;
+    nat.querySelector('input[type="radio"]').checked = native;
+    document.getElementById('zl-external-fields').style.display = native ? 'none' : '';
+    document.getElementById('zl-native-fields').style.display = native ? '' : 'none';
   }
 
   function render() {

@@ -681,14 +681,17 @@ def setup_save():
         if key not in _allowed_keys:
             log.warning("setup_save: rejected unknown key %r", key)
             continue
-        # Treat empty strings as "clear override"
-        if value == "":
-            _settings.set(key, None)
-        elif key in _settings._BOOL_KEYS:
-            _settings.set(key, str(value).lower() in ("1", "true", "yes", "on"))
-        else:
-            _settings.set(key, value)
-        saved += 1
+        try:
+            # Treat empty strings as "clear override"
+            if value == "":
+                _settings.set(key, None)
+            elif key in _settings._BOOL_KEYS:
+                _settings.set(key, str(value).lower() in ("1", "true", "yes", "on"))
+            else:
+                _settings.set(key, value)
+            saved += 1
+        except ValueError as exc:
+            log.warning("setup_save: rejected invalid value for %s: %s", key, exc)
     _settings.set("SETUP_COMPLETE", True)
     log.info("Setup wizard saved %d settings", saved)
     return jsonify(ok=True, saved=saved)
