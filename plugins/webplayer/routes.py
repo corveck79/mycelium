@@ -34,12 +34,14 @@ def web_player_status(job_id: str):
     if not job:
         abort(404)
     return jsonify(
-        status     = job.status.value,
-        message    = job.message,
-        stream_url = job.stream_url,
-        cdn_url    = job.cdn_url,
-        file_info  = job.file_info,
-        error      = job.error,
+        status      = job.status.value,
+        message     = job.message,
+        token       = job.token,
+        stream_url  = job.stream_url,
+        stream_type = job.stream_type,
+        cdn_url     = job.cdn_url,
+        file_info   = job.file_info,
+        error       = job.error,
     )
 
 
