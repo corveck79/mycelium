@@ -307,6 +307,7 @@ def _remove_duplicates(strm_files: list[Path], run_id: int) -> tuple[int, list[P
                 # alive and Jellyfin may retain a ghost entry for it.
                 dup.with_suffix(".nfo").unlink(missing_ok=True)
                 strm_generator._delete_spore_stubs(dup)
+                db.delete_virtual_item_by_strm_path(str(dup))
                 log.info("Duplicate removed: %s (kept %s)", dup, keeper_names)
                 try:
                     dup.parent.rmdir()

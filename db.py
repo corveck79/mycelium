@@ -453,7 +453,12 @@ def insert_request(title: str, imdb_id: str, media_type: str, seasons: list[int]
                     tmdb_id: int | None = None) -> int:
     seasons_str = ",".join(str(s) for s in (seasons or []))
     with _connect() as conn:
-        cur = conn.execute(
+        # cursor.lastrowid is unreliable here: on the ON CONFLICT/UPDATE path
+        # (i.e. every retry of an existing imdb_id) SQLite does NOT update
+        # last_insert_rowid(), so it can return a stale id left over from some
+        # unrelated row's last real INSERT on this connection. Look the row up
+        # explicitly instead of trusting lastrowid.
+        conn.execute(
             "INSERT INTO requests (title, imdb_id, media_type, seasons, tmdb_id) VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT(imdb_id) DO UPDATE SET "
             "title=excluded.title, seasons=COALESCE(excluded.seasons, seasons), "
@@ -461,8 +466,9 @@ def insert_request(title: str, imdb_id: str, media_type: str, seasons: list[int]
             "updated_at=strftime('%Y-%m-%d %H:%M:%S', 'now')",
             (title, imdb_id, media_type, seasons_str or None, tmdb_id),
         )
+        row = conn.execute("SELECT id FROM requests WHERE imdb_id=?", (imdb_id,)).fetchone()
         conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        return row["id"]
 
 
 def update_request(row_id: int, status: str, quality: str | None = None,
@@ -1049,6 +1055,12 @@ def get_idle_virtual_items(cutoff_iso: str) -> list[dict]:
 def delete_virtual_item(token: str) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM virtual_items WHERE token=?", (token,))
+        conn.commit()
+
+
+def delete_virtual_item_by_strm_path(strm_path: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM virtual_items WHERE strm_path=?", (strm_path,))
         conn.commit()
 
 

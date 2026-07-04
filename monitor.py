@@ -253,7 +253,11 @@ def _retry_episode(ep: dict) -> bool:
             return True
         try:
             torbox.add_magnet(stream.magnet, reason="series-monitor")
-            torbox.wait_until_ready(stream.info_hash)
+            added_item = torbox.wait_until_ready(stream.info_hash)
+            if not added_item or not torbox._is_ready(added_item):
+                log.info("Monitor: %s S%02dE%02d still downloading  -  strm will follow once ready",
+                         title, season, episode)
+                return False
             log.info("Monitor: added %s S%02dE%02d", title, season, episode)
             return True
         except torbox.RateLimited:

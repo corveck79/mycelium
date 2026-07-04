@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 # Verplichte env vars voor config.py (wordt NIET gemockt)
 os.environ.setdefault("TORBOX_API_KEY", "test")
 os.environ.setdefault("MEDIA_PATH", "/tmp/mycelium-test-media")
@@ -21,13 +23,30 @@ os.environ.setdefault("SPORE_MEDIA_PATH", "/tmp/mycelium-test-spore")
 os.environ.setdefault("TORBOX_BASE_URL", "https://api.torbox.app/v1/api")
 os.environ.setdefault("SPORE_ENABLED", "true")
 
-# Mock zware imports zodat strm_generator importeerbaar is zonder DB/netwerk
-for _mod in ("db", "jellyfin", "settings", "torbox", "nfo_generator", "mp4_faststart"):
-    sys.modules.setdefault(_mod, MagicMock())
+# Mock zware imports zodat strm_generator importeerbaar is zonder DB/netwerk.
+# Onvoorwaardelijk overschrijven (niet setdefault): andere testbestanden kunnen
+# via hun eigen imports al een ECHTE "settings"/"db" module in sys.modules hebben
+# gezet voordat dit bestand geladen wordt, wat setdefault() zou laten staan.
+_MOCKED_MODULES = ("db", "jellyfin", "settings", "torbox", "nfo_generator", "mp4_faststart")
+_orig_modules = {_mod: sys.modules.get(_mod) for _mod in _MOCKED_MODULES}
+for _mod in _MOCKED_MODULES:
+    sys.modules[_mod] = MagicMock()
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import strm_generator as sg  # noqa: E402  (imports na sys.path setup)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _restore_mocked_modules():
+    """Herstelt sys.modules na dit bestand, zodat de mocks hier niet lekken
+    naar andere testbestanden die later in dezelfde sessie draaien."""
+    yield
+    for _mod, _orig in _orig_modules.items():
+        if _orig is None:
+            sys.modules.pop(_mod, None)
+        else:
+            sys.modules[_mod] = _orig
 
 
 # =============================================================================
@@ -86,6 +105,51 @@ class TestStrmPath:
     def test_episode_path_double_digit(self):
         p = sg._strm_path({"type": "episode", "title": "The Bear", "season": 1, "episode": 10})
         assert "S01E10" in str(p)
+
+
+class TestProcessTorrentCanonicalTitle:
+    """A canonical_title/imdb_id lets a fresh torrent add land in the same
+    series folder every time instead of re-deriving a (possibly different)
+    folder name from each torrent's own raw release name  -  the cause of a
+    show ending up split across several duplicate library entries."""
+
+    def test_uses_canonical_title_and_writes_tvshow_nfo(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
+        monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: False)  # CATBOX_MODE off
+        monkeypatch.setattr(sg, "_resolve_url", lambda *a, **kw: "http://cdn.example/x")
+        item = {
+            "id": 1,
+            "name": "Full.House.S02.1080p.WEB-DL",
+            "hash": "a" * 40,
+            "files": [{"id": 1, "name": "Full.House.S02E01.mkv"}],
+        }
+        written = sg.process_torrent(item, canonical_title="Full House", imdb_id="tt0092359")
+        assert written == 1
+        folder = Path(tmp_path) / "series" / "Full House"
+        assert (folder / "Season 02" / "Full House S02E01.strm").exists()
+        nfo = folder / "tvshow.nfo"
+        assert nfo.exists()
+        assert "tt0092359" in nfo.read_text()
+
+    def test_two_differently_named_torrents_land_in_same_folder(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
+        monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: False)
+        monkeypatch.setattr(sg, "_resolve_url", lambda *a, **kw: "http://cdn.example/x")
+        item1 = {
+            "id": 1, "name": "Full.House.S01.1080p.WEB-DL", "hash": "a" * 40,
+            "files": [{"id": 1, "name": "Full.House.S01E01.mkv"}],
+        }
+        item2 = {
+            "id": 2, "name": "[SITE] FULL HOUSE S02 COMPLETE", "hash": "b" * 40,
+            "files": [{"id": 2, "name": "Full House S02E01.mkv"}],
+        }
+        sg.process_torrent(item1, canonical_title="Full House", imdb_id="tt0092359")
+        sg.process_torrent(item2, canonical_title="Full House", imdb_id="tt0092359")
+        series_dir = Path(tmp_path) / "series"
+        show_folders = [p for p in series_dir.iterdir() if p.is_dir()]
+        assert [p.name for p in show_folders] == ["Full House"]
 
 
 class TestNormTitle:

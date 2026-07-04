@@ -39,8 +39,27 @@ def _rank(streams, prefer_season_pack: bool = False, override: dict | None = Non
     return torrentio.rank_streams(streams, prefer_season_pack=prefer_season_pack, override=override)
 
 
+def _movie_runtime_minutes(imdb_id: str) -> float | None:
+    import tmdb
+    try:
+        sec = tmdb.get_movie_runtime_sec(imdb_id)
+        return sec / 60.0 if sec else None
+    except Exception:
+        return None
+
+
+def _episode_runtime_minutes(imdb_id: str, season: int, episode: int) -> float | None:
+    import tmdb
+    try:
+        sec = tmdb.get_episode_runtime_sec(imdb_id, season, episode)
+        return sec / 60.0 if sec else None
+    except Exception:
+        return None
+
+
 def _fetch_movie_candidates(req: MediaRequest) -> list:
-    override = db.get_show_override(req.imdb_id)
+    override = dict(db.get_show_override(req.imdb_id) or {})
+    override["runtime_minutes"] = _movie_runtime_minutes(req.imdb_id)
     streams: list[TorrentioStream] = []
     seen_hashes: set[str] = set()
     if _settings.get("ZILEAN_ENABLED", False) and health_cache.is_up("zilean"):
@@ -59,7 +78,8 @@ def _fetch_movie_candidates(req: MediaRequest) -> list:
 
 
 def _fetch_season_candidates(req: MediaRequest, season: int, episode: int, prefer_season_pack: bool = False) -> list:
-    override = db.get_show_override(req.imdb_id)
+    override = dict(db.get_show_override(req.imdb_id) or {})
+    override["runtime_minutes"] = _episode_runtime_minutes(req.imdb_id, season, episode)
     streams: list[TorrentioStream] = []
     seen_hashes: set[str] = set()
     if _settings.get("ZILEAN_ENABLED", False) and health_cache.is_up("zilean"):
@@ -98,7 +118,15 @@ def _try_add_magnet(stream: TorrentioStream, label: str) -> bool:
         return True
     try:
         torbox.add_magnet(stream.magnet, reason="processor")
-        torbox.wait_until_ready(stream.info_hash)
+        item = torbox.wait_until_ready(stream.info_hash)
+        if not item or not torbox._is_ready(item):
+            # wait_until_ready() timed out without TorBox ever reporting the
+            # torrent ready. Don't create a .strm for a file that isn't there
+            # yet: skip this candidate now, it'll be picked up again (already
+            # in the library, likely finished by then) on the next retry/recheck.
+            log.warning("Torbox still downloading %s after the poll timeout  -  "
+                        "not creating a .strm yet, will recheck later", label)
+            return False
         return True
     except torbox.RateLimited:
         log.warning("createtorrent budget exhausted adding %s  -  will retry later", label)
@@ -506,17 +534,39 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
     started = time.monotonic()
     row_id = db.insert_request(req.title, req.imdb_id, req.media_type, req.seasons,
                                 tmdb_id=req.tmdb_id)
+
+    # Never accept a release for a movie that isn't out yet: pre-release
+    # blockbusters attract fake/junk cached torrents (mislabeled CAMs, scam
+    # uploads) that would otherwise get a .strm and show in the library playing
+    # garbage. Mark it upcoming and recheck once it has actually released.
+    if req.is_movie:
+        try:
+            import datetime
+            import tmdb
+            rd = tmdb.release_date(req.imdb_id, getattr(req, "tmdb_id", None), "movie")
+            if rd and rd > datetime.date.today().isoformat():
+                db.update_request(row_id, "upcoming", error=f"not released yet (releases {rd})")
+                log.info("Skip %s: not released until %s  -  marked upcoming", req.title, rd)
+                return False
+        except Exception as exc:
+            log.debug("release-date guard skipped for %s: %s", req.title, exc)
+
     success = False
     winner: Optional[TorrentioStream] = None
+    season_winners: list[TorrentioStream] = []
     try:
         if req.is_movie:
             success, winner = _process_movie(req)
+            if winner:
+                season_winners.append(winner)
         else:
             for season in req.seasons:
                 ok, w = _process_season(req, season)
                 if ok:
                     success = True
-                    winner = winner or w
+                    if w:
+                        season_winners.append(w)
+            winner = season_winners[0] if season_winners else None
     except RateLimited:
         # TorBox 429  -  not a real failure. Reschedule and surface a clear status.
         _LAST_FAIL_REASON.pop(req.imdb_id, None)
@@ -547,20 +597,25 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
         )
         if not req.is_movie:
             monitor.add_series(req.imdb_id, req.title, req.seasons)
-        item = torbox.find_by_hash(winner.info_hash) if winner else None
-        torrent_id = item.get('id') if item else None
-        if torrent_id:
+        # Generate .strm for every winning torrent. For a multi-season series each
+        # season is its own pack, so all winners must be materialised  -  not just
+        # the first  -  otherwise only season 1 ends up in the library. (In catbox/
+        # lazy mode the winners aren't in TorBox and the per-season .strm files were
+        # already written during registration, so this loop no-ops.)
+        for w in season_winners:
+            item = torbox.find_by_hash(w.info_hash) if w else None
+            torrent_id = item.get('id') if item else None
+            if not torrent_id:
+                continue
             strm_generator.create_strm_for_torrent(torrent_id, req.title, req.media_type,
                                                     imdb_id=req.imdb_id,
                                                     tmdb_id=getattr(req, 'tmdb_id', None))
-        # RD fallback already wrote its .strm before returning; nothing to do here.
-            # Best-effort subtitle fetch
+            # Best-effort subtitle fetch (movies only)
             try:
                 import subtitles
                 from pathlib import Path
                 from config import MEDIA_PATH
                 if req.is_movie:
-                    # Find newest .strm in movies for this title (rough match)
                     media = Path(MEDIA_PATH) / "movies"
                     for p in sorted(media.rglob("*.strm"), key=lambda p: p.stat().st_mtime, reverse=True)[:3]:
                         subtitles.fetch_for(p, req.imdb_id, "movie")
