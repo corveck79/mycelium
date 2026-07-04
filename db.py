@@ -391,6 +391,10 @@ def _migrate() -> None:
         if "trakt_token_expires" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN trakt_token_expires REAL")
             log.info("Migration: added users.trakt_token_expires")
+        for col in ("discover_language_include", "discover_language_exclude"):
+            if col not in user_cols:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+                log.info("Migration: added users.%s", col)
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS trakt_watched (

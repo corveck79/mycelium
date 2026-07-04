@@ -101,6 +101,10 @@ export interface SessionInfo {
     auto_approve: boolean;
     region: string;
     library_click_jellyfin?: boolean;
+    trakt_connected?: boolean;
+    trakt_username?: string | null;
+    discover_language_include?: string;
+    discover_language_exclude?: string;
   } | null;
 }
 

@@ -1757,6 +1757,7 @@ def ui_api_discover_search():
         return jsonify(results=[])
     page = int(request.args.get("page") or "1")
     results = tmdb.multi_search(q, page=page)
+    results = _filter_by_language(results)
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1817,6 +1818,33 @@ def _enrich_library_status(items: list[dict]) -> None:
             it["imdb_id"] = imdb_map.get(it.get("tmdb_id"))
 
 
+def _filter_by_language(items: list[dict]) -> list[dict]:
+    """Apply the logged-in user's Discover language include/exclude preference
+    to a list of normalized TMDB items (in place semantics via return value).
+    Include wins when both are set for the same language. Items with no
+    original_language (rare) are never filtered out."""
+    rec = auth.current_user_record()
+    if not rec:
+        return items
+    include = {l.strip().lower() for l in (rec.get("discover_language_include") or "").split(",") if l.strip()}
+    exclude = {l.strip().lower() for l in (rec.get("discover_language_exclude") or "").split(",") if l.strip()}
+    if not include and not exclude:
+        return items
+    out = []
+    for it in items:
+        lang = (it.get("original_language") or "").lower()
+        if not lang:
+            out.append(it)
+            continue
+        if include:
+            if lang in include:
+                out.append(it)
+            continue
+        if lang not in exclude:
+            out.append(it)
+    return out
+
+
 def _user_region() -> str:
     """Region from ?region= param, or from the logged-in user's profile, or system default."""
     r = request.args.get("region")
@@ -1833,6 +1861,7 @@ def ui_api_discover_trending():
     media = request.args.get("type", "all")  # all | movie | tv
     window = request.args.get("window", "week")  # day | week
     results = tmdb.trending(media, window)
+    results = _filter_by_language(results)
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1842,6 +1871,7 @@ def ui_api_discover_popular():
     media = request.args.get("type", "movie")
     region = _user_region()
     results = tmdb.popular(media, region=region)
+    results = _filter_by_language(results)
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1850,6 +1880,7 @@ def ui_api_discover_popular():
 def ui_api_discover_top_rated():
     media = request.args.get("type", "movie")
     results = tmdb.top_rated(media)
+    results = _filter_by_language(results)
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1858,6 +1889,7 @@ def ui_api_discover_top_rated():
 def ui_api_discover_now_playing():
     region = _user_region()
     results = tmdb.now_playing(region=region)
+    results = _filter_by_language(results)
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1866,6 +1898,7 @@ def ui_api_discover_now_playing():
 def ui_api_discover_upcoming():
     region = _user_region()
     results = tmdb.upcoming(region=region)
+    results = _filter_by_language(results)
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1873,6 +1906,7 @@ def ui_api_discover_upcoming():
 @app.get("/ui/api/discover/on-the-air")
 def ui_api_discover_on_the_air():
     results = tmdb.on_the_air()
+    results = _filter_by_language(results)
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -1893,6 +1927,7 @@ def ui_api_discover_by_provider():
     if not pid:
         return jsonify(error="provider_id required"), 400
     results = tmdb.discover_by_provider(media, pid, region=region, sort_by=sort)
+    results = _filter_by_language(results)
     _enrich_library_status(results)
     return jsonify(results=results)
 
@@ -2314,6 +2349,8 @@ def ui_api_session():
         "region": rec.get("region", "NL"),
         "library_click_jellyfin": bool(rec.get("library_click_jellyfin")),
         "trakt_connected": bool(rec.get("trakt_access_token")),
+        "discover_language_include": rec.get("discover_language_include") or "",
+        "discover_language_exclude": rec.get("discover_language_exclude") or "",
     }
     user.update(plugin_loader.session_fields(rec))
     jellyfin_url = (_settings.get("JELLYFIN_URL") or cfg.JELLYFIN_URL or "").rstrip("/")
@@ -2429,8 +2466,14 @@ def ui_api_me_preferences():
     if not rec:
         return jsonify(error="not authenticated"), 401
     p = request.get_json(silent=True) or {}
-    _ALLOWED = {"library_click_jellyfin"}
-    fields = {k: (1 if v else 0) for k, v in p.items() if k in _ALLOWED}
+    _BOOL_FIELDS = {"library_click_jellyfin"}
+    _TEXT_FIELDS = {"discover_language_include", "discover_language_exclude"}
+    fields = {}
+    for k, v in p.items():
+        if k in _BOOL_FIELDS:
+            fields[k] = 1 if v else 0
+        elif k in _TEXT_FIELDS:
+            fields[k] = ",".join(l.strip().lower() for l in str(v or "").split(",") if l.strip())
     if not fields:
         return jsonify(error="no valid fields"), 400
     db.update_user(rec["id"], **fields)

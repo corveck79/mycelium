@@ -237,6 +237,7 @@ def _norm_item(item: dict, media_type: str | None = None) -> dict:
         "poster_path": item.get("poster_path"),
         "backdrop_path": item.get("backdrop_path"),
         "genre_ids": item.get("genre_ids") or [],
+        "original_language": item.get("original_language") or "",
     }
 
 

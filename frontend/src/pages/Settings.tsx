@@ -110,7 +110,7 @@ function PreferencesCard() {
   const jellyfinUrl = session?.jellyfin_url;
 
   const mutation = useMutation({
-    mutationFn: (prefs: Record<string, boolean>) => api.setPreferences(prefs),
+    mutationFn: (prefs: Record<string, boolean | string>) => api.setPreferences(prefs),
     onError: () => {
       // Revert optimistic update on failure
       qc.invalidateQueries({ queryKey: ['session'] });
@@ -125,6 +125,20 @@ function PreferencesCard() {
       old ? { ...old, user: { ...old.user, library_click_jellyfin: newVal } } : old,
     );
     mutation.mutate({ library_click_jellyfin: newVal });
+  };
+
+  const [includeLang, setIncludeLang] = useState((session?.user as any)?.discover_language_include || '');
+  const [excludeLang, setExcludeLang] = useState((session?.user as any)?.discover_language_exclude || '');
+  useEffect(() => {
+    setIncludeLang((session?.user as any)?.discover_language_include || '');
+    setExcludeLang((session?.user as any)?.discover_language_exclude || '');
+  }, [session]);
+
+  const saveLanguages = () => {
+    mutation.mutate({
+      discover_language_include: includeLang,
+      discover_language_exclude: excludeLang,
+    });
   };
 
   return (
@@ -151,6 +165,39 @@ function PreferencesCard() {
             </div>
           </div>
         </label>
+
+        <div className="border-t border-border pt-3">
+          <div className="text-sm font-medium mb-1">Discover language filter</div>
+          <p className="text-xs text-muted mb-2">
+            Comma-separated ISO 639-1 codes (e.g. <code>en,nl</code>). Only-include takes priority over exclude.
+            Leave both empty to show everything.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="text"
+              value={includeLang}
+              onChange={(e) => setIncludeLang(e.target.value)}
+              placeholder="Only show (e.g. en,nl)"
+              className="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm
+                         placeholder:text-muted focus:outline-none focus:border-accent"
+            />
+            <input
+              type="text"
+              value={excludeLang}
+              onChange={(e) => setExcludeLang(e.target.value)}
+              placeholder="Hide (e.g. ru,hi)"
+              className="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm
+                         placeholder:text-muted focus:outline-none focus:border-accent"
+            />
+            <button
+              onClick={saveLanguages}
+              disabled={mutation.isPending}
+              className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50 whitespace-nowrap"
+            >
+              {mutation.isPending ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

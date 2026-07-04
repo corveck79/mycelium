@@ -159,7 +159,7 @@ export const api = {
     }),
 
   // User preferences
-  setPreferences: (prefs: Record<string, boolean>) =>
+  setPreferences: (prefs: Record<string, boolean | string>) =>
     http<{ ok: boolean }>('/ui/api/me/preferences', {
       method: 'POST',
       body: JSON.stringify(prefs),
