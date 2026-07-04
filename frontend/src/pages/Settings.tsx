@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { usePlugins } from '../hooks/usePlugins';
 import PluginSettingsCard from '../components/PluginSettingsCard';
@@ -18,7 +18,6 @@ export default function Settings() {
     <div className="space-y-6">
       <ChangePasswordCard />
       <PreferencesCard />
-      <TraktCard />
       <MDBListCard />
       {isAdmin && <NotificationsCard />}
 
@@ -202,127 +201,6 @@ function PreferencesCard() {
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-
-function TraktCard() {
-  const qc = useQueryClient();
-  const { data: session } = useQuery({ queryKey: ['session'], queryFn: api.session });
-  const connected = !!(session?.user as any)?.trakt_connected;
-
-  const [pairing, setPairing] = useState<{ user_code: string; verification_url: string } | null>(null);
-  const [syncResult, setSyncResult] = useState('');
-  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollDeadline = useRef<number>(0);
-
-  useEffect(() => () => { if (pollTimer.current) clearInterval(pollTimer.current); }, []);
-
-  const startMutation = useMutation({
-    mutationFn: api.traktAuthStart,
-    onSuccess: (data: any) => {
-      setPairing({ user_code: data.user_code, verification_url: data.verification_url });
-      pollDeadline.current = Date.now() + (data.expires_in || 600) * 1000;
-      const intervalMs = Math.max(2, data.interval || 5) * 1000;
-      if (pollTimer.current) clearInterval(pollTimer.current);
-      pollTimer.current = setInterval(async () => {
-        if (Date.now() > pollDeadline.current) {
-          clearInterval(pollTimer.current!);
-          setPairing(null);
-          return;
-        }
-        try {
-          const r = await api.traktAuthPoll();
-          if (r.status === 'success') {
-            clearInterval(pollTimer.current!);
-            setPairing(null);
-            qc.invalidateQueries({ queryKey: ['session'] });
-          } else if (r.status === 'error') {
-            clearInterval(pollTimer.current!);
-            setPairing(null);
-          }
-        } catch { /* keep polling */ }
-      }, intervalMs);
-    },
-  });
-
-  const revokeMutation = useMutation({
-    mutationFn: api.traktRevoke,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['session'] }),
-  });
-
-  const syncMutation = useMutation({
-    mutationFn: api.traktSync,
-    onSuccess: (data: any) => setSyncResult(`Queued ${data.added} new watchlist item${data.added === 1 ? '' : 's'}.`),
-    onError: (e: any) => setSyncResult(`Error: ${e.message}`),
-  });
-
-  const syncWatchedMutation = useMutation({
-    mutationFn: api.traktSyncWatched,
-    onSuccess: (data: any) => setSyncResult(`Synced ${data.watched} watched item${data.watched === 1 ? '' : 's'}.`),
-    onError: (e: any) => setSyncResult(`Error: ${e.message}`),
-  });
-
-  return (
-    <div className="bg-card rounded-lg border border-border p-6">
-      <h2 className="text-base font-bold mb-1">Trakt</h2>
-      <p className="text-muted text-xs mb-4">
-        Connect your Trakt account to auto-request items from your watchlist and show watched badges.
-      </p>
-
-      {connected ? (
-        <div className="space-y-3">
-          <p className="text-sm text-ok">Connected as {(session?.user as any)?.trakt_username || 'your Trakt account'}.</p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
-              className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50"
-            >
-              {syncMutation.isPending ? 'Syncing...' : 'Sync watchlist now'}
-            </button>
-            <button
-              onClick={() => syncWatchedMutation.mutate()}
-              disabled={syncWatchedMutation.isPending}
-              className="px-3 py-1.5 rounded border border-border text-sm font-medium disabled:opacity-50"
-            >
-              {syncWatchedMutation.isPending ? 'Syncing...' : 'Sync watched status'}
-            </button>
-            <button
-              onClick={() => revokeMutation.mutate()}
-              disabled={revokeMutation.isPending}
-              className="px-3 py-1.5 rounded border border-danger text-danger text-sm font-medium disabled:opacity-50"
-            >
-              Disconnect
-            </button>
-          </div>
-          {syncResult && <p className="text-xs text-muted">{syncResult}</p>}
-        </div>
-      ) : pairing ? (
-        <div className="space-y-2">
-          <p className="text-sm">
-            Go to <a href={pairing.verification_url} target="_blank" rel="noreferrer" className="text-accent underline">
-              {pairing.verification_url}
-            </a> and enter this code:
-          </p>
-          <p className="text-2xl font-mono font-bold tracking-widest">{pairing.user_code}</p>
-          <p className="text-xs text-muted">Waiting for confirmation...</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <button
-            onClick={() => startMutation.mutate()}
-            disabled={startMutation.isPending}
-            className="px-4 py-2 rounded-lg bg-accent hover:bg-accent/90 disabled:opacity-60 font-semibold text-sm"
-          >
-            {startMutation.isPending ? 'Starting...' : 'Connect Trakt'}
-          </button>
-          {startMutation.isError && (
-            <p className="text-danger text-xs">{(startMutation.error as any)?.message || 'Could not start Trakt authorization'}</p>
-          )}
-        </div>
-      )}
     </div>
   );
 }

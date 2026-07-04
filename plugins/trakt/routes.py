@@ -158,6 +158,22 @@ def trakt_sync_watched():
     return jsonify(ok=True, watched=watched)
 
 
+@bp.post("/ui/api/trakt/auto-request")
+def trakt_auto_request():
+    """Queue new watchlist items for download (capped via TRAKT_AUTO_REQUEST_CAP),
+    on top of the plain watchlist sync above which only populates the browsing list."""
+    rec = _require_user()
+    user_id = rec.get("id")
+    if not user_id:
+        abort(401)
+    tok = trakt_api.get_token(user_id)
+    if not tok:
+        return jsonify(error="Not connected to Trakt"), 400
+    tok = trakt_api.refresh_if_needed(tok)
+    added = trakt_api.auto_request_watchlist(user_id, tok["access_token"])
+    return jsonify(ok=True, added=added)
+
+
 @bp.post("/ui/api/trakt/scrobble")
 def trakt_scrobble_endpoint():
     rec = _require_user()

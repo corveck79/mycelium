@@ -6,8 +6,9 @@ blueprint.register_blueprint(_routes.bp)
 
 PLUGIN_META = {
     "label":       "Trakt",
-    "version":     "1.0.0",
-    "description": "Sync watchlist with Trakt.tv and scrobble watch history",
+    "version":     "1.1.0",
+    "description": "Sync watchlist with Trakt.tv, auto-request new watchlist items "
+                    "for download (capped), and scrobble watch history",
     "user_fields": [],
     # settings_ui drives the generic PluginSettingsCard renderer in the frontend.
     # No frontend code changes needed when adding a new plugin  -  just define this.
@@ -47,6 +48,14 @@ PLUGIN_META = {
                 "show_if":          "connected",
                 "success_key":      "watched",
                 "success_template": "✓ {watched} titles synced",
+            },
+            {
+                "label":            "⬇ Auto-request watchlist",
+                "url":              "/ui/api/trakt/auto-request",
+                "method":           "POST",
+                "show_if":          "connected",
+                "success_key":      "added",
+                "success_template": "✓ {added} new items queued for download",
             },
         ],
     },

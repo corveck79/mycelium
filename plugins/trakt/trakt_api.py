@@ -300,14 +300,55 @@ def sync_user_watched(user_id: int, access_token: str) -> int:
     return synced
 
 
+def auto_request_watchlist(user_id: int, access_token: str) -> int:
+    """Queue new Trakt watchlist items for download (not just add to the browsing
+    watchlist), capped per call so a large imported watchlist can't flood TorBox's
+    createtorrent quota in one run. Returns the number of items newly queued."""
+    import threading
+    import processor
+    import settings as _settings
+    from config import TRAKT_AUTO_REQUEST_CAP
+    from webhook_parser import MediaRequest
+
+    cap = _settings.get("TRAKT_AUTO_REQUEST_CAP", TRAKT_AUTO_REQUEST_CAP)
+    seen_movies = {r["imdb_id"] for r in db.get_recent(2000) if r.get("media_type") == "movie"}
+    seen_series = {s["imdb_id"] for s in db.get_all_monitored_series()}
+
+    added = 0
+    for kind, media_type in (("movies", "movie"), ("shows", "series")):
+        if added >= cap:
+            break
+        for item in _fetch_watchlist(access_token, kind):
+            if added >= cap:
+                break
+            obj = item.get(kind[:-1], {})
+            ids = obj.get("ids", {})
+            imdb_id = ids.get("imdb")
+            if not imdb_id:
+                continue
+            already_seen = imdb_id in (seen_movies if media_type == "movie" else seen_series)
+            if already_seen:
+                continue
+            seasons = [] if media_type == "movie" else [1]
+            req = MediaRequest(title=obj.get("title") or imdb_id, media_type=media_type,
+                                imdb_id=imdb_id, seasons=seasons, tmdb_id=ids.get("tmdb"))
+            threading.Thread(target=processor.process, args=(req,),
+                             name=f"trakt-auto-request-{imdb_id}", daemon=True).start()
+            added += 1
+    return added
+
+
 def sync_all_users() -> None:
-    """Background job: sync watchlists + watch history for all connected users."""
+    """Background job: sync watchlists + watch history for all connected users,
+    then auto-request new watchlist items for download (capped)."""
     for tok in _get_all_tokens():
         try:
             tok = refresh_if_needed(tok)
             wl = sync_user_watchlist(tok["user_id"], tok["access_token"])
             watched = sync_user_watched(tok["user_id"], tok["access_token"])
-            log.info("Trakt sync: user %d  -  %d watchlist, %d watched", tok["user_id"], wl, watched)
+            requested = auto_request_watchlist(tok["user_id"], tok["access_token"])
+            log.info("Trakt sync: user %d  -  %d watchlist, %d watched, %d auto-requested",
+                     tok["user_id"], wl, watched, requested)
         except Exception as exc:
             log.warning("Trakt sync failed for user %d: %s", tok["user_id"], exc)
 
