@@ -1168,6 +1168,15 @@ def ui_api_poster(imdb_id: str):
     return jsonify(poster=f"https://image.tmdb.org/t/p/w154{path}" if path else None)
 
 
+@app.get("/ui/api/person/<int:person_id>")
+def ui_api_person(person_id: int):
+    """Actor/person detail: bio + combined filmography, for the clickable-cast view."""
+    person = tmdb.person_details(person_id)
+    if not person:
+        return jsonify(error="not found"), 404
+    return jsonify(**person)
+
+
 # ── Catbox lazy materialization ───────────────────────────────────────────────
 
 @app.get("/stream/<token>")

@@ -9,6 +9,7 @@ import type {
   MediaType,
   WantedMovie,
   WantedEpisode,
+  PersonDetail,
 } from './types';
 
 const csrfToken = (): string => {
@@ -68,6 +69,8 @@ export const api = {
     ),
   details: (type: MediaType, id: number) =>
     http<TmdbDetail>(`/ui/api/discover/details?type=${type}&id=${id}`),
+  person: (id: number) =>
+    http<PersonDetail>(`/ui/api/person/${id}`),
   addToLibrary: (
     tmdb_id: number,
     media_type: MediaType,

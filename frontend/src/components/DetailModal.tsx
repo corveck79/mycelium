@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, tmdbImg } from '../api';
 import type { MediaType, TmdbItem, WatchlistItem } from '../types';
 import TrailerModal from './TrailerModal';
+import PersonModal from './PersonModal';
 import { usePluginSlot } from '../hooks/usePluginSlots';
 import { useWatched } from '../hooks/useWatched';
 
@@ -50,6 +51,7 @@ export default function DetailModal({
     'idle',
   );
   const [pollingImdbId, setPollingImdbId] = useState<string | null>(null);
+  const [personId, setPersonId] = useState<number | null>(null);
 
   // Poll request status until a terminal state is reached or 3 min timeout
   useEffect(() => {
@@ -384,8 +386,14 @@ export default function DetailModal({
             <Section title="Cast">
               <div className="flex gap-3 overflow-x-auto scrollbar-hidden">
                 {detail.cast.map((c, i) => (
-                  <div key={i} className="flex-shrink-0 w-20 text-center">
-                    <div className="w-20 h-20 rounded-full bg-bg overflow-hidden">
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => c.id && setPersonId(c.id)}
+                    disabled={!c.id}
+                    className="flex-shrink-0 w-20 text-center group"
+                  >
+                    <div className="w-20 h-20 rounded-full bg-bg overflow-hidden group-hover:ring-2 group-hover:ring-accent/60 transition">
                       {c.profile_path && (
                         <img
                           src={tmdbImg.profile(c.profile_path) || undefined}
@@ -394,11 +402,11 @@ export default function DetailModal({
                         />
                       )}
                     </div>
-                    <div className="text-[11px] mt-1 font-semibold leading-tight line-clamp-2">
+                    <div className="text-[11px] mt-1 font-semibold leading-tight line-clamp-2 group-hover:text-accent transition">
                       {c.name}
                     </div>
                     <div className="text-[10px] text-muted line-clamp-2">{c.character}</div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </Section>
@@ -447,6 +455,11 @@ export default function DetailModal({
         onClose={() => setShowPlayer(false)}
       />
     )}
+    <PersonModal
+      personId={personId}
+      onClose={() => setPersonId(null)}
+      onSelectItem={(item) => { setPersonId(null); onSelectItem(item); }}
+    />
   </>,
   document.body
   );

@@ -386,7 +386,7 @@ def details(media_type: str, tmdb_id: int, region: str = "NL") -> dict | None:
         item["number_of_seasons"] = data.get("number_of_seasons")
         item["number_of_episodes"] = data.get("number_of_episodes")
     cast = ((data.get("credits") or {}).get("cast") or [])[:12]
-    item["cast"] = [{"name": c.get("name"), "character": c.get("character"),
+    item["cast"] = [{"id": c.get("id"), "name": c.get("name"), "character": c.get("character"),
                      "profile_path": c.get("profile_path")} for c in cast]
     videos = ((data.get("videos") or {}).get("results") or [])
     item["trailers"] = [{"key": v.get("key"), "name": v.get("name"), "site": v.get("site")}
@@ -401,6 +401,38 @@ def details(media_type: str, tmdb_id: int, region: str = "NL") -> dict | None:
     item["recommendations"] = [_norm_item(r, media_type=media_type)
                                 for r in (data.get("recommendations") or {}).get("results", [])[:12]]
     return item
+
+
+def person_details(person_id: int) -> dict | None:
+    """Return a person's bio + filmography (movies and TV combined, sorted by
+    popularity), normalized for the actor detail view."""
+    data = _get(f"/person/{person_id}", params={"append_to_response": "combined_credits"})
+    if not data:
+        return None
+    credits = (data.get("combined_credits") or {}).get("cast") or []
+    seen: set[tuple[str, int]] = set()
+    filmography = []
+    for c in credits:
+        media_type = c.get("media_type")
+        if media_type not in ("movie", "tv"):
+            continue
+        key = (media_type, c.get("id"))
+        if key in seen or not c.get("id"):
+            continue
+        seen.add(key)
+        item = _norm_item(c, media_type="movie" if media_type == "movie" else "tv")
+        item["character"] = c.get("character") or ""
+        filmography.append(item)
+    filmography.sort(key=lambda x: x.get("popularity") or 0, reverse=True)
+    return {
+        "id": data.get("id"),
+        "name": data.get("name"),
+        "biography": data.get("biography") or "",
+        "profile_path": data.get("profile_path"),
+        "birthday": data.get("birthday"),
+        "place_of_birth": data.get("place_of_birth"),
+        "filmography": filmography[:40],
+    }
 
 
 # Common Dutch / European providers  -  IDs from TMDB
