@@ -154,6 +154,8 @@ def parse(payload: dict) -> MediaRequest:
         raise WebhookError("No IMDB id found in webhook payload or Seerr API")
 
     title = payload.get("subject") or media.get("title") or imdb_id
+    if not title or title == imdb_id or _IMDB_RE.fullmatch(title.strip()):
+        title = tmdb.display_title(imdb_id, media_type) or title
 
     if media_type == "series":
         seasons = _extract_seasons(payload) or seerr_seasons

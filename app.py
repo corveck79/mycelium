@@ -818,12 +818,13 @@ def ui_submit():
     if media_type == "series" and not seasons:
         seasons = [1]
 
+    display_title = tmdb.display_title(imdb_id, media_type) or imdb_id
     media_request = MediaRequest(
-        title=imdb_id, media_type=media_type, imdb_id=imdb_id, seasons=seasons,
+        title=display_title, media_type=media_type, imdb_id=imdb_id, seasons=seasons,
     )
     threading.Thread(target=processor.process, args=(media_request,),
                      name=f"manual-{imdb_id}", daemon=True).start()
-    flash(f"Queued: {imdb_id} ({media_type})", "ok")
+    flash(f"Queued: {display_title} ({media_type})", "ok")
     return redirect(url_for("ui_dashboard"))
 
 
@@ -845,13 +846,14 @@ def ui_search_episode():
 @app.post("/ui/download-movie")
 def ui_download_movie():
     imdb_id = request.form.get("imdb_id", "")
+    display_title = tmdb.display_title(imdb_id, "movie") or imdb_id
     media_request = MediaRequest(
-        title=imdb_id, media_type="movie", imdb_id=imdb_id, seasons=[],
+        title=display_title, media_type="movie", imdb_id=imdb_id, seasons=[],
     )
     db.update_media_item_status(imdb_id, "movie", "processing")
     threading.Thread(target=processor.process, args=(media_request,),
                      name=f"movie-{imdb_id}", daemon=True).start()
-    flash(f"Download queued for {imdb_id}", "ok")
+    flash(f"Download queued for {display_title}", "ok")
     return redirect(url_for("ui_dashboard") + "#movies")
 
 
@@ -1088,13 +1090,13 @@ def ui_api_search_candidates():
         return jsonify(error="invalid imdb id"), 400
 
     if media_type == "movie":
-        streams = zilean.fetch_streams(imdb_id) if cfg.ZILEAN_ENABLED else []
+        streams = zilean.fetch_streams(imdb_id) if _settings_mod.get("ZILEAN_ENABLED", cfg.ZILEAN_ENABLED) else []
         candidates = torrentio.rank_streams(streams)
         if not candidates:
             streams = torrentio.fetch_streams("movie", imdb_id)
             candidates = torrentio.rank_streams(streams)
     else:
-        streams = zilean.fetch_streams(imdb_id, season=season, episode=episode) if cfg.ZILEAN_ENABLED else []
+        streams = zilean.fetch_streams(imdb_id, season=season, episode=episode) if _settings_mod.get("ZILEAN_ENABLED", cfg.ZILEAN_ENABLED) else []
         candidates = torrentio.rank_streams(streams)
         if not candidates:
             streams = torrentio.fetch_streams("series", imdb_id, season=season, episode=episode)
@@ -1157,20 +1159,16 @@ def ui_api_poster(imdb_id: str):
 
 @app.get("/stream/<token>")
 def stream_redirect(token: str):
-    """Jellyfin catbox endpoint: always 302 → CDN. Zero server bandwidth."""
-    import time as _t
-    started = _t.monotonic()
+    """Catbox endpoint: 302 → /spore-stream/<token> (moov-first proxy).
+
+    Redirecting to spore-stream instead of the raw CDN URL ensures all clients
+    (Jellyfin, Plex direct-stream, Android TV) get moov-first MP4 so playback
+    starts immediately. spore-stream handles catbox materialization itself.
+    """
     ua  = request.headers.get("User-Agent", "?")[:80]
     rng = request.headers.get("Range", "-")
-    url = catbox.materialize(token)
-    elapsed = _t.monotonic() - started
-    if not url:
-        log.warning("stream: materialize FAILED token=%s ua=%r range=%s (%.1fs)",
-                    token, ua, rng, elapsed)
-        abort(404)
-    log.info("stream: token=%s → 302 CDN (%.1fs) ua=%r range=%s",
-             token, elapsed, ua, rng)
-    return redirect(url, code=302)
+    log.info("stream: token=%s → /spore-stream/ ua=%r range=%s", token, ua, rng)
+    return redirect(f"/spore-stream/{token}", code=302)
 
 
 _spore_cold_sizes: dict = {}  # token -> file_size, avoids repeated HEAD on CDN
@@ -1322,11 +1320,14 @@ def spore_stream_proxy(token: str):
 
         return resp
 
-    # CDN file is already moov-first (or MKV redirect sentinel): redirect to CDN.
-    # For MKV files _build_then_probe is never triggered by the cold-cache path,
-    # so we trigger it here once to probe audio streams and detect TrueHD.
+    # CDN file is already moov-first (or MKV redirect sentinel).
+    # MKV files (ftyp_size == 0): redirect to CDN — FFmpeg reads MKV from byte 0,
+    #   no seeking needed, and CDN redirect avoids unnecessary proxy bandwidth.
+    # Already fast-start MP4 (ftyp_size > 0): proxy bytes through our server so
+    #   Plex Server cannot cache the raw CDN URL. Plex stores our /spore-stream/
+    #   URL instead; when any client (MiTV, Shield, etc.) plays, they always hit
+    #   our server which resolves a fresh CDN URL — expired URLs never reach clients.
     if info.get("already_fast"):
-        _spore_cold_sizes.pop(token, None)
         existing = db.load_spore_tracks(token)
         if (not existing or "preferred_audio_idx" not in existing) and token not in _spore_probing:
             _spore_probing.add(token)
@@ -1337,8 +1338,15 @@ def spore_stream_proxy(token: str):
                 name=f"probe-{token[:8]}",
             ).start()
             log.info("spore-stream: token=%s triggering background probe", token)
-        log.info("spore-stream: token=%s already fast-start, 302 to CDN", token)
-        return redirect(cdn_url, code=302)
+        if info["ftyp_size"] == 0:
+            # Non-MP4 sentinel (MKV/other): 302 to CDN, no moov seeking required.
+            _spore_cold_sizes.pop(token, None)
+            log.info("spore-stream: token=%s non-MP4 sentinel, 302 to CDN", token)
+            return redirect(cdn_url, code=302)
+        # Already fast-start MP4: proxy bytes; Plex stores our URL not the CDN URL.
+        log.info("spore-stream: token=%s already fast-start MP4, proxying bytes", token)
+        _spore_cold_sizes[token] = info["cdn_size"]
+        info = None  # fall through to cold-proxy path below
 
     file_size = info["cdn_size"]
     range_hdr = request.headers.get("Range")
