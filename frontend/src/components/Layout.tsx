@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
@@ -99,6 +99,7 @@ export default function Layout() {
               </svg>
             </button>
             <Breadcrumb path={location.pathname} />
+            <TopbarSearch />
             <div className="ml-auto flex items-center gap-2">
               {session?.user && <RegionPicker region={session.user.region || 'NL'} />}
             </div>
@@ -109,6 +110,32 @@ export default function Layout() {
         </main>
       </div>
     </div>
+  );
+}
+
+function TopbarSearch() {
+  const navigate = useNavigate();
+  const [q, setQ] = useState('');
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (q.trim()) navigate(`/search?q=${encodeURIComponent(q.trim())}`);
+  };
+
+  return (
+    <form onSubmit={submit} className="hidden sm:block flex-1 max-w-sm">
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm pointer-events-none">🔍</span>
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search movies and series..."
+          className="w-full bg-card border border-border rounded-lg pl-9 pr-3 py-1.5 text-sm
+                     placeholder:text-muted focus:outline-none focus:border-accent"
+        />
+      </div>
+    </form>
   );
 }
 

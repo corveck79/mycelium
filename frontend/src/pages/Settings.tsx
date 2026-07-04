@@ -7,6 +7,7 @@ import PluginSettingsCard from '../components/PluginSettingsCard';
 export default function Settings() {
   const { plugins } = usePlugins();
   const { data: session } = useQuery({ queryKey: ['session'], queryFn: api.session });
+  const isAdmin = session?.user?.role === 'admin';
 
   const visiblePlugins = plugins.filter(p => {
     const anyFieldEnabled = (p.user_fields || []).some(f => !!(session?.user as any)?.[f]);
@@ -19,6 +20,7 @@ export default function Settings() {
       <PreferencesCard />
       <TraktCard />
       <MDBListCard />
+      {isAdmin && <NotificationsCard />}
 
       {visiblePlugins.length > 0 && (
         <>
@@ -321,6 +323,103 @@ function TraktCard() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+
+function NotificationsCard() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['settings'], queryFn: api.settings });
+  const group = data?.groups.find((g) => g.id === 'notifications');
+  const valueOf = (key: string) => group?.items.find((i) => i.key === key)?.value;
+
+  const [notifySuccess, setNotifySuccess] = useState(true);
+  const [notifyFailure, setNotifyFailure] = useState(true);
+  const [discordUrl, setDiscordUrl] = useState('');
+  const [telegramToken, setTelegramToken] = useState('');
+  const [telegramChat, setTelegramChat] = useState('');
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    if (!group) return;
+    setNotifySuccess(!!valueOf('NOTIFY_ON_SUCCESS'));
+    setNotifyFailure(!!valueOf('NOTIFY_ON_FAILURE'));
+    setDiscordUrl(valueOf('DISCORD_WEBHOOK_URL') || '');
+    setTelegramToken(valueOf('TELEGRAM_BOT_TOKEN') || '');
+    setTelegramChat(valueOf('TELEGRAM_CHAT_ID') || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () => api.setNotificationSettings({
+      NOTIFY_ON_SUCCESS: notifySuccess,
+      NOTIFY_ON_FAILURE: notifyFailure,
+      DISCORD_WEBHOOK_URL: discordUrl,
+      TELEGRAM_BOT_TOKEN: telegramToken,
+      TELEGRAM_CHAT_ID: telegramChat,
+    }),
+    onSuccess: () => { setMsg('Saved.'); qc.invalidateQueries({ queryKey: ['settings'] }); },
+    onError: (e: any) => setMsg(`Error: ${e.message}`),
+  });
+
+  return (
+    <div className="bg-card rounded-lg border border-border p-6">
+      <h2 className="text-base font-bold mb-1">Notifications</h2>
+      <p className="text-muted text-xs mb-4">
+        Discord and/or Telegram alerts when a request succeeds or fails. Admin-only.
+      </p>
+      <div className="space-y-3 max-w-lg">
+        <div className="flex gap-4">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={notifySuccess} onChange={(e) => setNotifySuccess(e.target.checked)} />
+            Notify on success
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={notifyFailure} onChange={(e) => setNotifyFailure(e.target.checked)} />
+            Notify on failure
+          </label>
+        </div>
+        <div>
+          <label className="block text-xs text-muted mb-1">Discord webhook URL</label>
+          <input
+            type="text"
+            value={discordUrl}
+            onChange={(e) => setDiscordUrl(e.target.value)}
+            placeholder="https://discord.com/api/webhooks/..."
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm
+                       placeholder:text-muted focus:outline-none focus:border-accent"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs text-muted mb-1">Telegram bot token</label>
+            <input
+              type="text"
+              value={telegramToken}
+              onChange={(e) => setTelegramToken(e.target.value)}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">Telegram chat id</label>
+            <input
+              type="text"
+              value={telegramChat}
+              onChange={(e) => setTelegramChat(e.target.value)}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
+            />
+          </div>
+        </div>
+        <button
+          onClick={() => saveMutation.mutate()}
+          disabled={saveMutation.isPending}
+          className="px-4 py-2 rounded-lg bg-accent hover:bg-accent/90 disabled:opacity-60 font-semibold text-sm"
+        >
+          {saveMutation.isPending ? 'Saving...' : 'Save'}
+        </button>
+        {msg && <p className="text-xs text-muted">{msg}</p>}
+      </div>
     </div>
   );
 }

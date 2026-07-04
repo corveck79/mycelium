@@ -326,7 +326,26 @@ export const api = {
     }),
   mdblistSync: () =>
     http<{ ok: boolean; added: number }>('/ui/api/mdblist/sync', { method: 'POST' }),
+
+  // Settings (admin)
+  settings: () =>
+    http<{ groups: Array<{ id: string; title: string; items: SettingItem[] }>; hot_reload: string[] }>(
+      '/ui/api/settings',
+    ),
+  setNotificationSettings: (values: Record<string, boolean | string>) =>
+    http<{ ok: boolean }>('/ui/api/settings/notifications', {
+      method: 'POST',
+      body: JSON.stringify(values),
+    }),
 };
+
+export interface SettingItem {
+  key: string;
+  value: any;
+  kind: 'bool' | 'list' | 'int' | 'float' | 'str';
+  overridden: boolean;
+  hot_reload: boolean;
+}
 
 export interface GenreRule {
   media_type: 'movie' | 'tv';

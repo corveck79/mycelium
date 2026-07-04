@@ -1634,6 +1634,29 @@ def ui_api_settings():
     return jsonify(groups=settings.all_for_ui(), hot_reload=list(settings.HOT_RELOAD))
 
 
+_NOTIFICATION_KEYS = {"NOTIFY_ON_SUCCESS", "NOTIFY_ON_FAILURE",
+                      "DISCORD_WEBHOOK_URL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"}
+
+
+@app.post("/ui/api/settings/notifications")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_settings_notifications_set():
+    """Focused write endpoint for the React Settings page's Notifications card."""
+    if not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
+    import settings as _s
+    p = request.get_json(silent=True) or {}
+    for key, value in p.items():
+        if key not in _NOTIFICATION_KEYS:
+            continue
+        if key in _s._BOOL_KEYS:
+            _s.set(key, bool(value))
+        else:
+            _s.set(key, value)
+    return jsonify(ok=True)
+
+
 @app.post("/ui/settings")
 def ui_save_settings():
     import settings
