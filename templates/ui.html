@@ -655,39 +655,6 @@
       </div>
     </form>
 
-    <div class="card" style="margin-top:20px">
-      <div class="card-title">Radarr / Sonarr bulk import</div>
-      <p class="dim" style="font-size:12px;margin-bottom:10px">
-        Configure RADARR_URL/SONARR_URL + API keys above, save, then click test → import.
-        Import skips items already in your Mycelium library and runs in the background.
-      </p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-        <button type="button" class="btn btn-secondary btn-sm" onclick="arrTest('radarr')">Test Radarr</button>
-        <button type="button" class="btn btn-primary btn-sm" onclick="arrRun('radarr')">▶ Import Radarr</button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="arrTest('sonarr')">Test Sonarr</button>
-        <button type="button" class="btn btn-primary btn-sm" onclick="arrRun('sonarr')">▶ Import Sonarr</button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="arrStatus()">↻ Status</button>
-      </div>
-      <div id="arr-status" class="dim" style="font-size:12px;font-family:monospace"></div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <div class="card-title">Zilean native index</div>
-      <p class="dim" style="font-size:12px;margin-bottom:10px">
-        Set ZILEAN_MODE above to <code>native</code> to use a built-in DMM hash index
-        instead of an external Zilean service, then save. Sync downloads the
-        community hashlist snapshot (may take a while the first time). If you
-        already run an external Zilean + Postgres and don't want to re-scrape,
-        fill in the Postgres connection fields above and use Import instead.
-      </p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-        <button type="button" class="btn btn-primary btn-sm" onclick="zileanSync()">▶ Sync now</button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="zileanImport()">⬇ Import from Postgres</button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="zileanStatus()">↻ Status</button>
-      </div>
-      <div id="zilean-status" class="dim" style="font-size:12px;font-family:monospace"></div>
-    </div>
-
     <div class="card" style="margin-top:16px">
       <div class="card-title">Auto-add now</div>
       <p class="dim" style="font-size:12px;margin-bottom:10px">
@@ -1282,6 +1249,48 @@
         body += '</table>';
         card.innerHTML = body;
         root.appendChild(card);
+
+        // Action buttons that belong to this specific settings group  -  shown
+        // right below the fields they act on instead of scattered elsewhere.
+        if (g.id === 'arr_import') {
+          const actions = document.createElement('div');
+          actions.className = 'card';
+          actions.style.cssText = 'margin-bottom:12px;margin-top:-4px';
+          actions.innerHTML = `
+            <p class="dim" style="font-size:12px;margin-bottom:10px">
+              Save the fields above first, then test → import. Import skips items already in your Mycelium library and runs in the background.
+            </p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="arrTest('radarr')">Test Radarr</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="arrRun('radarr')">▶ Import Radarr</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="arrTest('sonarr')">Test Sonarr</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="arrRun('sonarr')">▶ Import Sonarr</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="arrStatus()">↻ Status</button>
+            </div>
+            <div id="arr-status" class="dim" style="font-size:12px;font-family:monospace"></div>
+          `;
+          root.appendChild(actions);
+        }
+        if (g.id === 'zilean_native') {
+          const actions = document.createElement('div');
+          actions.className = 'card';
+          actions.style.cssText = 'margin-bottom:12px;margin-top:-4px';
+          actions.innerHTML = `
+            <p class="dim" style="font-size:12px;margin-bottom:10px">
+              Set ZILEAN_MODE above to <code>native</code> and save first. Sync downloads the
+              community hashlist snapshot (may take a while the first time). If you already run
+              an external Zilean + Postgres and don't want to re-scrape, fill in the Postgres
+              connection fields above and use Import instead.
+            </p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+              <button type="button" class="btn btn-primary btn-sm" onclick="zileanSync()">▶ Sync now</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="zileanImport()">⬇ Import from Postgres</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="zileanStatus()">↻ Status</button>
+            </div>
+            <div id="zilean-status" class="dim" style="font-size:12px;font-family:monospace"></div>
+          `;
+          root.appendChild(actions);
+        }
       });
       // Live banner: show when a restart-required field changes from initial
       const form = document.getElementById('settings-form');
