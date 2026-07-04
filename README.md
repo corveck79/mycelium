@@ -19,7 +19,7 @@
   Inspired by <a href="https://docs.elfhosted.com/app/catbox/">elfhosted CatBox</a>:
   torrents are added on-demand at playback, released after idle time.
   Your library can be as large as you want.<br>
-  Also includes <strong>Mycelium Spore</strong> — a custom-built Plex integration that streams
+  Also includes <strong>Mycelium Spore</strong>  -  a custom-built Plex integration that streams
   directly from TorBox CDN without rclone, FUSE, or local storage. <em>(experimental)</em>
 </p>
 
@@ -69,7 +69,7 @@ that streams directly from TorBox or RealDebrid. No FUSE, no rclone, no local do
 | | Path | Purpose |
 |--|--|--|
 | **SPA** | `/` | Discover, Library, Watchlist, multi-user request management |
-| **Admin** | `/admin` | Overview, requests, blacklist, maintenance, settings, logs |
+| **Admin** | `/admin` | Two tabs: **Dashboard** (users, Radarr/Sonarr import, Auto-approve, genre tabs, maintenance) and **Classic** (overview, blacklist, repair, settings, logs) |
 
 **Works with:**
 
@@ -98,7 +98,9 @@ One image, two profiles. Choose in the setup wizard or toggle via Settings (rest
 | **Full only** | | |
 | React SPA (Discover, Library, Watchlist) | ✅ | ❌ |
 | Web Player (browser streaming) | ✅ | ❌ |
-| Trakt scrobbling | ✅ | ❌ |
+| Trakt scrobbling + auto-request | ✅ | ❌ |
+| MDBList integration | ✅ | ❌ |
+| Auto-approve (genre rules + favorite actors) | ✅ | ❌ |
 | Auto-upgrade + season-pack consolidation | ✅ | ❌ |
 | Trending / auto-add | ✅ | ❌ |
 | **Resources (idle)** | ~290 MB / ~1% CPU | ~140 MB / ~0% CPU |
@@ -152,9 +154,12 @@ sequenceDiagram
 
 - Poster grids: trending, popular, top rated, now playing, upcoming
 - Per-service filtering: Netflix, Prime, Disney+, HBO Max, Apple TV+, and more
-- Live multi-search across movies and series
+- Admin-configurable **genre tabs**: extra Discover rows per genre, optionally bounded by a year range
+- Per-user **language filter**: include/exclude content by original language
+- Real search bar in the topbar, live multi-search across movies and series
 - Detail modals with cast, trailers, seasons, where-to-stream badges, recommendations
-- Library view with movies and per-episode series status
+- **Clickable cast**: click an actor to see bio + filmography, with a Follow button (see Auto-approve)
+- Library view with movies and per-episode series status; click-to-open-in-Jellyfin toggle in Settings
 - Watchlist per user, multi-user with admin approval flow
 
 </details>
@@ -167,6 +172,20 @@ sequenceDiagram
 - **Season-pack consolidation**: swaps per-episode torrents for one cached pack
 - **Trending pre-cache**: TMDB top-N auto-adds if already cached on TorBox
 - **Radarr / Sonarr bulk import**: pull your entire monitored library in one click
+- **Fake-quality filter**: rejects cams/trailers mislabeled as high resolution using a file-size-vs-runtime plausibility check
+- **Unreleased-title guard**: blocks pre-release titles that would otherwise pull in fake/cam "cached" releases
+
+</details>
+
+<details>
+<summary><b>Auto-approve</b></summary>
+
+Admin-configurable automatic requesting, on top of the manual SPA/webhook paths.
+
+- **Genre rules**: pick a genre + optional year range (e.g. Action movies 2015-2024); enabled rules fill into one shared daily budget
+- **Favorite actors**: any user can follow an actor from their detail page; a separate daily budget auto-requests new titles from their filmography, skipping talk shows/news/reality TV
+- Both reuse the normal request pipeline, so quality filtering, release-date guards, and dedup against your library all apply exactly as they do for manual requests
+- Configurable in Admin > Dashboard
 
 </details>
 
@@ -179,6 +198,7 @@ sequenceDiagram
 - Self-healing strm probe and cleanup task
 - Watchdog: deadman switch and disk-space alerts
 - Daily DB backup (14 retained), recovery wizard, library import after disaster
+- **TorBox library scan** (Admin > Dashboard > Maintenance): backfills `.strm` files for anything already cached in TorBox that Mycelium has no record of, e.g. after a DB reset
 
 </details>
 
@@ -201,15 +221,26 @@ Stream directly in the browser - no Jellyfin client needed.
 
 - Watched badges on posters in Discover and Library
 - Automatic scrobble on playback via Web Player
+- **Auto-request from watchlist**: new watchlist items are queued for download (not just synced into the browsing watchlist), capped daily
 - Connect via Settings > Trakt (OAuth device flow, no redirect URI needed)
+
+</details>
+
+<details>
+<summary><b>MDBList</b></summary>
+
+- Connect your own [MDBList](https://mdblist.com) API key (no OAuth, just a key from your account preferences)
+- Pick which of your lists to sync
+- **Auto-request from list**: new items are queued for download, capped daily
+- Connect via Settings > MDBList
 
 </details>
 
 ---
 
-## 🍄 Mycelium Spore *(experimental — work in progress)*
+## 🍄 Mycelium Spore *(experimental  -  work in progress)*
 
-**Mycelium Spore** is a custom-built Plex integration developed specifically for Mycelium. Unlike solutions that require rclone, FUSE mounts, or virtual filesystems, Spore works entirely through a lightweight transcoder wrapper — no kernel modules, no extra daemons, no local storage.
+**Mycelium Spore** is a custom-built Plex integration developed specifically for Mycelium. Unlike solutions that require rclone, FUSE mounts, or virtual filesystems, Spore works entirely through a lightweight transcoder wrapper  -  no kernel modules, no extra daemons, no local storage.
 
 Plex streams directly from TorBox CDN on demand.
 
@@ -222,7 +253,7 @@ Plex scans stub .mkv files  →  user presses Play
 ```
 
 **How it works:**
-- Mycelium writes a small stub `.mkv` per item into a Plex-scanned folder — no real video data, just enough metadata for Plex to display the library
+- Mycelium writes a small stub `.mkv` per item into a Plex-scanned folder  -  no real video data, just enough metadata for Plex to display the library
 - A transcoder wrapper intercepts every playback request and replaces the stub path with a live CDN stream URL
 - On first play, Mycelium builds a fast-start cache in the background so subsequent seeks are instant
 - Audio and subtitle tracks are automatically updated in the stub after first play
@@ -253,7 +284,7 @@ entrypoint:
     exec /init
 ```
 
-> **Status:** Confirmed working on Android (Plex app) and Linux desktop. Shield TV testing in progress. Dolby Vision and lossless audio passthrough are not supported — Plex always transcodes via the wrapper.
+> **Status:** Confirmed working on Android (Plex app) and Linux desktop. Shield TV testing in progress. Dolby Vision and lossless audio passthrough are not supported  -  Plex always transcodes via the wrapper.
 
 ---
 
@@ -287,6 +318,8 @@ Open **`http://<your-host>:8088`** - the setup wizard walks you through everythi
 - [RealDebrid](https://real-debrid.com) - fallback debrid when TorBox misses
 - [Jellyseerr](https://jellyseerr.dev) / [Overseerr](https://overseerr.dev) - request portal via webhook
 - [OpenSubtitles](https://www.opensubtitles.com/en/consumers) - auto subtitle download
+- [Trakt](https://trakt.tv) - watched badges, scrobbling, watchlist auto-request
+- [MDBList](https://mdblist.com) - list sync + auto-request
 
 ---
 
@@ -323,6 +356,9 @@ flowchart LR
 | `upgrader.py` | Auto-upgrade quality + season-pack consolidation |
 | `cleanup.py` | Repair broken strms, merge duplicates |
 | `arr_import.py` | Radarr / Sonarr bulk import |
+| `auto_approve.py` | Genre-rule fill + favorite-actor auto-request |
+| `mdblist.py` | MDBList list sync + auto-request |
+| `plugins/trakt/` | Trakt OAuth, watchlist sync, watched status, scrobble, auto-request |
 | `webdav.py` | Optional WebDAV server for Plex/Emby |
 | `app.py` | Flask app, scheduler, all routes |
 
@@ -361,9 +397,13 @@ Full reference: [`.env.example`](.env.example). Key variables:
 | `AUTO_UPGRADE_ENABLED` | `true` | Periodic upgrade scan |
 | `MULTI_DEBRID_ENABLED` | `false` | RealDebrid fallback when TorBox misses |
 | `WEBDAV_ENABLED` | `false` | Serve library as virtual .mkv files (Plex) |
-| `DISCORD_WEBHOOK_URL` | *(empty)* | Optional notifications |
+| `DISCORD_WEBHOOK_URL` | *(empty)* | Optional notifications (also configurable in Settings > Notifications) |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | *(empty)* | Optional notifications |
 | `OPENSUBTITLES_API_KEY` | *(empty)* | Auto subtitle download |
+| `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET` | *(empty)* | Trakt app credentials, from [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications) |
+| `TRAKT_AUTO_REQUEST_CAP` / `MDBLIST_AUTO_REQUEST_CAP` | `10` | Max new items auto-requested per sync run |
+| `AUTO_APPROVE_DAILY_LIMIT` / `AUTO_APPROVE_ACTOR_DAILY_LIMIT` | `5` | Daily budget for genre-rule fill / favorite-actor fill |
+| `EXCLUDE_UNDERSIZED_RELEASES` | `true` | Reject releases too small to be real for their claimed quality + runtime |
 | `METRICS_TOKEN` | *(empty)* | Bearer token for `/metrics` scraping |
 
 ---
@@ -418,7 +458,7 @@ CatBox is a managed hosting service. Mycelium runs on your own hardware with you
 <details>
 <summary><b>How does Plex work?</b></summary>
 
-Use **Mycelium Spore** — see the [Spore section](#-mycelium-spore-experimental--work-in-progress) for setup. No rclone or FUSE required.
+Use **Mycelium Spore**  -  see the [Spore section](#-mycelium-spore-experimental--work-in-progress) for setup. No rclone or FUSE required.
 </details>
 
 <details>
