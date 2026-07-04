@@ -2,7 +2,8 @@ import logging
 
 import requests
 
-from config import ZILEAN_URL
+import settings as _settings
+from config import ZILEAN_URL as _ZILEAN_URL_DEFAULT
 from torrentio import TorrentioStream, _looks_like_season_pack
 
 log = logging.getLogger(__name__)
@@ -67,7 +68,8 @@ def fetch_streams(
         params["Season"] = season
     if episode is not None:
         params["Episode"] = episode
-    url = f"{ZILEAN_URL.rstrip('/')}/dmm/filtered"
+    zilean_url = _settings.get("ZILEAN_URL", _ZILEAN_URL_DEFAULT)
+    url = f"{zilean_url.rstrip('/')}/dmm/filtered"
     log.info("Querying Zilean: %s params=%s", url, params)
     try:
         resp = requests.get(url, params=params, timeout=timeout)

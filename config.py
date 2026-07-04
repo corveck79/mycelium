@@ -56,6 +56,11 @@ EXCLUDE_DV_P5 = _env("EXCLUDE_DV_P5", "true").lower() in ("1", "true", "yes")
 # "only cam available, allowing them" fallback). When false, cam is allowed
 # only if it's the sole option.
 STRICT_NO_CAM = _env("STRICT_NO_CAM", "false").lower() in ("1", "true", "yes")
+# Reject candidates whose file size is implausibly small for their claimed
+# quality and the title's real (TMDB) runtime  -  catches releases that lie
+# about their quality (a cam mislabeled as "2160p") or aren't the full title
+# at all (a trailer standing in for the movie).
+EXCLUDE_UNDERSIZED_RELEASES = _env("EXCLUDE_UNDERSIZED_RELEASES", "true").lower() in ("1", "true", "yes")
 PREFER_WEBDL = _env("PREFER_WEBDL", "true").lower() in ("1", "true", "yes")
 PREFER_HEVC = _env("PREFER_HEVC", "true").lower() in ("1", "true", "yes")
 # Minimum seeders to include a candidate (0 = no filter; unknown seeders always pass).

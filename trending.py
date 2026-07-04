@@ -10,22 +10,19 @@ import logging
 
 import db
 import processor
+import settings as _settings
 import tmdb
-from config import (
-    AUTO_ADD_MIN_RATING, AUTO_ADD_MIN_VOTES, AUTO_ADD_REGION,
-    DISNEY_NL_TOP_COUNT, NETFLIX_NL_TOP_COUNT, POPULAR_MOVIE_COUNT,
-    POPULAR_TV_COUNT, PRIME_NL_TOP_COUNT, TRENDING_PRECACHE_COUNT,
-    TRENDING_TV_COUNT,
-)
 from webhook_parser import MediaRequest
 
 log = logging.getLogger(__name__)
 
 
 def _passes_filters(item: dict) -> bool:
-    if (item.get("rating") or 0) < AUTO_ADD_MIN_RATING:
+    min_rating = _settings.get("AUTO_ADD_MIN_RATING")
+    min_votes = _settings.get("AUTO_ADD_MIN_VOTES")
+    if (item.get("rating") or 0) < min_rating:
         return False
-    if (item.get("votes") or 0) < AUTO_ADD_MIN_VOTES:
+    if (item.get("votes") or 0) < min_votes:
         return False
     return True
 
@@ -112,40 +109,49 @@ def run() -> int:
     seen_movies = {r["imdb_id"] for r in db.get_recent(2000) if r.get("media_type") == "movie"}
     seen_series = {s["imdb_id"] for s in db.get_all_monitored_series()}
 
+    region = _settings.get("AUTO_ADD_REGION")
+    trending_precache_count = _settings.get("TRENDING_PRECACHE_COUNT")
+    popular_movie_count = _settings.get("POPULAR_MOVIE_COUNT")
+    netflix_nl_top_count = _settings.get("NETFLIX_NL_TOP_COUNT")
+    prime_nl_top_count = _settings.get("PRIME_NL_TOP_COUNT")
+    disney_nl_top_count = _settings.get("DISNEY_NL_TOP_COUNT")
+    trending_tv_count = _settings.get("TRENDING_TV_COUNT")
+    popular_tv_count = _settings.get("POPULAR_TV_COUNT")
+
     # Movies
-    if TRENDING_PRECACHE_COUNT > 0:
+    if trending_precache_count > 0:
         total += _run_movie_category("trending-movie-week",
                                        tmdb.trending("movie", "week"),
-                                       TRENDING_PRECACHE_COUNT, seen_movies)
-    if POPULAR_MOVIE_COUNT > 0:
+                                       trending_precache_count, seen_movies)
+    if popular_movie_count > 0:
         total += _run_movie_category("popular-movies",
-                                       tmdb.popular("movie", region=AUTO_ADD_REGION),
-                                       POPULAR_MOVIE_COUNT, seen_movies)
-    if NETFLIX_NL_TOP_COUNT > 0:
+                                       tmdb.popular("movie", region=region),
+                                       popular_movie_count, seen_movies)
+    if netflix_nl_top_count > 0:
         total += _run_movie_category("netflix-nl-top",
                                        tmdb.discover_by_provider("movie", tmdb.NL_PROVIDERS["netflix"],
-                                                                  region=AUTO_ADD_REGION),
-                                       NETFLIX_NL_TOP_COUNT, seen_movies)
-    if PRIME_NL_TOP_COUNT > 0:
+                                                                  region=region),
+                                       netflix_nl_top_count, seen_movies)
+    if prime_nl_top_count > 0:
         total += _run_movie_category("prime-nl-top",
                                        tmdb.discover_by_provider("movie", tmdb.NL_PROVIDERS["amazon_prime"],
-                                                                  region=AUTO_ADD_REGION),
-                                       PRIME_NL_TOP_COUNT, seen_movies)
-    if DISNEY_NL_TOP_COUNT > 0:
+                                                                  region=region),
+                                       prime_nl_top_count, seen_movies)
+    if disney_nl_top_count > 0:
         total += _run_movie_category("disney-nl-top",
                                        tmdb.discover_by_provider("movie", tmdb.NL_PROVIDERS["disney_plus"],
-                                                                  region=AUTO_ADD_REGION),
-                                       DISNEY_NL_TOP_COUNT, seen_movies)
+                                                                  region=region),
+                                       disney_nl_top_count, seen_movies)
 
     # Series
-    if TRENDING_TV_COUNT > 0:
+    if trending_tv_count > 0:
         total += _run_series_category("trending-tv-week",
                                         tmdb.trending("tv", "week"),
-                                        TRENDING_TV_COUNT, seen_series)
-    if POPULAR_TV_COUNT > 0:
+                                        trending_tv_count, seen_series)
+    if popular_tv_count > 0:
         total += _run_series_category("popular-tv",
                                         tmdb.popular("tv"),
-                                        POPULAR_TV_COUNT, seen_series)
+                                        popular_tv_count, seen_series)
 
     log.info("Auto-add: %d total item(s) added across all categories", total)
     return total

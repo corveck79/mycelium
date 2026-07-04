@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 # Type hints per key  -  drives parsing of stored strings.
 _BOOL_KEYS = {
+    "EXCLUDE_UNDERSIZED_RELEASES",
     "CATBOX_MODE",
     "CATBOX_PRELOAD",
     "ALLOW_4K",
@@ -45,6 +46,9 @@ _LIST_KEYS = {
     "AUDIO_LANGUAGE_PREFERENCE",
     "EXCLUDE_LANGUAGES",
     "OPENSUBTITLES_LANGUAGES",
+}
+_FLOAT_KEYS = {
+    "AUTO_ADD_MIN_RATING",
 }
 _INT_KEYS = {
     "MIN_SEEDERS",
@@ -101,6 +105,7 @@ HOT_RELOAD = {
     "EXCLUDE_BLURAY",
     "EXCLUDE_CAM",
     "STRICT_NO_CAM",
+    "EXCLUDE_UNDERSIZED_RELEASES",
     "PREFER_WEBDL",
     "PREFER_HEVC",
     "MIN_SEEDERS",
@@ -108,6 +113,8 @@ HOT_RELOAD = {
     "AUDIO_LANGUAGE_PREFERENCE",
     "EXCLUDE_LANGUAGES",
     "OPENSUBTITLES_LANGUAGES",
+    "OPENSUBTITLES_API_KEY",
+    "OPENSUBTITLES_USER_AGENT",
     "BLACKLIST_FAIL_THRESHOLD",
     "WEB_PLAYER_MAX_SIZE_GB",
     "NOTIFY_ON_SUCCESS",
@@ -165,13 +172,15 @@ SETTING_GROUPS = [
         "keys": [
             "QUALITY_PREFERENCE", "ALLOW_4K", "EXCLUDE_REMUX", "EXCLUDE_BLURAY", "EXCLUDE_CAM",
             "PREFER_WEBDL", "PREFER_HEVC", "MIN_SEEDERS", "MAX_SIZE_GB", "STRICT_NO_CAM",
+            "EXCLUDE_UNDERSIZED_RELEASES",
             "WEB_PLAYER_MAX_SIZE_GB",
         ],
     },
     {
         "id": "languages",
         "title": "Languages & subtitles",
-        "keys": ["AUDIO_LANGUAGE_PREFERENCE", "EXCLUDE_LANGUAGES", "OPENSUBTITLES_LANGUAGES", "OPENSUBTITLES_API_KEY"],
+        "keys": ["AUDIO_LANGUAGE_PREFERENCE", "EXCLUDE_LANGUAGES", "OPENSUBTITLES_LANGUAGES",
+                 "OPENSUBTITLES_API_KEY", "OPENSUBTITLES_USER_AGENT"],
     },
     {
         "id": "auto",
@@ -242,6 +251,11 @@ def _coerce(key: str, raw: str | None):
             return int(raw)
         except (TypeError, ValueError):
             return None
+    if key in _FLOAT_KEYS:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
     return raw
 
 
@@ -286,6 +300,7 @@ def all_for_ui() -> list[dict]:
                 "bool" if key in _BOOL_KEYS
                 else "list" if key in _LIST_KEYS
                 else "int" if key in _INT_KEYS
+                else "float" if key in _FLOAT_KEYS
                 else "str"
             )
             items.append({

@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 import db
 import settings as _settings
 import torbox
-from config import CATBOX_HOST, CATBOX_IDLE_MINUTES
+from config import CATBOX_HOST, CATBOX_IDLE_MINUTES as _CATBOX_IDLE_MINUTES_DEFAULT
 
 log = logging.getLogger(__name__)
 
@@ -733,7 +733,8 @@ def _schedule_next_episode_preload(token: str) -> None:
 
 def release_idle() -> int:
     """Remove TorBox items idle longer than CATBOX_IDLE_MINUTES. Returns count released."""
-    cutoff = datetime.utcnow() - timedelta(minutes=CATBOX_IDLE_MINUTES)
+    idle_minutes = _settings.get("CATBOX_IDLE_MINUTES", _CATBOX_IDLE_MINUTES_DEFAULT)
+    cutoff = datetime.utcnow() - timedelta(minutes=idle_minutes)
     cutoff_iso = cutoff.strftime("%Y-%m-%d %H:%M:%S")
     items = db.get_idle_virtual_items(cutoff_iso)
     released = 0

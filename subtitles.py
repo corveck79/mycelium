@@ -11,7 +11,6 @@ from pathlib import Path
 import requests
 
 import settings as _settings
-from config import OPENSUBTITLES_USER_AGENT
 
 log = logging.getLogger(__name__)
 _BASE = "https://api.opensubtitles.com/api/v1"
@@ -19,6 +18,10 @@ _BASE = "https://api.opensubtitles.com/api/v1"
 
 def _api_key() -> str:
     return _settings.get("OPENSUBTITLES_API_KEY", "")
+
+
+def _user_agent() -> str:
+    return _settings.get("OPENSUBTITLES_USER_AGENT", "Mycelium v1.0")
 
 
 def _languages() -> list[str]:
@@ -29,7 +32,7 @@ def _languages() -> list[str]:
 def _headers() -> dict:
     return {
         "Api-Key": _api_key(),
-        "User-Agent": OPENSUBTITLES_USER_AGENT,
+        "User-Agent": _user_agent(),
         "Accept": "application/json",
         "Content-Type": "application/json",
     }

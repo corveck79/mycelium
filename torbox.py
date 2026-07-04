@@ -6,12 +6,17 @@ from collections import deque
 import requests
 
 from config import (
-    TORBOX_BASE_URL,
+    TORBOX_BASE_URL as _TORBOX_BASE_URL_DEFAULT,
     TORBOX_POLL_INTERVAL_SEC,
     TORBOX_POLL_TIMEOUT_SEC,
 )
 
 log = logging.getLogger(__name__)
+
+
+def _base_url() -> str:
+    import settings
+    return settings.get("TORBOX_BASE_URL", _TORBOX_BASE_URL_DEFAULT)
 
 
 def _headers() -> dict[str, str]:
@@ -84,7 +89,7 @@ class RateLimited(Exception):
 
 
 def add_magnet(magnet: str, timeout: int = 30, reason: str = "unknown") -> dict:
-    url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/createtorrent"
+    url = f"{_base_url().rstrip('/')}/torrents/createtorrent"
     # Client-side guard: check both the 60/hour and the 10/minute edge limits.
     usage_hour = createtorrent_usage(window_sec=3600)
     usage_min  = createtorrent_usage(window_sec=60)
@@ -136,7 +141,7 @@ def list_torrents(timeout: int = 30, force_refresh: bool = False) -> list[dict]:
         cached = _mylist_cache["items"]
         if cached is not None and (_t.monotonic() - _mylist_cache["ts"]) < _MYLIST_TTL_SECONDS:
             return cached
-    url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/mylist"
+    url = f"{_base_url().rstrip('/')}/torrents/mylist"
     all_items: list[dict] = []
     seen_ids: set[int] = set()
     offset = 0
@@ -189,7 +194,7 @@ def find_by_hash(info_hash: str, force_refresh: bool = False) -> dict | None:
 
 def find_by_id(torrent_id: int, timeout: int = 15) -> dict | None:
     """Fetch a single torrent by ID directly from TorBox  -  not limited to mylist top-1000."""
-    url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/mylist"
+    url = f"{_base_url().rstrip('/')}/torrents/mylist"
     try:
         resp = requests.get(url, headers=_headers(), timeout=timeout,
                             params={"id": torrent_id})
@@ -208,7 +213,7 @@ def find_by_id(torrent_id: int, timeout: int = 15) -> dict | None:
 
 def get_user_info(timeout: int = 10) -> dict | None:
     """Return TorBox user info (subscription, plan, etc) or None on failure."""
-    url = f"{TORBOX_BASE_URL.rstrip('/')}/user/me"
+    url = f"{_base_url().rstrip('/')}/user/me"
     try:
         resp = requests.get(url, headers=_headers(), timeout=timeout)
         resp.raise_for_status()
@@ -262,7 +267,7 @@ def check_quota_and_warn(threshold_count: int = 200, threshold_gb: int = 4000) -
 
 
 def delete_torrent(torrent_id: int, timeout: int = 15) -> bool:
-    url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/controltorrent"
+    url = f"{_base_url().rstrip('/')}/torrents/controltorrent"
     try:
         resp = requests.post(
             url, headers=_headers(),
@@ -289,7 +294,7 @@ def check_cached(hashes: list[str], timeout: int = 15) -> set[str]:
             cached |= check_cached(hashes[i:i + _BATCH], timeout=timeout)
         log.info("TorBox cache check: %d/%d hashes cached (batched)", len(cached), len(hashes))
         return cached
-    url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/checkcached"
+    url = f"{_base_url().rstrip('/')}/torrents/checkcached"
     params = {"hash": ",".join(hashes), "format": "object"}
     try:
         resp = requests.get(url, headers=_headers(), params=params, timeout=timeout)

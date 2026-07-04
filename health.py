@@ -4,13 +4,7 @@ import requests
 
 import config
 import settings
-from config import (
-    TMDB_API_KEY,
-    TORBOX_BASE_URL,
-    TORRENTIO_BASE_URL,
-    ZILEAN_ENABLED,
-    ZILEAN_URL,
-)
+from config import TORRENTIO_BASE_URL
 
 log = logging.getLogger(__name__)
 
@@ -33,19 +27,20 @@ def check_all() -> list[dict]:
     services = []
     services.append(_ping(
         "TorBox",
-        f"{TORBOX_BASE_URL.rstrip('/')}/torrents/mylist",
+        f"{_s('TORBOX_BASE_URL').rstrip('/')}/torrents/mylist",
         headers={"Authorization": f"Bearer {settings.get('TORBOX_API_KEY', '')}"},
     ))
-    if ZILEAN_ENABLED:
-        services.append(_ping("Zilean", f"{ZILEAN_URL.rstrip('/')}/healthz"))
+    if settings.get("ZILEAN_ENABLED", False):
+        services.append(_ping("Zilean", f"{_s('ZILEAN_URL').rstrip('/')}/healthz"))
     else:
         services.append({"name": "Zilean", "status": "disabled"})
     services.append(_ping("Torrentio", f"{TORRENTIO_BASE_URL.rstrip('/')}/manifest.json"))
-    if TMDB_API_KEY:
+    tmdb_api_key = _s("TMDB_API_KEY")
+    if tmdb_api_key:
         services.append(_ping(
             "TMDB",
             "https://api.themoviedb.org/3/configuration",
-            headers={"Authorization": f"Bearer {TMDB_API_KEY}", "Accept": "application/json"},
+            headers={"Authorization": f"Bearer {tmdb_api_key}", "Accept": "application/json"},
         ))
     else:
         services.append({"name": "TMDB", "status": "disabled"})
