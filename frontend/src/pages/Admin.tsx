@@ -244,11 +244,11 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className={`w-10 h-5 rounded-full transition relative ${on ? 'bg-accent' : 'bg-border'}`}
+      className={`w-10 h-5 rounded-full transition-colors flex items-center px-0.5 ${on ? 'bg-accent' : 'bg-border'}`}
     >
       <span
-        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-          on ? 'translate-x-5' : 'translate-x-0.5'
+        className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${
+          on ? 'translate-x-5' : 'translate-x-0'
         }`}
       />
     </button>
