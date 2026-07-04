@@ -2,6 +2,44 @@
 
 All notable changes to Mycelium are documented in this file.
 
+## [0.6.0] - 2026-07-04
+
+### Credits
+
+Several of the bugfixes in this release were discovered and/or confirmed through the work of [Ventrex](https://github.com/Ventrex/mycelium) in his fork ("VenFlix") and the accompanying [GitHub Discussions](https://github.com/corveck79/mycelium/discussions). Thanks for digging into these issues and sharing the fixes/ideas with the community.
+
+Thanks also to [Damosso](https://github.com/Damosso) for the Seerr webhook secret tip in [#41](https://github.com/corveck79/mycelium/issues/41), which shaped a docs fix earlier in this cycle.
+
+### Added
+
+- **Trakt**: auto-request new watchlist items for download (not just watchlist sync), capped daily, built into the existing Trakt plugin
+- **MDBList integration**: connect your own API key, pick lists to sync, capped auto-request
+- **Auto-approve**: per-genre rules with year ranges, follow favorite actors (auto-requests their filmography, excludes talk shows/soaps), shared daily budget
+- **Discover genre tabs**: admin-configurable browse rows per genre + year range
+- **Language filter**: per-user include/exclude of content by original language in Discover
+- **Clickable cast**: cast in the detail modal opens an actor page with bio + filmography + Follow button
+- **TorBox library scan**: reads existing TorBox cache and creates `.strm` files for anything missing (e.g. after a DB reset)
+- **Notification settings** in the React Settings page (Discord/Telegram)
+- **Real topbar search bar** instead of just a link to the search page
+- **React Admin dashboard finally routed**: `/admin` now shows a tab between the new dashboard (user management, Radarr/Sonarr import, Auto-approve, genre tabs, maintenance) and the existing Jinja page - this page already existed but was never wired to a route
+
+### Fixed
+
+- Settings-UI overrides were silently ignored in several places (Zilean, TMDB, RealDebrid, TorBox, OpenSubtitles, catbox) due to frozen `config.py` imports instead of `settings.get()`
+- Mislabeled cams/trailers (e.g. "2160p" that's actually a cam) are now rejected based on physically plausible file size vs. TMDB runtime
+- Unreleased titles could pull in fake/cam releases - now blocked via TMDB release date
+- Multi-season series only got season 1 into the library
+- Duplicate episode tokens/strms when title sanitizing landed differently
+- `db.insert_request()` could update the wrong row on retry (SQLite `lastrowid` quirk), leaving requests permanently stuck on "rate_limited"
+- TorBox timeouts were treated as success, writing a `.strm` before the torrent was actually ready
+- Series could end up split across multiple folders due to varying release names
+- Jellyfin library refresh had no debounce, could fire excessively during bulk operations
+- Raw IMDb IDs (`tt1234567`) instead of titles shown in notifications/UI for requests without a title in the payload
+- Toggle switches in the admin user panel rendered incorrectly (knob always on the right regardless of state)
+- Clickable cast was invisible due to a z-index conflict between the detail and actor modals
+- Removed a duplicate, colliding Trakt integration (a new build on top of an already-existing plugin) - including a database schema conflict that broke the existing plugin
+- Web Player: `/ui/api/web-player/status/<job_id>` silently dropped `token`/`stream_type` from its JSON response, so the frontend always fell into the HLS.js branch (pointed at a raw MP4 redirect instead of a playlist) instead of direct-playing eligible files, causing an infinite retry/timeout loop
+
 ## [0.5.2] - 2026-06-12
 
 ### Added

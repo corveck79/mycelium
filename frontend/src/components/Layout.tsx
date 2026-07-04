@@ -74,7 +74,7 @@ export default function Layout() {
           ) : (
             <a href="/login" className="hover:text-white">Sign in</a>
           )}
-          <div className="mt-2 text-center text-[10px] opacity-50">v0.2.0-beta</div>
+          <div className="mt-2 text-center text-[10px] opacity-50">v0.6.0-beta</div>
         </div>
       </aside>
       {/* Drawer overlay */}

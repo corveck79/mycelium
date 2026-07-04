@@ -1,5 +1,35 @@
 [
   {
+    "version": "0.6.0",
+    "date": "2026-07-04",
+    "notes": [
+      "Added: Trakt auto-request from watchlist (capped daily), built into the existing Trakt plugin",
+      "Added: MDBList integration (own API key, list sync, capped auto-request)",
+      "Added: Auto-approve - per-genre rules with year ranges, follow favorite actors",
+      "Added: Discover genre tabs (admin-configurable, per genre + year range)",
+      "Added: per-user language filter (include/exclude) in Discover",
+      "Added: clickable cast opens actor page with bio, filmography and Follow button",
+      "Added: TorBox library scan to backfill missing .strm files",
+      "Added: notification settings (Discord/Telegram) in React Settings",
+      "Added: real topbar search bar",
+      "Added: React Admin dashboard finally routed at /admin (tab next to the classic Jinja page)",
+      "Fix: settings-UI overrides silently ignored for Zilean, TMDB, RealDebrid, TorBox, OpenSubtitles, catbox",
+      "Fix: mislabeled cams/trailers rejected via file-size-vs-runtime plausibility check",
+      "Fix: unreleased titles could pull in fake/cam releases - now blocked via TMDB release date",
+      "Fix: multi-season series only got season 1 into the library",
+      "Fix: duplicate episode tokens/strms from inconsistent title sanitizing",
+      "Fix: db.insert_request() could update the wrong row on retry, stuck 'rate_limited' requests",
+      "Fix: TorBox timeouts treated as success, writing a .strm before the torrent was ready",
+      "Fix: series split across multiple folders due to varying release names",
+      "Fix: Jellyfin library refresh had no debounce",
+      "Fix: raw IMDb IDs shown instead of titles in notifications/UI",
+      "Fix: admin user-table toggle switches rendered incorrectly",
+      "Fix: clickable cast hidden behind a z-index conflict",
+      "Fix: removed a duplicate, colliding Trakt integration and its database schema conflict",
+      "Fix: Web Player status endpoint dropped token/stream_type, causing an infinite HLS retry loop instead of direct playback"
+    ]
+  },
+  {
     "version": "0.5.2",
     "date": "2026-06-12",
     "notes": [
