@@ -958,6 +958,19 @@ def ui_api_repair_strms():
     return jsonify(**result)
 
 
+@app.post("/ui/api/torbox/scan-library")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_torbox_scan_library():
+    """Scan TorBox's own library for torrents we have no record of (e.g. after
+    a DB reset) and materialize .strm files for them, resolving titles via
+    TMDB where possible."""
+    if not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
+    result = strm_generator.scan_torbox_library()
+    return jsonify(**result)
+
+
 @app.post("/ui/api/spore/backfill")
 @_csrf.exempt
 @auth.require_role("admin")

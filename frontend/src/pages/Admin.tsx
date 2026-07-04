@@ -370,6 +370,26 @@ function MaintenancePanel() {
     }
   };
 
+  const scanTorboxLibrary = async () => {
+    setBusy(true);
+    setResult('Scanning TorBox library…');
+    try {
+      const r = await fetch('/ui/api/torbox/scan-library', { method: 'POST' });
+      const data = await r.json();
+      const parts = [
+        `scanned: ${data.scanned}`,
+        `imported: ${data.imported}`,
+        `skipped: ${data.skipped}`,
+        ...(data.failed ? [`failed: ${data.failed}`] : []),
+      ];
+      setResult('Done  -  ' + parts.join(', ') + (data.imported > 0 ? '  -  do a full Jellyfin library rescan now' : ''));
+    } catch (e: any) {
+      setResult(`Error: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const migrateCanonical = async () => {
     if (!confirm('This renames movie folders to TMDB canonical names and removes duplicates. Jellyfin needs a full rescan afterwards. Continue?')) return;
     setBusy(true);
@@ -439,6 +459,21 @@ function MaintenancePanel() {
             className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50"
           >
             {busy ? 'Scanning…' : 'Repair broken strm files'}
+          </button>
+        </div>
+        <div className="border-t border-border pt-3">
+          <p className="text-sm font-medium mb-1">Scan TorBox library</p>
+          <p className="text-muted text-xs mb-2">
+            Reads everything already cached in your TorBox account and creates .strm files
+            for anything Mycelium has no record of (e.g. after a database reset, or content
+            added outside Mycelium). Resolves titles via TMDB where possible.
+          </p>
+          <button
+            onClick={scanTorboxLibrary}
+            disabled={busy}
+            className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50"
+          >
+            {busy ? 'Scanning…' : 'Scan TorBox library'}
           </button>
         </div>
         {result && <div className="font-mono text-xs text-muted border-t border-border pt-2">{result}</div>}

@@ -261,6 +261,10 @@ export const api = {
     http<{ scanned: number; ok: number; orphaned_tokens: number; relinked: number; deleted: number; skipped: number }>(
       '/ui/api/repair-strms', { method: 'POST' }
     ),
+  scanTorboxLibrary: () =>
+    http<{ scanned: number; imported: number; skipped: number; failed: number }>(
+      '/ui/api/torbox/scan-library', { method: 'POST' }
+    ),
 };
 
 // Image helpers  -  TMDB image CDN

@@ -1674,6 +1674,66 @@ def create_strm_for_torrent(torrent_id: int, title: str, media_type: str,
     return process_torrent(item, canonical_title=title, imdb_id=imdb_id, tmdb_id=tmdb_id)
 
 
+def scan_torbox_library() -> dict:
+    """Reconcile TorBox's own library against ours: find torrents TorBox already
+    has cached that we have no record of (e.g. after a DB reset, or content
+    added outside Mycelium) and materialize .strm files for them.
+
+    For each unknown torrent, guesses title/year/season/episode from the
+    release name, resolves a real title via TMDB when possible so the item
+    lands in a properly named, deduplicated folder (same canonical-title path
+    normal requests use), and falls back to the raw parsed name otherwise.
+    """
+    import torbox as torbox_mod
+    import tmdb
+    items = torbox_mod.list_torrents(force_refresh=True)
+    scanned = imported = skipped = failed = 0
+    for item in items:
+        if not torbox_mod._is_ready(item):
+            continue
+        scanned += 1
+        info_hash = (item.get('hash') or '').lower()
+        if not info_hash:
+            skipped += 1
+            continue
+        if db.get_virtual_item_by_hash(info_hash):
+            skipped += 1
+            continue
+        try:
+            torrent_name = _clean_torrent_name(item.get('name') or '')
+            guess = _parse_info(torrent_name, torrent_name)
+            if not guess:
+                skipped += 1
+                continue
+            media_type = 'series' if guess['type'] == 'episode' else 'movie'
+            imdb_id = None
+            try:
+                if media_type == 'movie':
+                    imdb_id = tmdb.search_movie(guess['title'], guess.get('year'))
+                else:
+                    imdb_id = tmdb.search_tv(guess['title'])
+            except Exception as exc:
+                log.debug("scan_torbox_library: TMDB lookup failed for %r: %s", guess['title'], exc)
+            resolved_title = tmdb.display_title(imdb_id, media_type) if imdb_id else None
+            if resolved_title:
+                title = resolved_title
+            elif guess['type'] == 'movie' and guess.get('year'):
+                title = f"{guess['title']} ({guess['year']})"
+            else:
+                title = guess['title']
+            written = create_strm_for_torrent(item['id'], title, media_type, imdb_id=imdb_id)
+            if written:
+                imported += 1
+            else:
+                skipped += 1
+        except Exception as exc:
+            log.warning("scan_torbox_library: failed for %s: %s", item.get('name'), exc)
+            failed += 1
+    log.info("scan_torbox_library: scanned=%d imported=%d skipped=%d failed=%d",
+              scanned, imported, skipped, failed)
+    return {"scanned": scanned, "imported": imported, "skipped": skipped, "failed": failed}
+
+
 def create_series_strms_from_files(torrent_name: str, files_with_urls: list) -> int:
     """For a season-pack torrent on any debrid provider, write per-episode .strm
     files. files_with_urls is a list of (file_dict_with_path_and_size, direct_url).

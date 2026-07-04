@@ -107,6 +107,50 @@ class TestStrmPath:
         assert "S01E10" in str(p)
 
 
+class TestScanTorboxLibrary:
+    """scan_torbox_library() backfills .strm files for torrents TorBox already
+    has cached that we have no virtual_item record of (e.g. after a DB reset)."""
+
+    def test_imports_unknown_ready_torrent_with_tmdb_title(self, tmp_path, monkeypatch):
+        import tmdb as real_tmdb
+        monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: False)  # CATBOX_MODE off
+        monkeypatch.setattr(sg, "_resolve_url", lambda *a, **kw: "http://cdn.example/x")
+        monkeypatch.setattr(sg.db, "get_virtual_item_by_hash", lambda info_hash: None)
+        monkeypatch.setattr(real_tmdb, "search_movie", lambda title, year=None: "tt0110912")
+        monkeypatch.setattr(real_tmdb, "display_title", lambda imdb_id, media_type: "Pulp Fiction (1994)")
+
+        item = {
+            "id": 1, "name": "Pulp.Fiction.1994.1080p.WEB-DL", "hash": "a" * 40,
+            "files": [{"id": 1, "name": "Pulp.Fiction.1994.1080p.WEB-DL.mkv"}],
+        }
+        sg.torbox_mod.list_torrents = lambda force_refresh=True: [item]
+        sg.torbox_mod._is_ready = lambda item: True
+        sg.torbox_mod.find_by_id = lambda torrent_id: item
+
+        result = sg.scan_torbox_library()
+        assert result == {"scanned": 1, "imported": 1, "skipped": 0, "failed": 0}
+        path = Path(tmp_path) / "movies" / "Pulp Fiction (1994)" / "Pulp Fiction (1994).strm"
+        assert path.exists()
+
+    def test_skips_torrent_already_known(self, monkeypatch):
+        monkeypatch.setattr(sg.db, "get_virtual_item_by_hash", lambda info_hash: {"token": "existing"})
+        item = {"id": 2, "name": "Known.Movie.2020", "hash": "b" * 40, "files": []}
+        sg.torbox_mod.list_torrents = lambda force_refresh=True: [item]
+        sg.torbox_mod._is_ready = lambda item: True
+
+        result = sg.scan_torbox_library()
+        assert result == {"scanned": 1, "imported": 0, "skipped": 1, "failed": 0}
+
+    def test_skips_not_ready_torrents(self, monkeypatch):
+        item = {"id": 3, "name": "Still.Downloading.2020", "hash": "c" * 40, "files": []}
+        sg.torbox_mod.list_torrents = lambda force_refresh=True: [item]
+        sg.torbox_mod._is_ready = lambda item: False
+
+        result = sg.scan_torbox_library()
+        assert result == {"scanned": 0, "imported": 0, "skipped": 0, "failed": 0}
+
+
 class TestProcessTorrentCanonicalTitle:
     """A canonical_title/imdb_id lets a fresh torrent add land in the same
     series folder every time instead of re-deriving a (possibly different)
