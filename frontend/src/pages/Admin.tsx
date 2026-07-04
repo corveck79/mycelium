@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
+import type { GenreRule } from '../api';
 import { usePlugins } from '../hooks/usePlugins';
 
 export default function Admin() {
@@ -157,6 +158,7 @@ export default function Admin() {
       </section>
 
       <ArrImportPanel />
+      <AutoApprovePanel />
       <MaintenancePanel />
     </div>
   );
@@ -322,6 +324,146 @@ function ArrImportPanel() {
             </div>
           </div>
         )}
+
+        {msg && <div className="font-mono text-xs text-muted">{msg}</div>}
+      </div>
+    </section>
+  );
+}
+
+function AutoApprovePanel() {
+  const qc = useQueryClient();
+  const [msg, setMsg] = useState('');
+  const { data } = useQuery({ queryKey: ['auto-approve-rules'], queryFn: api.autoApproveGenreRules });
+  const { data: movieGenres } = useQuery({ queryKey: ['genres', 'movie'], queryFn: () => api.genres('movie') });
+  const { data: tvGenres } = useQuery({ queryKey: ['genres', 'tv'], queryFn: () => api.genres('tv') });
+
+  const [rules, setRules] = useState<GenreRule[] | null>(null);
+  const effectiveRules = rules ?? data?.rules ?? [];
+
+  const saveMutation = useMutation({
+    mutationFn: (r: GenreRule[]) => api.setAutoApproveGenreRules(r),
+    onSuccess: () => { setMsg('Saved.'); qc.invalidateQueries({ queryKey: ['auto-approve-rules'] }); },
+    onError: (e: any) => setMsg(`Error: ${e.message}`),
+  });
+  const runMutation = useMutation({
+    mutationFn: api.runAutoApproveNow,
+    onSuccess: () => setMsg('Started in the background - check logs for progress.'),
+    onError: (e: any) => setMsg(`Error: ${e.message}`),
+  });
+
+  const addRule = () => {
+    const genres = movieGenres?.genres || [];
+    const first = genres[0];
+    setRules([
+      ...effectiveRules,
+      {
+        media_type: 'movie', genre_id: first?.id || 0, genre_name: first?.name || '',
+        year_from: null, year_to: null, enabled: true,
+      },
+    ]);
+  };
+
+  const updateRule = (i: number, patch: Partial<GenreRule>) => {
+    const next = effectiveRules.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
+    setRules(next);
+  };
+
+  const removeRule = (i: number) => {
+    setRules(effectiveRules.filter((_, idx) => idx !== i));
+  };
+
+  return (
+    <section>
+      <h2 className="text-lg font-bold mb-3">Auto-approve (genres + favorite actors)</h2>
+      <div className="bg-card rounded-lg border border-border p-4 space-y-4">
+        <p className="text-muted text-sm">
+          Automatically request titles matching enabled genre rules (year-ranged) and any
+          user's followed actors, up to the daily caps in Settings &gt; Auto-approve.
+        </p>
+
+        <div className="space-y-2">
+          {effectiveRules.map((rule, i) => {
+            const genres = (rule.media_type === 'movie' ? movieGenres : tvGenres)?.genres || [];
+            return (
+              <div key={i} className="flex flex-wrap items-center gap-2 bg-bg rounded-lg p-2">
+                <button
+                  type="button"
+                  onClick={() => updateRule(i, { enabled: !rule.enabled })}
+                  className={`w-9 h-5 rounded-full transition-colors flex items-center px-0.5 flex-shrink-0
+                    ${rule.enabled ? 'bg-accent' : 'bg-border'}`}
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform
+                    ${rule.enabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                </button>
+                <select
+                  value={rule.media_type}
+                  onChange={(e) => {
+                    const mt = e.target.value as 'movie' | 'tv';
+                    const g = (mt === 'movie' ? movieGenres : tvGenres)?.genres?.[0];
+                    updateRule(i, { media_type: mt, genre_id: g?.id || 0, genre_name: g?.name || '' });
+                  }}
+                  className="bg-card border border-border rounded px-2 py-1 text-xs"
+                >
+                  <option value="movie">Movies</option>
+                  <option value="tv">Shows</option>
+                </select>
+                <select
+                  value={rule.genre_id}
+                  onChange={(e) => {
+                    const g = genres.find((x) => x.id === Number(e.target.value));
+                    updateRule(i, { genre_id: g?.id || 0, genre_name: g?.name || '' });
+                  }}
+                  className="bg-card border border-border rounded px-2 py-1 text-xs"
+                >
+                  {genres.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+                <input
+                  type="number"
+                  placeholder="From year"
+                  value={rule.year_from ?? ''}
+                  onChange={(e) => updateRule(i, { year_from: e.target.value ? Number(e.target.value) : null })}
+                  className="w-24 bg-card border border-border rounded px-2 py-1 text-xs"
+                />
+                <span className="text-muted text-xs">to</span>
+                <input
+                  type="number"
+                  placeholder="To year"
+                  value={rule.year_to ?? ''}
+                  onChange={(e) => updateRule(i, { year_to: e.target.value ? Number(e.target.value) : null })}
+                  className="w-24 bg-card border border-border rounded px-2 py-1 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeRule(i)}
+                  className="ml-auto px-2 py-1 rounded text-xs text-red-400 hover:bg-red-500/10"
+                >
+                  Remove
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button onClick={addRule} className="px-3 py-1.5 rounded border border-border text-sm hover:bg-bg">
+            + Add genre rule
+          </button>
+          <button
+            onClick={() => saveMutation.mutate(effectiveRules)}
+            disabled={saveMutation.isPending}
+            className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50"
+          >
+            {saveMutation.isPending ? 'Saving...' : 'Save rules'}
+          </button>
+          <button
+            onClick={() => runMutation.mutate()}
+            disabled={runMutation.isPending}
+            className="px-3 py-1.5 rounded border border-border text-sm hover:bg-bg disabled:opacity-50"
+          >
+            ▶ Run now
+          </button>
+        </div>
 
         {msg && <div className="font-mono text-xs text-muted">{msg}</div>}
       </div>

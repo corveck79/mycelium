@@ -326,6 +326,33 @@ def discover_by_provider(media_type: str, provider_id: int, region: str = "NL",
     return [_norm_item(i, media_type=media_type) for i in (data.get("results") or [])]
 
 
+def discover_by_genre(media_type: str, genre_id: int, year_from: int | None = None,
+                       year_to: int | None = None, page: int = 1,
+                       sort_by: str = "popularity.desc") -> list[dict]:
+    """Discover content in a genre, optionally bounded by release/air year."""
+    date_field = "primary_release_date" if media_type == "movie" else "first_air_date"
+    params: dict = {
+        "with_genres": genre_id,
+        "sort_by": sort_by,
+        "page": page,
+        "include_adult": "false",
+    }
+    if year_from:
+        params[f"{date_field}.gte"] = f"{year_from}-01-01"
+    if year_to:
+        params[f"{date_field}.lte"] = f"{year_to}-12-31"
+    data = _get(f"/discover/{media_type}", params=params)
+    if not data:
+        return []
+    return [_norm_item(i, media_type=media_type) for i in (data.get("results") or [])]
+
+
+def list_genres(media_type: str = "movie") -> list[dict]:
+    """Return TMDB's genre list for movies or tv: [{"id", "name"}, ...]."""
+    data = _get(f"/genre/{media_type}/list")
+    return (data or {}).get("genres") or []
+
+
 def list_providers(media_type: str = "movie", region: str = "NL") -> list[dict]:
     """List streaming providers available in a region."""
     data = _get(f"/watch/providers/{media_type}", params={"watch_region": region})

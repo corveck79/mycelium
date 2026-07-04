@@ -84,6 +84,9 @@ _INT_KEYS = {
     "CATCHUP_DELAY_SEC",
     "CATCHUP_TAKE",
     "TRAKT_AUTO_REQUEST_CAP",
+    "AUTO_APPROVE_DAILY_LIMIT",
+    "AUTO_APPROVE_ACTOR_DAILY_LIMIT",
+    "AUTO_APPROVE_INTERVAL_HOURS",
 }
 
 # Keys that take effect on the next access (no restart).
@@ -138,6 +141,7 @@ HOT_RELOAD = {
     "TRENDING_TV_COUNT", "POPULAR_MOVIE_COUNT", "POPULAR_TV_COUNT",
     "NETFLIX_NL_TOP_COUNT", "PRIME_NL_TOP_COUNT", "DISNEY_NL_TOP_COUNT",
     "AUTO_ADD_MIN_RATING", "AUTO_ADD_MIN_VOTES", "AUTO_ADD_REGION",
+    "AUTO_APPROVE_DAILY_LIMIT", "AUTO_APPROVE_ACTOR_DAILY_LIMIT", "AUTO_APPROVE_GENRE_RULES",
     "RADARR_URL", "RADARR_API_KEY", "SONARR_URL", "SONARR_API_KEY",
     "TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET", "TRAKT_AUTO_REQUEST_CAP",
 }
@@ -204,6 +208,11 @@ SETTING_GROUPS = [
         ],
     },
     {
+        "id": "auto_approve",
+        "title": "Auto-approve (genres + favorite actors)",
+        "keys": ["AUTO_APPROVE_DAILY_LIMIT", "AUTO_APPROVE_ACTOR_DAILY_LIMIT"],
+    },
+    {
         "id": "arr_import",
         "title": "Radarr / Sonarr import",
         "keys": ["RADARR_URL", "RADARR_API_KEY", "SONARR_URL", "SONARR_API_KEY"],
@@ -235,6 +244,7 @@ SETTING_GROUPS = [
             "MONITOR_INTERVAL_HOURS", "MOVIE_SYNC_INTERVAL_MINUTES",
             "MERGE_VERSIONS_INTERVAL_HOURS", "BACKUP_INTERVAL_HOURS",
             "RETRY_QUEUE_INTERVAL_MINUTES", "CONTINUE_WATCHING_INTERVAL_MINUTES",
+            "AUTO_APPROVE_INTERVAL_HOURS",
         ],
     },
 ]

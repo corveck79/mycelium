@@ -8,6 +8,7 @@ import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, Response, abort, flash, jsonify, redirect, render_template, request, stream_with_context, url_for
 
+import auto_approve
 import backup
 import catbox
 import nfo_generator
@@ -35,6 +36,7 @@ import upgrader
 import watchdog
 import zilean
 from config import (
+    AUTO_APPROVE_INTERVAL_HOURS,
     AUTO_UPGRADE_ENABLED,
     AUTO_UPGRADE_INTERVAL_HOURS,
     BACKUP_INTERVAL_HOURS,
@@ -353,6 +355,15 @@ def _start_scheduler() -> BackgroundScheduler:
             )
             log.info("Scheduled auto-add every %dh (total slots: %d)",
                      TRENDING_CHECK_INTERVAL_HOURS, _auto_add_total)
+
+        if AUTO_APPROVE_INTERVAL_HOURS > 0:
+            scheduler.add_job(
+                auto_approve.run,
+                trigger="interval", hours=AUTO_APPROVE_INTERVAL_HOURS,
+                id="auto_approve", next_run_time=None,
+            )
+            log.info("Scheduled auto-approve (genres + favorite actors) every %dh",
+                     AUTO_APPROVE_INTERVAL_HOURS)
 
         if CONTINUE_WATCHING_INTERVAL_MINUTES > 0:
             scheduler.add_job(
@@ -1175,6 +1186,77 @@ def ui_api_person(person_id: int):
     if not person:
         return jsonify(error="not found"), 404
     return jsonify(**person)
+
+
+@app.get("/ui/api/favorite-actors")
+@auth.require_auth
+def ui_api_favorite_actors_list():
+    rec = auth.current_user_record()
+    if not rec:
+        return jsonify(error="not authenticated"), 401
+    return jsonify(actors=db.get_favorite_actors(rec["id"]))
+
+
+@app.post("/ui/api/favorite-actors/<int:person_id>")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_favorite_actors_add(person_id: int):
+    rec = auth.current_user_record()
+    if not rec:
+        return jsonify(error="not authenticated"), 401
+    p = request.get_json(silent=True) or {}
+    db.add_favorite_actor(rec["id"], person_id, p.get("name") or str(person_id), p.get("profile_path"))
+    return jsonify(ok=True)
+
+
+@app.post("/ui/api/favorite-actors/<int:person_id>/remove")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_favorite_actors_remove(person_id: int):
+    rec = auth.current_user_record()
+    if not rec:
+        return jsonify(error="not authenticated"), 401
+    db.remove_favorite_actor(rec["id"], person_id)
+    return jsonify(ok=True)
+
+
+@app.get("/ui/api/genres")
+def ui_api_genres():
+    media_type = request.args.get("type", "movie")
+    return jsonify(genres=tmdb.list_genres(media_type))
+
+
+@app.get("/ui/api/auto-approve/genre-rules")
+@auth.require_auth
+def ui_api_auto_approve_genre_rules_get():
+    if not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
+    return jsonify(rules=auto_approve._genre_rules())
+
+
+@app.post("/ui/api/auto-approve/genre-rules")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_auto_approve_genre_rules_set():
+    if not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
+    p = request.get_json(silent=True) or {}
+    rules = p.get("rules")
+    if not isinstance(rules, list):
+        return jsonify(error="rules must be a list"), 400
+    auto_approve.set_genre_rules(rules)
+    return jsonify(ok=True)
+
+
+@app.post("/ui/api/auto-approve/run-now")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_auto_approve_run_now():
+    if not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
+    import threading
+    threading.Thread(target=auto_approve.run, name="auto-approve-manual", daemon=True).start()
+    return jsonify(ok=True, started=True)
 
 
 # ── Catbox lazy materialization ───────────────────────────────────────────────

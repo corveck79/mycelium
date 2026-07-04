@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, tmdbImg } from '../api';
 import type { TmdbItem } from '../types';
 
@@ -13,10 +13,25 @@ export default function PersonModal({
   onSelectItem: (item: TmdbItem) => void;
 }) {
   const open = personId !== null;
+  const qc = useQueryClient();
   const { data: person, isLoading } = useQuery({
     queryKey: ['person', personId],
     queryFn: () => api.person(personId!),
     enabled: open,
+  });
+  const { data: favorites } = useQuery({
+    queryKey: ['favorite-actors'],
+    queryFn: api.favoriteActors,
+  });
+  const isFollowing = !!favorites?.actors.some((a) => a.person_id === personId);
+
+  const followMutation = useMutation({
+    mutationFn: () => api.followActor(personId!, person!.name, person!.profile_path),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['favorite-actors'] }),
+  });
+  const unfollowMutation = useMutation({
+    mutationFn: () => api.unfollowActor(personId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['favorite-actors'] }),
   });
 
   useEffect(() => {
@@ -65,6 +80,18 @@ export default function PersonModal({
                     Born {person.birthday}{person.place_of_birth ? ` · ${person.place_of_birth}` : ''}
                   </p>
                 )}
+                <button
+                  type="button"
+                  onClick={() => (isFollowing ? unfollowMutation.mutate() : followMutation.mutate())}
+                  disabled={followMutation.isPending || unfollowMutation.isPending}
+                  className={`mt-2 px-3 py-1 rounded-full text-xs font-semibold border transition disabled:opacity-50 ${
+                    isFollowing
+                      ? 'border-accent bg-accent/10 text-accent hover:bg-accent/20'
+                      : 'border-border text-muted hover:text-white'
+                  }`}
+                >
+                  {isFollowing ? '★ Following' : '☆ Follow (auto-request new titles)'}
+                </button>
               </div>
             </div>
 

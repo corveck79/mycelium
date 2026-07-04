@@ -71,6 +71,17 @@ export const api = {
     http<TmdbDetail>(`/ui/api/discover/details?type=${type}&id=${id}`),
   person: (id: number) =>
     http<PersonDetail>(`/ui/api/person/${id}`),
+  favoriteActors: () =>
+    http<{ actors: Array<{ person_id: number; name: string; profile_path: string | null }> }>(
+      '/ui/api/favorite-actors',
+    ),
+  followActor: (personId: number, name: string, profilePath: string | null) =>
+    http<{ ok: boolean }>(`/ui/api/favorite-actors/${personId}`, {
+      method: 'POST',
+      body: JSON.stringify({ name, profile_path: profilePath }),
+    }),
+  unfollowActor: (personId: number) =>
+    http<{ ok: boolean }>(`/ui/api/favorite-actors/${personId}/remove`, { method: 'POST' }),
   addToLibrary: (
     tmdb_id: number,
     media_type: MediaType,
@@ -268,7 +279,29 @@ export const api = {
     http<{ scanned: number; imported: number; skipped: number; failed: number }>(
       '/ui/api/torbox/scan-library', { method: 'POST' }
     ),
+
+  // Auto-approve (genre rules + favorite actors)
+  genres: (type: 'movie' | 'tv') =>
+    http<{ genres: Array<{ id: number; name: string }> }>(`/ui/api/genres?type=${type}`),
+  autoApproveGenreRules: () =>
+    http<{ rules: GenreRule[] }>('/ui/api/auto-approve/genre-rules'),
+  setAutoApproveGenreRules: (rules: GenreRule[]) =>
+    http<{ ok: boolean }>('/ui/api/auto-approve/genre-rules', {
+      method: 'POST',
+      body: JSON.stringify({ rules }),
+    }),
+  runAutoApproveNow: () =>
+    http<{ ok: boolean; started: boolean }>('/ui/api/auto-approve/run-now', { method: 'POST' }),
 };
+
+export interface GenreRule {
+  media_type: 'movie' | 'tv';
+  genre_id: number;
+  genre_name: string;
+  year_from: number | null;
+  year_to: number | null;
+  enabled: boolean;
+}
 
 // Image helpers  -  TMDB image CDN
 export const tmdbImg = {

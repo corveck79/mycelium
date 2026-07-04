@@ -178,6 +178,13 @@ AUTO_ADD_MIN_RATING = float(_env("AUTO_ADD_MIN_RATING", "6.0"))
 AUTO_ADD_MIN_VOTES = _env_int("AUTO_ADD_MIN_VOTES", 100)
 AUTO_ADD_REGION = _env("AUTO_ADD_REGION", "NL")
 
+# Per-genre auto-approve (year-ranged genre fill) + favorite-actor auto-request.
+# Genre rules themselves are configured at runtime (AUTO_APPROVE_GENRE_RULES,
+# a JSON list) since they're a variable-length list, not a scalar env var.
+AUTO_APPROVE_DAILY_LIMIT = _env_int("AUTO_APPROVE_DAILY_LIMIT", 5)
+AUTO_APPROVE_ACTOR_DAILY_LIMIT = _env_int("AUTO_APPROVE_ACTOR_DAILY_LIMIT", 5)
+AUTO_APPROVE_INTERVAL_HOURS = _env_int("AUTO_APPROVE_INTERVAL_HOURS", 24)
+
 # ── Radarr / Sonarr import ────────────────────────────────────────────────────
 RADARR_URL = _env("RADARR_URL", "")
 RADARR_API_KEY = _env("RADARR_API_KEY", "")

@@ -6,11 +6,21 @@ os.environ.setdefault("TORBOX_API_KEY", "test")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Mock heavy imports so trakt.py's module-level `import db` / `import settings`
-# don't need a real DB connection.
-for _mod in ("db", "settings"):
-    sys.modules.setdefault(_mod, MagicMock())
+# don't need a real DB connection, then immediately drop them from sys.modules so
+# this doesn't leak into other test files collected afterward (they'd otherwise get
+# these mocks instead of the real modules via their own lazy imports).
+_MOCKED = ("db", "settings")
+_had_prior = {m: sys.modules.get(m) for m in _MOCKED}
+for _mod in _MOCKED:
+    sys.modules[_mod] = MagicMock()
 
 import trakt  # noqa: E402
+
+for _mod in _MOCKED:
+    if _had_prior[_mod] is None:
+        sys.modules.pop(_mod, None)
+    else:
+        sys.modules[_mod] = _had_prior[_mod]
 
 
 def test_is_configured_requires_both_client_id_and_secret(monkeypatch):

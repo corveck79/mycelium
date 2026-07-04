@@ -410,6 +410,18 @@ def _migrate() -> None:
             )
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS favorite_actors (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                person_id   INTEGER NOT NULL,
+                name        TEXT    NOT NULL,
+                profile_path TEXT,
+                added_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
+                UNIQUE(user_id, person_id)
+            )
+        """)
+
         conn.commit()
 
 
@@ -1430,6 +1442,36 @@ def get_trakt_watched_episodes(user_id: int) -> dict[str, dict[str, list[int]]]:
         season_map = shows.setdefault(r["imdb_id"], {})
         season_map.setdefault(str(r["season"]), []).append(r["episode"])
     return shows
+
+
+def add_favorite_actor(user_id: int, person_id: int, name: str, profile_path: str | None = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO favorite_actors (user_id, person_id, name, profile_path) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, person_id, name, profile_path),
+        )
+        conn.commit()
+
+
+def remove_favorite_actor(user_id: int, person_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM favorite_actors WHERE user_id=? AND person_id=?", (user_id, person_id))
+        conn.commit()
+
+
+def get_favorite_actors(user_id: int) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM favorite_actors WHERE user_id=? ORDER BY added_at DESC", (user_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_all_favorite_actors() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute("SELECT DISTINCT person_id, name FROM favorite_actors").fetchall()
+        return [dict(r) for r in rows]
 
 
 def user_count() -> int:
