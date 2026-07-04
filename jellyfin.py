@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 
 import requests
 
@@ -6,24 +8,11 @@ import settings
 
 log = logging.getLogger(__name__)
 
-
-def refresh_library(timeout: int = 30) -> bool:
-    JELLYFIN_URL = settings.get("JELLYFIN_URL")
-    JELLYFIN_API_KEY = settings.get("JELLYFIN_API_KEY")
-    if not JELLYFIN_URL:
-        log.warning("JELLYFIN_URL not set; skipping library refresh")
-        return False
-    url = f"{JELLYFIN_URL.rstrip('/')}/Library/Refresh"
-    headers = {}
-    if JELLYFIN_API_KEY:
-        headers["X-Emby-Token"] = JELLYFIN_API_KEY
-    log.info("Triggering Jellyfin library refresh: %s", url)
-    resp = requests.post(url, headers=headers, timeout=timeout)
-    if resp.status_code >= 400:
-        log.error("Jellyfin refresh failed: %s %s", resp.status_code, resp.text[:200])
-        return False
-    log.info("Jellyfin library refresh accepted (%s)", resp.status_code)
-    return True
+# Coalesce rapid successive refresh triggers (new strm right after another, an
+# upgrade batch, cleanup, etc.) into a single scan instead of queueing one per call.
+_REFRESH_DEBOUNCE_SEC = 60
+_refresh_lock = threading.Lock()
+_last_refresh_ts = 0.0
 
 
 def _jf_headers() -> dict:
@@ -32,6 +21,53 @@ def _jf_headers() -> dict:
     if JELLYFIN_API_KEY:
         h["X-Emby-Token"] = JELLYFIN_API_KEY
     return h
+
+
+def is_scanning(timeout: int = 10) -> bool:
+    """True if Jellyfin is currently running a library scan task."""
+    JELLYFIN_URL = settings.get("JELLYFIN_URL")
+    if not JELLYFIN_URL:
+        return False
+    try:
+        resp = requests.get(f"{JELLYFIN_URL.rstrip('/')}/ScheduledTasks",
+                            headers=_jf_headers(), timeout=timeout)
+        resp.raise_for_status()
+        tasks = resp.json()
+    except Exception as exc:
+        log.debug("Jellyfin is_scanning check failed: %s", exc)
+        return False
+    return any(t.get("Category") == "Library" and t.get("State") == "Running" for t in tasks)
+
+
+def refresh_library(timeout: int = 30) -> bool:
+    """Trigger a Jellyfin library scan, unless one was already triggered in the
+    last _REFRESH_DEBOUNCE_SEC or Jellyfin reports a scan already in progress."""
+    JELLYFIN_URL = settings.get("JELLYFIN_URL")
+    JELLYFIN_API_KEY = settings.get("JELLYFIN_API_KEY")
+    if not JELLYFIN_URL:
+        log.warning("JELLYFIN_URL not set; skipping library refresh")
+        return False
+    with _refresh_lock:
+        global _last_refresh_ts
+        now = time.monotonic()
+        if now - _last_refresh_ts < _REFRESH_DEBOUNCE_SEC:
+            log.debug("Jellyfin refresh skipped: last triggered %.0fs ago", now - _last_refresh_ts)
+            return False
+        if is_scanning(timeout=min(timeout, 10)):
+            log.debug("Jellyfin refresh skipped: a scan is already running")
+            return False
+        url = f"{JELLYFIN_URL.rstrip('/')}/Library/Refresh"
+        headers = {}
+        if JELLYFIN_API_KEY:
+            headers["X-Emby-Token"] = JELLYFIN_API_KEY
+        log.info("Triggering Jellyfin library refresh: %s", url)
+        resp = requests.post(url, headers=headers, timeout=timeout)
+        if resp.status_code >= 400:
+            log.error("Jellyfin refresh failed: %s %s", resp.status_code, resp.text[:200])
+            return False
+        _last_refresh_ts = now
+        log.info("Jellyfin library refresh accepted (%s)", resp.status_code)
+        return True
 
 
 def merge_duplicate_versions(timeout: int = 60) -> bool:
