@@ -2014,6 +2014,68 @@ def ui_api_discover_by_provider():
     return jsonify(results=results)
 
 
+@app.get("/ui/api/discover/by-genre")
+def ui_api_discover_by_genre():
+    media = request.args.get("type", "movie")
+    genre_id = int(request.args.get("genre_id") or "0")
+    if not genre_id:
+        return jsonify(error="genre_id required"), 400
+    year_from = request.args.get("year_from")
+    year_to = request.args.get("year_to")
+    results = tmdb.discover_by_genre(
+        media, genre_id,
+        year_from=int(year_from) if year_from else None,
+        year_to=int(year_to) if year_to else None,
+    )
+    results = _filter_by_language(results)
+    _enrich_library_status(results)
+    return jsonify(results=results)
+
+
+@app.get("/ui/api/discover/genre-tabs")
+def ui_api_discover_genre_tabs():
+    """Public: enabled genre-tab configs for the Discover page rows."""
+    import json
+    import settings as _s
+    raw = _s.get("DISCOVER_GENRE_TABS", "[]")
+    try:
+        tabs = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except (TypeError, ValueError):
+        tabs = []
+    return jsonify(tabs=[t for t in tabs if t.get("enabled")])
+
+
+@app.get("/ui/api/discover/genre-tabs/config")
+@auth.require_auth
+def ui_api_discover_genre_tabs_config_get():
+    if not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
+    import json
+    import settings as _s
+    raw = _s.get("DISCOVER_GENRE_TABS", "[]")
+    try:
+        tabs = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except (TypeError, ValueError):
+        tabs = []
+    return jsonify(tabs=tabs)
+
+
+@app.post("/ui/api/discover/genre-tabs/config")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_discover_genre_tabs_config_set():
+    if not auth.is_admin():
+        return jsonify(error="unauthorized"), 401
+    import json
+    import settings as _s
+    p = request.get_json(silent=True) or {}
+    tabs = p.get("tabs")
+    if not isinstance(tabs, list):
+        return jsonify(error="tabs must be a list"), 400
+    _s.set("DISCOVER_GENRE_TABS", json.dumps(tabs))
+    return jsonify(ok=True)
+
+
 @app.get("/ui/api/discover/details")
 def ui_api_discover_details():
     media = request.args.get("type", "movie")

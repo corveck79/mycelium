@@ -67,6 +67,20 @@ export const api = {
     http<{ results: TmdbItem[] }>(
       `/ui/api/discover/by-provider?type=${type}&provider_id=${providerId}${sortBy ? `&sort_by=${sortBy}` : ''}`,
     ),
+  byGenre: (type: MediaType, genreId: number, yearFrom?: number | null, yearTo?: number | null) =>
+    http<{ results: TmdbItem[] }>(
+      `/ui/api/discover/by-genre?type=${type}&genre_id=${genreId}` +
+      (yearFrom ? `&year_from=${yearFrom}` : '') + (yearTo ? `&year_to=${yearTo}` : ''),
+    ),
+  genreTabs: () =>
+    http<{ tabs: GenreRule[] }>('/ui/api/discover/genre-tabs'),
+  genreTabsConfig: () =>
+    http<{ tabs: GenreRule[] }>('/ui/api/discover/genre-tabs/config'),
+  setGenreTabsConfig: (tabs: GenreRule[]) =>
+    http<{ ok: boolean }>('/ui/api/discover/genre-tabs/config', {
+      method: 'POST',
+      body: JSON.stringify({ tabs }),
+    }),
   details: (type: MediaType, id: number) =>
     http<TmdbDetail>(`/ui/api/discover/details?type=${type}&id=${id}`),
   person: (id: number) =>

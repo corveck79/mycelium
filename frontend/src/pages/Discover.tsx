@@ -17,6 +17,7 @@ type Cat =
 export default function Discover() {
   const [detail, setDetail] = useState<{ id: number; type: MediaType } | null>(null);
   const [activeProvider, setActiveProvider] = useState<number | null>(null);
+  const { data: genreTabsData } = useQuery({ queryKey: ['genre-tabs'], queryFn: api.genreTabs });
 
   const open = (item: TmdbItem) => setDetail({ id: item.tmdb_id, type: item.media_type });
   const close = () => setDetail(null);
@@ -76,6 +77,16 @@ export default function Discover() {
             ]}
             onItemClick={open}
           />
+
+          {(genreTabsData?.tabs || []).map((tab) => (
+            <Row
+              key={`genre-${tab.media_type}-${tab.genre_id}`}
+              title={`🎭 ${tab.genre_name}${tab.year_from || tab.year_to ? ` (${tab.year_from ?? ''}${tab.year_from || tab.year_to ? '–' : ''}${tab.year_to ?? ''})` : ''}`}
+              query={['genre', tab.media_type, tab.genre_id, tab.year_from, tab.year_to]}
+              fetcher={() => api.byGenre(tab.media_type as MediaType, tab.genre_id, tab.year_from, tab.year_to).then((r) => r.results)}
+              onItemClick={open}
+            />
+          ))}
         </>
       )}
 
