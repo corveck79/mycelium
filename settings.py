@@ -84,6 +84,7 @@ _INT_KEYS = {
     "CATCHUP_DELAY_SEC",
     "CATCHUP_TAKE",
     "TRAKT_AUTO_REQUEST_CAP",
+    "MDBLIST_AUTO_REQUEST_CAP",
     "AUTO_APPROVE_DAILY_LIMIT",
     "AUTO_APPROVE_ACTOR_DAILY_LIMIT",
     "AUTO_APPROVE_INTERVAL_HOURS",
@@ -144,6 +145,7 @@ HOT_RELOAD = {
     "AUTO_APPROVE_DAILY_LIMIT", "AUTO_APPROVE_ACTOR_DAILY_LIMIT", "AUTO_APPROVE_GENRE_RULES",
     "RADARR_URL", "RADARR_API_KEY", "SONARR_URL", "SONARR_API_KEY",
     "TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET", "TRAKT_AUTO_REQUEST_CAP",
+    "MDBLIST_AUTO_REQUEST_CAP",
 }
 
 # Logical groups for the Settings UI tab.
@@ -210,7 +212,8 @@ SETTING_GROUPS = [
     {
         "id": "auto_approve",
         "title": "Auto-approve (genres + favorite actors)",
-        "keys": ["AUTO_APPROVE_DAILY_LIMIT", "AUTO_APPROVE_ACTOR_DAILY_LIMIT"],
+        "keys": ["AUTO_APPROVE_DAILY_LIMIT", "AUTO_APPROVE_ACTOR_DAILY_LIMIT",
+                 "TRAKT_AUTO_REQUEST_CAP", "MDBLIST_AUTO_REQUEST_CAP"],
     },
     {
         "id": "arr_import",

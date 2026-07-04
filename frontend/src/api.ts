@@ -292,6 +292,26 @@ export const api = {
     }),
   runAutoApproveNow: () =>
     http<{ ok: boolean; started: boolean }>('/ui/api/auto-approve/run-now', { method: 'POST' }),
+
+  // MDBList
+  mdblistStatus: () =>
+    http<{ connected: boolean; list_ids: string }>('/ui/api/mdblist/status'),
+  mdblistConnect: (apiKey: string) =>
+    http<{ ok: boolean }>('/ui/api/mdblist/connect', {
+      method: 'POST',
+      body: JSON.stringify({ api_key: apiKey }),
+    }),
+  mdblistDisconnect: () =>
+    http<{ ok: boolean }>('/ui/api/mdblist/disconnect', { method: 'POST' }),
+  mdblistLists: () =>
+    http<{ lists: Array<{ id: number; name: string }> }>('/ui/api/mdblist/lists'),
+  mdblistSetLists: (listIds: (string | number)[]) =>
+    http<{ ok: boolean }>('/ui/api/mdblist/lists', {
+      method: 'POST',
+      body: JSON.stringify({ list_ids: listIds }),
+    }),
+  mdblistSync: () =>
+    http<{ ok: boolean; added: number }>('/ui/api/mdblist/sync', { method: 'POST' }),
 };
 
 export interface GenreRule {

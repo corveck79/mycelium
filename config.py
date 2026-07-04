@@ -47,6 +47,9 @@ TRAKT_CLIENT_SECRET = _env("TRAKT_CLIENT_SECRET", "")
 # imported watchlist can't flood TorBox's createtorrent quota in one go.
 TRAKT_AUTO_REQUEST_CAP = _env_int("TRAKT_AUTO_REQUEST_CAP", 10)
 
+# MDBList: per-user API key (mdblist.com/preferences), no app-level credentials needed.
+MDBLIST_AUTO_REQUEST_CAP = _env_int("MDBLIST_AUTO_REQUEST_CAP", 10)
+
 LISTEN_HOST = _env("LISTEN_HOST", "0.0.0.0")
 LISTEN_PORT = _env_int("LISTEN_PORT", 8088)
 

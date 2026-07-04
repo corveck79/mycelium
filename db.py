@@ -395,6 +395,10 @@ def _migrate() -> None:
             if col not in user_cols:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
                 log.info("Migration: added users.%s", col)
+        for col in ("mdblist_api_key", "mdblist_list_ids"):
+            if col not in user_cols:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+                log.info("Migration: added users.%s", col)
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS trakt_watched (

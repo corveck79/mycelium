@@ -2718,6 +2718,82 @@ def ui_api_trakt_scrobble():
     return jsonify(ok=True)
 
 
+@app.get("/ui/api/mdblist/status")
+@auth.require_auth
+def ui_api_mdblist_status():
+    rec = auth.current_user_record()
+    if not rec:
+        return jsonify(error="not authenticated"), 401
+    import mdblist
+    return jsonify(
+        connected=mdblist.is_configured(rec),
+        list_ids=rec.get("mdblist_list_ids") or "",
+    )
+
+
+@app.post("/ui/api/mdblist/connect")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_mdblist_connect():
+    rec = auth.current_user_record()
+    if not rec:
+        return jsonify(error="not authenticated"), 401
+    p = request.get_json(silent=True) or {}
+    api_key = (p.get("api_key") or "").strip()
+    if not api_key:
+        return jsonify(error="api_key required"), 400
+    db.update_user(rec["id"], mdblist_api_key=api_key)
+    return jsonify(ok=True)
+
+
+@app.post("/ui/api/mdblist/disconnect")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_mdblist_disconnect():
+    rec = auth.current_user_record()
+    if not rec:
+        return jsonify(error="not authenticated"), 401
+    db.update_user(rec["id"], mdblist_api_key="", mdblist_list_ids="")
+    return jsonify(ok=True)
+
+
+@app.get("/ui/api/mdblist/lists")
+@auth.require_auth
+def ui_api_mdblist_lists():
+    rec = auth.current_user_record()
+    if not rec or not rec.get("mdblist_api_key"):
+        return jsonify(error="MDBList not connected"), 400
+    import mdblist
+    return jsonify(lists=mdblist.get_user_lists(rec["mdblist_api_key"]))
+
+
+@app.post("/ui/api/mdblist/lists")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_mdblist_set_lists():
+    rec = auth.current_user_record()
+    if not rec:
+        return jsonify(error="not authenticated"), 401
+    p = request.get_json(silent=True) or {}
+    list_ids = p.get("list_ids")
+    if not isinstance(list_ids, list):
+        return jsonify(error="list_ids must be a list"), 400
+    db.update_user(rec["id"], mdblist_list_ids=",".join(str(i) for i in list_ids))
+    return jsonify(ok=True)
+
+
+@app.post("/ui/api/mdblist/sync")
+@_csrf.exempt
+@auth.require_auth
+def ui_api_mdblist_sync():
+    rec = auth.current_user_record()
+    if not rec:
+        return jsonify(error="not authenticated"), 401
+    import mdblist
+    added = mdblist.sync_auto_request(rec)
+    return jsonify(ok=True, added=added)
+
+
 # Cache Jellyfin item IDs: imdb_id -> jellyfin_item_id (or None if not found)
 _jellyfin_item_cache: dict[str, str | None] = {}
 

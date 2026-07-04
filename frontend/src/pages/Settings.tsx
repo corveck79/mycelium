@@ -18,6 +18,7 @@ export default function Settings() {
       <ChangePasswordCard />
       <PreferencesCard />
       <TraktCard />
+      <MDBListCard />
 
       {visiblePlugins.length > 0 && (
         <>
@@ -318,6 +319,116 @@ function TraktCard() {
           {startMutation.isError && (
             <p className="text-danger text-xs">{(startMutation.error as any)?.message || 'Could not start Trakt authorization'}</p>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function MDBListCard() {
+  const qc = useQueryClient();
+  const { data: status } = useQuery({ queryKey: ['mdblist-status'], queryFn: api.mdblistStatus });
+  const { data: listsData } = useQuery({
+    queryKey: ['mdblist-lists'],
+    queryFn: api.mdblistLists,
+    enabled: !!status?.connected,
+  });
+  const [apiKey, setApiKey] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    setSelected((status?.list_ids || '').split(',').filter(Boolean));
+  }, [status]);
+
+  const connectMutation = useMutation({
+    mutationFn: () => api.mdblistConnect(apiKey),
+    onSuccess: () => { setApiKey(''); qc.invalidateQueries({ queryKey: ['mdblist-status'] }); },
+    onError: (e: any) => setMsg(`Error: ${e.message}`),
+  });
+  const disconnectMutation = useMutation({
+    mutationFn: api.mdblistDisconnect,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mdblist-status'] }),
+  });
+  const setListsMutation = useMutation({
+    mutationFn: (ids: string[]) => api.mdblistSetLists(ids),
+    onSuccess: () => setMsg('Lists saved.'),
+  });
+  const syncMutation = useMutation({
+    mutationFn: api.mdblistSync,
+    onSuccess: (data) => setMsg(`Queued ${data.added} new item${data.added === 1 ? '' : 's'}.`),
+    onError: (e: any) => setMsg(`Error: ${e.message}`),
+  });
+
+  const toggleList = (id: string) => {
+    const next = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
+    setSelected(next);
+    setListsMutation.mutate(next);
+  };
+
+  return (
+    <div className="bg-card rounded-lg border border-border p-6">
+      <h2 className="text-base font-bold mb-1">MDBList</h2>
+      <p className="text-muted text-xs mb-4">
+        Connect your MDBList API key (from{' '}
+        <a href="https://mdblist.com/preferences" target="_blank" rel="noreferrer" className="text-accent underline">
+          mdblist.com/preferences
+        </a>) to sync your lists and auto-request new items.
+      </p>
+
+      {status?.connected ? (
+        <div className="space-y-3">
+          {listsData?.lists && listsData.lists.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs text-muted mb-1">Lists to sync:</p>
+              {listsData.lists.map((l) => (
+                <label key={l.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(String(l.id))}
+                    onChange={() => toggleList(String(l.id))}
+                  />
+                  {l.name}
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50"
+            >
+              {syncMutation.isPending ? 'Syncing...' : 'Sync now'}
+            </button>
+            <button
+              onClick={() => disconnectMutation.mutate()}
+              disabled={disconnectMutation.isPending}
+              className="px-3 py-1.5 rounded border border-danger text-danger text-sm font-medium disabled:opacity-50"
+            >
+              Disconnect
+            </button>
+          </div>
+          {msg && <p className="text-xs text-muted">{msg}</p>}
+        </div>
+      ) : (
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="MDBList API key"
+            className="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm
+                       placeholder:text-muted focus:outline-none focus:border-accent"
+          />
+          <button
+            onClick={() => connectMutation.mutate()}
+            disabled={connectMutation.isPending || !apiKey}
+            className="px-4 py-2 rounded-lg bg-accent hover:bg-accent/90 disabled:opacity-60 font-semibold text-sm whitespace-nowrap"
+          >
+            {connectMutation.isPending ? 'Connecting...' : 'Connect'}
+          </button>
         </div>
       )}
     </div>
