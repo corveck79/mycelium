@@ -12,6 +12,7 @@ from config import (
     EXCLUDE_DV_P5,
     EXCLUDE_LANGUAGES,
     EXCLUDE_REMUX,
+    EXCLUDE_UNDERSIZED_RELEASES,
     MAX_SIZE_GB,
     MIN_SEEDERS,
     PREFER_HEVC,
@@ -48,6 +49,26 @@ _DV_RE    = re.compile(r"\b(dovi|dolby[\s.]?vision|\.dv\.)\b", re.IGNORECASE)
 _HDR10_RE = re.compile(r"\bhdr10(?!\+)\b", re.IGNORECASE)
 _SEEDERS_RE = re.compile(r"👤\s*(\d+)")
 _SIZE_RE = re.compile(r"💾\s*([\d.]+)\s*(GB|MB)", re.IGNORECASE)
+
+# Some release groups mislabel a cam/trailer/junk file as a much higher
+# quality than it really is (title says "2160p" or doesn't mention "CAM" at
+# all), so no title regex catches it. A real recording at a given resolution
+# has a physical minimum size for its runtime; below this it's not actually
+# that quality (or not actually the full movie at all). Expressed as GB per
+# 90 minutes of runtime, scaled by the title's real (TMDB) runtime.
+_MIN_GB_PER_90MIN = {
+    "2160p": 3.0,
+    "1080p": 1.1,
+    "720p": 0.7,
+    "480p": 0.4,
+}
+
+
+def _min_plausible_size_gb(quality: str, runtime_minutes: float | None) -> float:
+    floor = _MIN_GB_PER_90MIN.get(quality)
+    if not floor or not runtime_minutes or runtime_minutes <= 0:
+        return 0.0
+    return floor * (runtime_minutes / 90.0)
 
 # Language / audio markers in release titles
 _LANG_PATTERNS = {
@@ -249,6 +270,23 @@ def rank_streams(
             return []
         else:
             log.warning("Only cam/telesync candidates available; allowing them")
+
+    exclude_undersized = _settings.get("EXCLUDE_UNDERSIZED_RELEASES", EXCLUDE_UNDERSIZED_RELEASES)
+    runtime_minutes = override.get("runtime_minutes")
+    if exclude_undersized and runtime_minutes:
+        def _is_undersized(s: TorrentioStream) -> bool:
+            if s.size_gb <= 0:
+                return False  # unknown size  -  don't penalize, nothing to check
+            return s.size_gb < _min_plausible_size_gb(s.quality, runtime_minutes)
+        filtered = [s for s in candidates if not _is_undersized(s)]
+        if filtered:
+            candidates = filtered
+        elif strict_cam:
+            log.warning("Only implausibly small (likely fake/cam/trailer) candidates available "
+                        "and STRICT_NO_CAM is on  -  rejecting all")
+            return []
+        else:
+            log.warning("Only implausibly small (likely fake/cam/trailer) candidates available; allowing them")
 
     if min_seeders > 0:
         filtered = [s for s in candidates if s.seeders == 0 or s.seeders >= min_seeders]
