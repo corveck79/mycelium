@@ -1281,6 +1281,12 @@
               community hashlist snapshot (may take a while the first time). If you already run
               an external Zilean + Postgres and don't want to re-scrape, fill in the Postgres
               connection fields above and use Import instead.
+              <br><b style="color:var(--amber)">Import needs Postgres reachable from this Mycelium
+              container.</b> Most Zilean docker-compose setups only expose Postgres internally  -
+              add a <code>ports:</code> entry to the <code>postgres</code> service in your Zilean
+              compose file (e.g. <code>"&lt;this-host-ip&gt;:5433:5432"</code>), restart it, then
+              point ZILEAN_PG_HOST/PORT at that address. If Import fails, click Status again  -
+              the exact error is shown below the buttons.
             </p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
               <button type="button" class="btn btn-primary btn-sm" onclick="zileanSync()">▶ Sync now</button>
@@ -2180,7 +2186,15 @@
     const s = `${j.total_hashes} hash(es) · last sync: ${j.last_synced_at || 'never'} (${j.last_status}, +${j.last_new_hashes})` +
       (j.last_import_at ? ` · last import: ${j.last_import_at} (${j.last_import_count} rows)` : '') +
       (j.syncing ? ' · syncing…' : '') + (j.importing ? ' · importing…' : '');
-    document.getElementById('zilean-status').textContent = s;
+    const el = document.getElementById('zilean-status');
+    el.textContent = s;
+    const err = j.last_import_error || j.last_error;
+    if (err && !j.syncing && !j.importing) {
+      const errLine = document.createElement('div');
+      errLine.style.cssText = 'color:var(--red);margin-top:4px';
+      errLine.textContent = `✗ ${err}`;
+      el.appendChild(errLine);
+    }
     if (j.syncing || j.importing) setTimeout(zileanStatus, 3000);
   }
 </script>
