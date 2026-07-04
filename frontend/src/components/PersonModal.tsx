@@ -45,7 +45,7 @@ export default function PersonModal({
 
   return (
     <div
-      className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-[210] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-card rounded-2xl border border-border shadow-2xl">
