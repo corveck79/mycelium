@@ -26,6 +26,18 @@ TORBOX_BASE_URL = _env("TORBOX_BASE_URL", "https://api.torbox.app/v1/api")
 
 ZILEAN_URL = _env("ZILEAN_URL", "")
 ZILEAN_ENABLED = _env("ZILEAN_ENABLED", "false").lower() in ("1", "true", "yes")
+# "external": call an existing iPromKnight/zilean HTTP service (ZILEAN_URL above).
+# "native": run a built-in DMM hashlist index in SQLite, no separate service needed.
+ZILEAN_MODE = _env("ZILEAN_MODE", "external")
+ZILEAN_DB_PATH = _env("ZILEAN_DB_PATH", "/data/zilean_native.db")
+# One-time bulk import from an existing external Zilean's Postgres database,
+# for users switching to native mode who don't want to re-scrape from scratch.
+# Only used when explicitly triggered (see /ui/api/zilean/import).
+ZILEAN_PG_HOST = _env("ZILEAN_PG_HOST", "")
+ZILEAN_PG_PORT = _env_int("ZILEAN_PG_PORT", 5432)
+ZILEAN_PG_DB = _env("ZILEAN_PG_DB", "zilean")
+ZILEAN_PG_USER = _env("ZILEAN_PG_USER", "postgres")
+ZILEAN_PG_PASSWORD = _env("ZILEAN_PG_PASSWORD", "")
 
 TORRENTIO_BASE_URL = _env("TORRENTIO_BASE_URL", "https://torrentio.strem.fun")
 TORRENTIO_OPTS = _env("TORRENTIO_OPTS", "")

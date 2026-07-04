@@ -51,6 +51,7 @@ _FLOAT_KEYS = {
     "AUTO_ADD_MIN_RATING",
 }
 _INT_KEYS = {
+    "ZILEAN_PG_PORT",
     "MIN_SEEDERS",
     "MAX_SIZE_GB",
     "WEB_PLAYER_MAX_SIZE_GB",
@@ -101,6 +102,8 @@ HOT_RELOAD = {
     "TMDB_API_KEY",
     "ZILEAN_URL",
     "ZILEAN_ENABLED",
+    "ZILEAN_MODE",
+    "ZILEAN_PG_HOST", "ZILEAN_PG_PORT", "ZILEAN_PG_DB", "ZILEAN_PG_USER", "ZILEAN_PG_PASSWORD",
     "CATBOX_MODE",
     "CATBOX_LAZY_ADD",
     "CATBOX_IDLE_MINUTES",
@@ -167,6 +170,15 @@ SETTING_GROUPS = [
             "TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET", "TRAKT_AUTO_REQUEST_CAP",
             "ZILEAN_ENABLED", "ZILEAN_URL",
             "REALDEBRID_API_KEY", "MULTI_DEBRID_ENABLED",
+        ],
+    },
+    {
+        "id": "zilean_native",
+        "title": "Zilean (external service vs. native built-in index)",
+        "keys": [
+            "ZILEAN_MODE",
+            "ZILEAN_PG_HOST", "ZILEAN_PG_PORT", "ZILEAN_PG_DB",
+            "ZILEAN_PG_USER", "ZILEAN_PG_PASSWORD",
         ],
     },
     {

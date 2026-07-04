@@ -389,6 +389,16 @@ def _start_scheduler() -> BackgroundScheduler:
         )
         log.info("Scheduled TorBox quota check every %dh", QUOTA_CHECK_INTERVAL_HOURS)
 
+    def _zilean_native_sync():
+        if _settings_mod.get("ZILEAN_MODE", cfg.ZILEAN_MODE) != "native":
+            return
+        import zilean_index
+        zilean_index.sync()
+
+    scheduler.add_job(_zilean_native_sync, trigger="interval", hours=6,
+                       id="zilean_native_sync", next_run_time=None, max_instances=1)
+    log.info("Scheduled Zilean native index sync every 6h (no-op unless ZILEAN_MODE=native)")
+
     # Watchdogs + maintenance
     scheduler.add_job(watchdog.deadman_check, trigger="interval", hours=2,
                        id="deadman", next_run_time=None, max_instances=1)
@@ -1554,6 +1564,50 @@ def ui_api_integrity():
     """Read-only data-integrity scan: surfaces empty/malformed imdb_id,
     missing hashes, duplicate content and orphan playability rows."""
     return jsonify(db.integrity_report())
+
+
+@app.get("/ui/api/zilean/status")
+def ui_api_zilean_status():
+    """Status of the native Zilean index (mode, hash count, last sync/import)."""
+    mode = _settings_mod.get("ZILEAN_MODE", cfg.ZILEAN_MODE)
+    status = {"mode": mode}
+    if mode == "native":
+        import zilean_index
+        status.update(zilean_index.get_status())
+    return jsonify(status)
+
+
+@app.post("/ui/api/zilean/sync")
+@_csrf.exempt
+def ui_api_zilean_sync():
+    """Trigger an immediate native Zilean hashlist sync in the background."""
+    import threading as _threading
+    import zilean_index
+    force = bool(request.get_json(silent=True) and request.get_json(silent=True).get("force"))
+    _threading.Thread(target=zilean_index.sync, kwargs={"force": force}, daemon=True).start()
+    return jsonify(ok=True, started=True)
+
+
+@app.post("/ui/api/zilean/import")
+@_csrf.exempt
+def ui_api_zilean_import():
+    """One-time bulk import from an existing external Zilean's Postgres database
+    into the native index. Connection settings come from the Zilean native
+    settings group (Postgres host/port/db/user/password)."""
+    host = _settings_mod.get("ZILEAN_PG_HOST", cfg.ZILEAN_PG_HOST)
+    if not host:
+        return jsonify(error="ZILEAN_PG_HOST not configured"), 400
+    import threading as _threading
+    import zilean_index
+    kwargs = dict(
+        host=host,
+        port=_settings_mod.get("ZILEAN_PG_PORT", cfg.ZILEAN_PG_PORT),
+        dbname=_settings_mod.get("ZILEAN_PG_DB", cfg.ZILEAN_PG_DB),
+        user=_settings_mod.get("ZILEAN_PG_USER", cfg.ZILEAN_PG_USER),
+        password=_settings_mod.get("ZILEAN_PG_PASSWORD", cfg.ZILEAN_PG_PASSWORD),
+    )
+    _threading.Thread(target=zilean_index.import_from_postgres, kwargs=kwargs, daemon=True).start()
+    return jsonify(ok=True, started=True)
 
 
 @app.post("/ui/catbox-gc")

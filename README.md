@@ -314,7 +314,11 @@ docker compose up -d
 Open **`http://<your-host>:8088`** - the setup wizard walks you through everything. Each step has a **Test** button. The first account you create becomes admin.
 
 **Optional add-ons** (not needed to get started):
-- [Zilean](https://github.com/iPromKnight/zilean) - self-hosted hash index, faster and private
+- [Zilean](https://github.com/iPromKnight/zilean) - self-hosted hash index, faster and private. Two modes: **external**
+  (point at your own Zilean + Postgres service via `ZILEAN_URL`) or **native** (`ZILEAN_MODE=native`, built directly
+  into Mycelium - no separate container, syncs the DMM hashlist into a local SQLite index). Switching from external to
+  native doesn't mean starting over: the Settings tab has a one-time Postgres import that pulls your existing hashes
+  straight from your external Zilean's database.
 - [RealDebrid](https://real-debrid.com) - fallback debrid when TorBox misses
 - [Jellyseerr](https://jellyseerr.dev) / [Overseerr](https://overseerr.dev) - request portal via webhook
 - [OpenSubtitles](https://www.opensubtitles.com/en/consumers) - auto subtitle download

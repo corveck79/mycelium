@@ -57,11 +57,50 @@ def _to_stream(raw: dict, season: int | None) -> TorrentioStream | None:
     )
 
 
+def _from_native(raw: dict, season: int | None) -> TorrentioStream:
+    raw_title = raw.get("raw_title", "") or ""
+    return TorrentioStream(
+        name=raw_title,
+        title=raw_title,
+        info_hash=(raw.get("info_hash") or "").lower(),
+        quality="unknown",
+        seeders=0,
+        size_gb=round((raw.get("size_bytes") or 0) / _BYTES_PER_GB, 2),
+        is_season_pack=_looks_like_season_pack(raw_title, season),
+        source="zilean",
+    )
+
+
 def fetch_streams(
     imdb_id: str,
     season: int | None = None,
     episode: int | None = None,
     timeout: int = 10,
+) -> list[TorrentioStream]:
+    mode = _settings.get("ZILEAN_MODE", "external")
+    if mode == "native":
+        return _fetch_streams_native(imdb_id, season, episode)
+    return _fetch_streams_external(imdb_id, season, episode, timeout)
+
+
+def _fetch_streams_native(imdb_id: str, season: int | None, episode: int | None) -> list[TorrentioStream]:
+    import tmdb
+    import zilean_index
+    title = tmdb.display_title(imdb_id, media_type="tv" if season is not None else "movie")
+    if not title:
+        log.warning("Zilean (native): could not resolve title for %s, skipping", imdb_id)
+        return []
+    raw_list = zilean_index.search(title, season=season, episode=episode)
+    parsed = [_from_native(r, season) for r in raw_list]
+    log.info("Zilean (native) returned %d results for %r", len(parsed), title)
+    return parsed
+
+
+def _fetch_streams_external(
+    imdb_id: str,
+    season: int | None,
+    episode: int | None,
+    timeout: int,
 ) -> list[TorrentioStream]:
     params: dict[str, object] = {"ImdbId": imdb_id}
     if season is not None:

@@ -672,6 +672,23 @@
     </div>
 
     <div class="card" style="margin-top:16px">
+      <div class="card-title">Zilean native index</div>
+      <p class="dim" style="font-size:12px;margin-bottom:10px">
+        Set ZILEAN_MODE above to <code>native</code> to use a built-in DMM hash index
+        instead of an external Zilean service, then save. Sync downloads the
+        community hashlist snapshot (may take a while the first time). If you
+        already run an external Zilean + Postgres and don't want to re-scrape,
+        fill in the Postgres connection fields above and use Import instead.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button type="button" class="btn btn-primary btn-sm" onclick="zileanSync()">▶ Sync now</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="zileanImport()">⬇ Import from Postgres</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="zileanStatus()">↻ Status</button>
+      </div>
+      <div id="zilean-status" class="dim" style="font-size:12px;font-family:monospace"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
       <div class="card-title">Auto-add now</div>
       <p class="dim" style="font-size:12px;margin-bottom:10px">
         Trigger the auto-add scheduler immediately. Pulls all enabled categories
@@ -2119,6 +2136,39 @@
     const r = await fetch('/ui/api/auto-add-now', { method: 'POST' });
     const j = await r.json();
     alert(j.message || j.error || 'OK');
+  }
+
+  // ── Zilean native index helpers ───────────────────────────────────────
+  async function zileanSync() {
+    if (!confirm('Start a Zilean native hashlist sync? The first run can take a while.')) return;
+    const r = await fetch('/ui/api/zilean/sync', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({})
+    });
+    const j = await r.json();
+    if (j.error) { alert(j.error); return; }
+    document.getElementById('zilean-status').textContent = 'Sync started…';
+    setTimeout(zileanStatus, 2000);
+  }
+  async function zileanImport() {
+    if (!confirm('Import from the external Zilean Postgres database configured above? This can take a while for 1M+ rows.')) return;
+    const r = await fetch('/ui/api/zilean/import', { method: 'POST' });
+    const j = await r.json();
+    if (j.error) { alert(j.error); return; }
+    document.getElementById('zilean-status').textContent = 'Import started…';
+    setTimeout(zileanStatus, 2000);
+  }
+  async function zileanStatus() {
+    const r = await fetch('/ui/api/zilean/status');
+    const j = await r.json();
+    if (j.mode !== 'native') {
+      document.getElementById('zilean-status').textContent = `mode: ${j.mode} (native index inactive)`;
+      return;
+    }
+    const s = `${j.total_hashes} hash(es) · last sync: ${j.last_synced_at || 'never'} (${j.last_status}, +${j.last_new_hashes})` +
+      (j.last_import_at ? ` · last import: ${j.last_import_at} (${j.last_import_count} rows)` : '') +
+      (j.syncing ? ' · syncing…' : '') + (j.importing ? ' · importing…' : '');
+    document.getElementById('zilean-status').textContent = s;
+    if (j.syncing || j.importing) setTimeout(zileanStatus, 3000);
   }
 </script>
 </body>
