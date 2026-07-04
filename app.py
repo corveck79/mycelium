@@ -1723,13 +1723,16 @@ def ui_save_settings():
         # before each checkbox so the value always arrives. Handle multi-value here.
         values = request.form.getlist(raw_key)
         value = values[-1] if values else raw_value
-        if key in settings._BOOL_KEYS:
-            settings.set(key, str(value).lower() in ("1", "true", "yes", "on"))
-        elif value == "":
-            settings.set(key, None)
-        else:
-            settings.set(key, value)
-        saved += 1
+        try:
+            if key in settings._BOOL_KEYS:
+                settings.set(key, str(value).lower() in ("1", "true", "yes", "on"))
+            elif value == "":
+                settings.set(key, None)
+            else:
+                settings.set(key, value)
+            saved += 1
+        except ValueError as exc:
+            flash(str(exc), "error")
     flash(f"Saved {saved} setting(s). Hot-reload settings apply immediately; others need a restart.", "ok")
     return redirect(url_for("ui_dashboard") + "#settings")
 

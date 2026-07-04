@@ -50,6 +50,11 @@ _LIST_KEYS = {
 _FLOAT_KEYS = {
     "AUTO_ADD_MIN_RATING",
 }
+# Keys with a fixed set of valid values  -  rendered as a <select> in the UI
+# instead of free text, so a typo can't silently produce an invalid setting.
+_ENUM_KEYS: dict[str, list[str]] = {
+    "ZILEAN_MODE": ["external", "native"],
+}
 _INT_KEYS = {
     "ZILEAN_PG_PORT",
     "MIN_SEEDERS",
@@ -283,6 +288,8 @@ def _coerce(key: str, raw: str | None):
             return float(raw)
         except (TypeError, ValueError):
             return None
+    if key in _ENUM_KEYS:
+        return raw if raw in _ENUM_KEYS[key] else None
     return raw
 
 
@@ -305,6 +312,8 @@ def set(key: str, value) -> None:
     if value is None or value == "":
         db.set_setting(key, None)
         return
+    if key in _ENUM_KEYS and str(value) not in _ENUM_KEYS[key]:
+        raise ValueError(f"{key} must be one of {_ENUM_KEYS[key]}, got {value!r}")
     if isinstance(value, bool):
         stored = "true" if value else "false"
     elif isinstance(value, (list, tuple)):
@@ -328,12 +337,14 @@ def all_for_ui() -> list[dict]:
                 else "list" if key in _LIST_KEYS
                 else "int" if key in _INT_KEYS
                 else "float" if key in _FLOAT_KEYS
+                else "enum" if key in _ENUM_KEYS
                 else "str"
             )
             items.append({
                 "key": key,
                 "value": current,
                 "kind": kind,
+                "options": _ENUM_KEYS.get(key),
                 "overridden": override_raw is not None,
                 "hot_reload": key in HOT_RELOAD,
             })

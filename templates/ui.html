@@ -1256,6 +1256,10 @@
                      </label>`;
           } else if (it.kind === 'int') {
             input = `<input type="number" name="setting_${it.key}" value="${val}" style="width:140px">`;
+          } else if (it.kind === 'enum') {
+            const opts = (it.options || []).map(o =>
+              `<option value="${o}" ${o === val ? 'selected' : ''}>${o}</option>`).join('');
+            input = `<select name="setting_${it.key}" style="width:200px">${opts}</select>`;
           } else if (it.kind === 'list') {
             input = `<input type="text" name="setting_${it.key}" value="${val}" placeholder="comma,separated" style="width:280px">`;
           } else {
