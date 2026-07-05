@@ -33,9 +33,25 @@ log = logging.getLogger(__name__)
 
 _CONNECT_TIMEOUT = 10
 _READ_TIMEOUT    = 60
-_MOOV_FETCH_MB   = 32          # fetch last N MB looking for moov
+_MAX_MOOV_BYTES  = 128 * 1024 * 1024  # refuse to buffer a moov bigger than this
+_MAX_FTYP_BYTES  = 1024 * 1024        # real ftyp boxes are a few dozen bytes; same cap idea as moov
 _CACHE_DIR: Path | None = None # set by init()
-_cache_lock = threading.Lock()
+# Per-token locks instead of one global lock, so building the fast-start
+# cache for one movie doesn't block every other concurrent cold-start build.
+# Not swept/evicted - same accepted tradeoff as catbox.py's _token_locks
+# (unbounded but slow growth vs. the risk of deleting a lock while it's
+# being handed out to another caller).
+_cache_locks: dict[str, threading.Lock] = {}
+_cache_locks_registry_lock = threading.Lock()
+
+
+def _token_lock(token: str) -> threading.Lock:
+    with _cache_locks_registry_lock:
+        lock = _cache_locks.get(token)
+        if lock is None:
+            lock = threading.Lock()
+            _cache_locks[token] = lock
+        return lock
 
 
 def init(cache_dir: str | Path) -> None:
@@ -70,9 +86,20 @@ def _box_header(data: bytes | bytearray, pos: int) -> tuple[bytes, int, int]:
     return typ, size, hdr
 
 
-def _rewrite_offsets(moov: bytearray, delta: int) -> None:
-    """Add delta to every stco/co64 chunk offset inside moov (in-place)."""
-    _CONTAINERS = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"edts", b"moof", b"traf"}
+def _rewrite_offsets(moov: bytearray, delta: int, moov_offset: int) -> None:
+    """Add delta to every stco/co64 chunk offset inside moov that points into
+    mdat1 (the data before moov in the CDN file), in-place.
+
+    Offsets >= moov_offset point into a second mdat block that comes AFTER
+    moov in the CDN layout ([ftyp][mdat1][moov][mdat2]) - that region doesn't
+    move in the virtual fast-start layout, so those offsets must stay
+    untouched. Raises ValueError if a 32-bit stco offset would overflow.
+
+    Only the classic (non-fragmented) moov container hierarchy is handled.
+    moof/traf (fragmented MP4) use tfhd/trun, not stco/co64, and can't appear
+    nested inside moov anyway - deliberately excluded so a fragmented file
+    falls through as untouched/no-op rather than being mis-rewritten."""
+    _CONTAINERS = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"edts"}
 
     def _walk(start: int, end: int) -> None:
         pos = start
@@ -80,6 +107,8 @@ def _rewrite_offsets(moov: bytearray, delta: int) -> None:
             try:
                 typ, size, hdr = _box_header(moov, pos)
             except ValueError:
+                break
+            if size < 8:
                 break
             box_end = pos + size
 
@@ -90,12 +119,22 @@ def _rewrite_offsets(moov: bytearray, delta: int) -> None:
                 for i in range(n):
                     p = pos + 16 + i * 4
                     old = struct.unpack_from(">I", moov, p)[0]
-                    struct.pack_into(">I", moov, p, old + delta)
+                    if old >= moov_offset:
+                        continue  # points into mdat2, unchanged in the virtual layout
+                    new = old + delta
+                    if new > 0xFFFFFFFF:
+                        raise ValueError(
+                            f"stco offset overflow: {old}+{delta} exceeds 32-bit range - "
+                            "file needs co64, fast-start unsupported"
+                        )
+                    struct.pack_into(">I", moov, p, new)
             elif typ == b"co64":
                 n = struct.unpack_from(">I", moov, pos + 12)[0]
                 for i in range(n):
                     p = pos + 16 + i * 8
                     old = struct.unpack_from(">Q", moov, p)[0]
+                    if old >= moov_offset:
+                        continue
                     struct.pack_into(">Q", moov, p, old + delta)
             pos = box_end
 
@@ -126,6 +165,17 @@ def _get(url: str, start: int, end: int) -> bytes:
         timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT),
         stream=True,
     )
+    if resp.status_code == 200:
+        # CDN ignored the Range header and is about to send the WHOLE file
+        # starting at byte 0, not at `start` - every offset computed from
+        # this response would be wrong. Bail out instead of silently
+        # buffering/misreading it (every real TorBox CDN response uses 206).
+        raise ValueError(
+            f"CDN returned HTTP 200 (ignored Range header) for bytes={start}-{end} - "
+            "refusing to treat body as if it started at the requested offset"
+        )
+    if resp.status_code != 206:
+        raise ValueError(f"CDN returned HTTP {resp.status_code} for bytes={start}-{end}")
     data = bytearray()
     for chunk in resp.iter_content(1 << 17):
         data += chunk
@@ -149,7 +199,10 @@ def _locate_moov(cdn_url: str, cdn_size: int) -> tuple[int, int] | None:
             break
         if typ == b"moov":
             return pos, size
-        if size == 0 or size > cdn_size - pos:
+        if size < 8 or size > cdn_size - pos:
+            # A box smaller than the minimum header (or one claiming to run
+            # past EOF) means the file is malformed - bail out instead of
+            # crawling forward one byte at a time, one HTTP request per box.
             break
         pos += size
     return None
@@ -162,7 +215,7 @@ def build_and_cache(cdn_url: str, token: str) -> bool:
     Returns True on success.
     """
     path = _cache_path(token)
-    with _cache_lock:
+    with _token_lock(token):
         if path.exists():
             return True
 
@@ -170,9 +223,16 @@ def build_and_cache(cdn_url: str, token: str) -> bool:
             head = req_lib.head(cdn_url, timeout=_CONNECT_TIMEOUT, allow_redirects=True)
             cdn_size = int(head.headers["Content-Length"])
 
-            # ftyp: first box — read header to get actual size, then fetch full box
+            # ftyp: first box  -  read header to get actual size, then fetch full box
             ftyp_hdr = _get(cdn_url, 0, 15)
             _, ftyp_size, _ = _box_header(ftyp_hdr, 0)
+            if ftyp_size > _MAX_FTYP_BYTES:
+                log.warning(
+                    "FastStart: ftyp size %d for token=%s exceeds cap %d - "
+                    "refusing to buffer (malformed/hostile CDN response?)",
+                    ftyp_size, token, _MAX_FTYP_BYTES,
+                )
+                return False
             ftyp_raw = _get(cdn_url, 0, ftyp_size - 1)
             ftyp = ftyp_raw[:ftyp_size]
 
@@ -193,6 +253,14 @@ def build_and_cache(cdn_url: str, token: str) -> bool:
 
             moov_offset, moov_size = result
 
+            if moov_size > _MAX_MOOV_BYTES:
+                log.warning(
+                    "FastStart: moov size %d for token=%s exceeds cap %d - "
+                    "refusing to buffer (malformed/hostile CDN response?)",
+                    moov_size, token, _MAX_MOOV_BYTES,
+                )
+                return False
+
             if moov_offset == ftyp_size:
                 # Already fast-start: sentinel with moov_size=0 signals direct CDN redirect
                 meta = struct.pack(">QQQQ", ftyp_size, 0, cdn_size, moov_offset)
@@ -204,7 +272,7 @@ def build_and_cache(cdn_url: str, token: str) -> bool:
             moov = bytearray(_get(cdn_url, moov_offset, moov_offset + moov_size - 1))
 
             # Chunk offsets delta = moov_size: mdat1 shifts right by moov_size in virtual layout
-            _rewrite_offsets(moov, moov_size)
+            _rewrite_offsets(moov, moov_size, moov_offset)
 
             header = ftyp + bytes(moov)
 

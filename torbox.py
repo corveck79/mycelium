@@ -44,15 +44,53 @@ def _load_createtorrent_from_db() -> None:
         log.debug("Could not load createtorrent log from DB: %s", exc)
 
 
-def _record_createtorrent(reason: str) -> None:
-    now = time.time()
-    with _CREATETORRENT_LOCK:
-        _CREATETORRENT_LOG.append((now, reason))
+def _persist_createtorrent(ts: float, reason: str) -> None:
     try:
         import db as _db
-        _db.log_createtorrent(now, reason)
+        _db.log_createtorrent(ts, reason)
     except Exception as exc:
         log.debug("Could not persist createtorrent log: %s", exc)
+
+
+def _reserve_createtorrent_slot(reason: str) -> tuple[float, str]:
+    """Atomically check both the hourly and per-minute budgets and reserve a
+    slot in the same locked section, so two concurrent callers can't both
+    pass the check before either recorded a call (the old check-then-record
+    was two separate locked sections with the actual HTTP call in between,
+    letting concurrent cold-starts collectively overshoot TorBox's real
+    quota). Raises RateLimited if no budget remains; otherwise returns the
+    log entry so the caller can roll it back if the API call itself fails."""
+    global _CREATETORRENT_LOADED
+    if not _CREATETORRENT_LOADED:
+        _CREATETORRENT_LOADED = True
+        _load_createtorrent_from_db()
+    now = time.time()
+    with _CREATETORRENT_LOCK:
+        hour_count = sum(1 for ts, _ in _CREATETORRENT_LOG if ts >= now - 3600)
+        min_count  = sum(1 for ts, _ in _CREATETORRENT_LOG if ts >= now - 60)
+        if hour_count >= _CREATETORRENT_LIMIT_HOUR - 2:
+            log.warning("createtorrent [%s] SKIPPED  -  hourly quota %d/%d reached",
+                        reason, hour_count, _CREATETORRENT_LIMIT_HOUR)
+            raise RateLimited()
+        if min_count >= _CREATETORRENT_LIMIT_MIN - 1:
+            log.warning("createtorrent [%s] SKIPPED  -  per-minute burst %d/%d reached",
+                        reason, min_count, _CREATETORRENT_LIMIT_MIN)
+            raise RateLimited()
+        entry = (now, reason)
+        _CREATETORRENT_LOG.append(entry)
+        log.info("createtorrent [%s] (%d/60h, %d/10m): reserving slot",
+                  reason, hour_count + 1, min_count + 1)
+        return entry
+
+
+def _release_createtorrent_slot(entry: tuple[float, str]) -> None:
+    """Undo a reservation when the API call never actually reached/was
+    accepted by TorBox (network error, explicit 429, or non-2xx response)."""
+    with _CREATETORRENT_LOCK:
+        try:
+            _CREATETORRENT_LOG.remove(entry)
+        except ValueError:
+            pass
 
 
 def createtorrent_usage(window_sec: int = 3600) -> dict:
@@ -90,28 +128,23 @@ class RateLimited(Exception):
 
 def add_magnet(magnet: str, timeout: int = 30, reason: str = "unknown") -> dict:
     url = f"{_base_url().rstrip('/')}/torrents/createtorrent"
-    # Client-side guard: check both the 60/hour and the 10/minute edge limits.
-    usage_hour = createtorrent_usage(window_sec=3600)
-    usage_min  = createtorrent_usage(window_sec=60)
-    if usage_hour["count"] >= _CREATETORRENT_LIMIT_HOUR - 2:
-        log.warning("createtorrent [%s] SKIPPED  -  hourly quota %d/%d reached (resets ~%ds)",
-                    reason, usage_hour["count"], _CREATETORRENT_LIMIT_HOUR,
-                    usage_hour["resets_in_sec"])
-        raise RateLimited()
-    if usage_min["count"] >= _CREATETORRENT_LIMIT_MIN - 1:
-        log.warning("createtorrent [%s] SKIPPED  -  per-minute burst %d/%d reached",
-                    reason, usage_min["count"], _CREATETORRENT_LIMIT_MIN)
-        raise RateLimited()
-    log.info("createtorrent [%s] (%d/60h, %d/10m): %s",
-             reason, usage_hour["count"] + 1, usage_min["count"] + 1, magnet[:80])
-    resp = requests.post(url, headers=_headers(), data={"magnet": magnet}, timeout=timeout)
-    if resp.status_code == 429:
-        retry_after = int(resp.headers.get("Retry-After", 60))
-        log.warning("createtorrent [%s] got 429 from TorBox (Retry-After=%ds)  -  raising RateLimited",
-                    reason, retry_after)
-        raise RateLimited()
-    resp.raise_for_status()
-    _record_createtorrent(reason)
+    # Client-side guard: check both the 60/hour and the 10/minute edge limits,
+    # and reserve the slot in the same locked step (see _reserve_createtorrent_slot).
+    entry = _reserve_createtorrent_slot(reason)
+    log.info("createtorrent [%s]: %s", reason, magnet[:80])
+    try:
+        resp = requests.post(url, headers=_headers(), data={"magnet": magnet}, timeout=timeout)
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", 60))
+            log.warning("createtorrent [%s] got 429 from TorBox (Retry-After=%ds)  -  raising RateLimited",
+                        reason, retry_after)
+            raise RateLimited()
+        resp.raise_for_status()
+    except Exception:
+        # TorBox never actually accepted this call - give the slot back.
+        _release_createtorrent_slot(entry)
+        raise
+    _persist_createtorrent(*entry)
     payload = resp.json() or {}
     if not payload.get("success", False):
         # DUPLICATE_ITEM means the torrent is already in TorBox  -  treat as success
@@ -357,4 +390,4 @@ def wait_until_ready(info_hash: str, timeout: int | None = None,
                 return item
         time.sleep(TORBOX_POLL_INTERVAL_SEC)
     log.warning("Timed out waiting for Torbox to make %s available", info_hash)
-    return find_by_hash(info_hash)
+    return find_by_id(torrent_id) if torrent_id else find_by_hash(info_hash)

@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { PluginMeta, PluginSettingsUi } from '../hooks/usePlugins'
-import { api } from '../api'
+import { api, csrfToken } from '../api'
 
 export default function PluginSettingsCard({ plugin, embedded }: { plugin: PluginMeta; embedded?: boolean }) {
   const ui = plugin.settings_ui!
@@ -17,7 +17,10 @@ export default function PluginSettingsCard({ plugin, embedded }: { plugin: Plugi
 
   const { data: status, refetch: refetchStatus } = useQuery<Record<string, any>>({
     queryKey: ['plugin-status', plugin.name],
-    queryFn:  () => fetch(ui.status_url, { credentials: 'same-origin' }).then(r => r.json()),
+    queryFn:  () => fetch(ui.status_url, { credentials: 'same-origin' }).then(r => {
+      if (!r.ok) throw new Error(`${r.status}`)
+      return r.json()
+    }),
   })
 
   const configured = !ui.config_gate || !!status?.[ui.config_gate.field]
@@ -134,7 +137,7 @@ function OAuthDeviceSection({ spec, configured, connected, username, syncedAt, o
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json',
-                   'X-CSRFToken': document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '' },
+                   'X-CSRFToken': csrfToken() },
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
@@ -154,6 +157,16 @@ function OAuthDeviceSection({ spec, configured, connected, username, syncedAt, o
     pollRef.current = setInterval(async () => {
       try {
         const r = await fetch(spec.poll_url, { credentials: 'same-origin' })
+        if (r.status === 401) {
+          // Session expired mid-poll - match api.ts's http() wrapper instead
+          // of silently polling a dead session (the same bug already fixed
+          // in DetailModal.tsx's request-status poll).
+          clearInterval(pollRef.current)
+          setPhase('idle')
+          setDeviceInfo(null)
+          if (!window.location.pathname.endsWith('/login')) window.location.href = '/login'
+          return
+        }
         const data = await r.json()
         if (data.status === 'connected') {
           clearInterval(pollRef.current)
@@ -175,7 +188,7 @@ function OAuthDeviceSection({ spec, configured, connected, username, syncedAt, o
     await fetch(spec.revoke_url, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'X-CSRFToken': document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '' },
+      headers: { 'X-CSRFToken': csrfToken() },
     })
     onStatusChange()
   }
@@ -253,7 +266,7 @@ function ActionButton({ action, onSuccess }: {
       const r = await fetch(action.url, {
         method: action.method || 'POST',
         credentials: 'same-origin',
-        headers: { 'X-CSRFToken': document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '' },
+        headers: { 'X-CSRFToken': csrfToken() },
       })
       const data = await r.json()
       if (action.success_template && action.success_key != null) {

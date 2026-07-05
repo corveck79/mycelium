@@ -262,7 +262,7 @@ TRUSTED_PROXY_AUTH = _env("TRUSTED_PROXY_AUTH", "false").lower() in ("1", "true"
 TRUSTED_PROXY_USER_HEADER = _env("TRUSTED_PROXY_USER_HEADER", "X-Forwarded-User")
 TRUSTED_PROXY_NETWORKS = _env(
     "TRUSTED_PROXY_NETWORKS",
-    "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+    "127.0.0.1/32",
 )
 
 # ── OIDC (native single sign-on, opt-in) ──────────────────────────────────────

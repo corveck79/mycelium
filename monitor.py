@@ -100,46 +100,58 @@ def _sync_wanted(imdb_id: str, tmdb_id: int, title: str, seasons: list[int],
                 db.mark_episode_status(imdb_id, season, ep_num, "wanted")
 
 
+def _check_one_series(series: dict) -> None:
+    """Refresh one monitored series: resolve TMDB id, detect new seasons,
+    refresh its wanted-episode list. Split out of run_series_check so a
+    failure on one series (network error, bad TMDB response, ...) can't
+    abort the whole batch - the caller wraps this in try/except per series."""
+    imdb_id = series["imdb_id"]
+    title = series["title"]
+    tmdb_id = series["tmdb_id"]
+    seasons = [int(s) for s in (series["seasons"] or "1").split(",") if s.strip().isdigit()]
+    monitor_mode = series.get("monitor_mode") or "all"
+    since = series.get("added_at_date")
+
+    # Resolve TMDB ID if missing
+    if not tmdb_id:
+        tmdb_id = tmdb.find_by_imdb(imdb_id, kind="tv")
+        if tmdb_id:
+            db.update_monitored_series(series["id"], tmdb_id=tmdb_id)
+
+    if not tmdb_id:
+        log.warning("Monitor: no TMDB ID for %s; skipping", title)
+        db.update_monitored_series(series["id"])
+        return
+
+    # Detect new seasons via TMDB. For 'selected' mode we never auto-expand  -
+    # the user picked specific seasons. For 'all' and 'future' we pick up new
+    # seasons as they're announced.
+    if monitor_mode != "selected":
+        show = tmdb.get_show_info(tmdb_id)
+        if show:
+            total = show.get("number_of_seasons") or 0
+            new_seasons = [s for s in range(1, total + 1) if s not in seasons]
+            if new_seasons:
+                log.info("Monitor: new season(s) %s detected for %s", new_seasons, title)
+                seasons = sorted(set(seasons) | set(new_seasons))
+                db.update_monitored_series(series["id"], seasons=seasons)
+
+    # Refresh wanted list (mode-aware)
+    _sync_wanted(imdb_id, tmdb_id, title, seasons, monitor_mode=monitor_mode, since=since)
+    db.update_monitored_series(series["id"])
+
+
 def run_series_check() -> None:
     """Periodic: refresh episode lists, detect new seasons, retry wanted."""
     log.info("Monitor: starting series check")
     today = _TODAY()
 
     for series in db.get_monitored_series(status="active"):
-        imdb_id = series["imdb_id"]
         title = series["title"]
-        tmdb_id = series["tmdb_id"]
-        seasons = [int(s) for s in (series["seasons"] or "1").split(",") if s.strip().isdigit()]
-        monitor_mode = series.get("monitor_mode") or "all"
-        since = series.get("added_at_date")
-
-        # Resolve TMDB ID if missing
-        if not tmdb_id:
-            tmdb_id = tmdb.find_by_imdb(imdb_id, kind="tv")
-            if tmdb_id:
-                db.update_monitored_series(series["id"], tmdb_id=tmdb_id)
-
-        if not tmdb_id:
-            log.warning("Monitor: no TMDB ID for %s; skipping", title)
-            db.update_monitored_series(series["id"])
-            continue
-
-        # Detect new seasons via TMDB. For 'selected' mode we never auto-expand  - 
-        # the user picked specific seasons. For 'all' and 'future' we pick up new
-        # seasons as they're announced.
-        if monitor_mode != "selected":
-            show = tmdb.get_show_info(tmdb_id)
-            if show:
-                total = show.get("number_of_seasons") or 0
-                new_seasons = [s for s in range(1, total + 1) if s not in seasons]
-                if new_seasons:
-                    log.info("Monitor: new season(s) %s detected for %s", new_seasons, title)
-                    seasons = sorted(set(seasons) | set(new_seasons))
-                    db.update_monitored_series(series["id"], seasons=seasons)
-
-        # Refresh wanted list (mode-aware)
-        _sync_wanted(imdb_id, tmdb_id, title, seasons, monitor_mode=monitor_mode, since=since)
-        db.update_monitored_series(series["id"])
+        try:
+            _check_one_series(series)
+        except Exception as exc:
+            log.error("Monitor: series check failed for %s: %s", title, exc)
 
     # Retry wanted episodes  -  keep watching indefinitely (like Radarr/Sonarr).
     # In catbox mode no TorBox quota is consumed so we never pause for budget.
@@ -169,6 +181,11 @@ def run_series_check() -> None:
                 continue
             log.info("Monitor: rate limited  -  pausing episode retries until next run")
             break
+        except Exception as exc:
+            # One bad episode (network error, unexpected API shape, ...) must
+            # not abort retries for every other wanted episode this cycle.
+            log.error("Monitor: retry failed for %s S%02dE%02d: %s",
+                      ep["title"], ep["season"], ep["episode"], exc)
 
     log.info("Monitor: series check complete")
 
@@ -263,7 +280,7 @@ def _retry_episode(ep: dict) -> bool:
         except torbox.RateLimited:
             raise processor.RateLimited()
         except Exception as exc:
-            if "429" in str(exc):
+            if processor._is_429(exc):
                 raise processor.RateLimited()
             log.warning("Monitor: failed to add %s S%02dE%02d: %s", title, season, episode, exc)
 

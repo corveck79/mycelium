@@ -5,6 +5,7 @@ and picks which of their lists to sync. Unlike Trakt this has no OAuth flow -
 MDBList uses a single long-lived API key per account.
 """
 import logging
+import time
 
 import requests
 
@@ -92,4 +93,5 @@ def sync_auto_request(user: dict) -> int:
             threading.Thread(target=processor.process, args=(req,),
                              name=f"mdblist-sync-{imdb_id}", daemon=True).start()
             added += 1
+            time.sleep(0.3)  # small stagger so a big synced list doesn't burst TorBox all at once
     return added

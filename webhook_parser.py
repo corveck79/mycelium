@@ -53,7 +53,11 @@ def _extract_imdb(payload: dict) -> str | None:
             return str(value).strip()
     blob = str(payload)
     m = _IMDB_RE.search(blob)
-    return m.group(0) if m else None
+    if m:
+        log.warning("Extracted imdb_id %s via last-resort payload scan  -  "
+                    "no imdbId/imdb_id/imdb field or 'imdb' extra found", m.group(0))
+        return m.group(0)
+    return None
 
 
 def _extract_request_id(payload: dict) -> str | None:

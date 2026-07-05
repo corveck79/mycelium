@@ -2,6 +2,34 @@
 
 All notable changes to Mycelium are documented in this file.
 
+## [0.6.1] - 2026-07-05
+
+A security- and correctness-focused release from a full multi-pass code review. No new features.
+
+### Security
+
+- OIDC and trusted-proxy logins no longer implicitly become admin - `auth.py` now resolves or creates a real per-user role (`user` by default; only the very first user ever provisioned this way becomes admin, and only during initial, incomplete setup)
+- `AUTH_SESSION_SECRET` is no longer used to sign sessions when left at the well-known default value - a random secret is generated and persisted instead, same pattern as the existing `WEBHOOK_SECRET_AUTO`
+- Added `is_admin()` checks to roughly 30 previously-unprotected `/ui/*` and `/ui/api/*` routes: settings save/reset, backup restore, DB vacuum/prune, cleanup/repair/migrate triggers, Zilean sync/import, wanted-recheck, NFO/strm regeneration, and several legacy `/api/*` aliases that had slipped through
+- `/admin` itself now redirects non-admin users to login instead of only checking that setup is complete
+- Web Player `/stream/<token>/*` playback routes now require an authenticated session with the Web Player feature enabled - previously reachable by anyone who obtained a token
+- `TRUSTED_PROXY_NETWORKS` default narrowed from broad private-IP ranges to loopback only
+- Webhook secret and internal token comparisons now use constant-time comparison throughout
+- The Spore TCP server (port 8089, unauthenticated protocol) now binds to loopback by default instead of all interfaces
+
+### Fixed
+
+- A transient scraper/cache-check error on a single episode could mark an entire multi-season request "failed", discarding seasons that had already been added successfully
+- The retry queue could silently drop a failed retry and abort the rest of that cycle's batch instead of continuing
+- Cleanup/repair and canonical-name migration could leave orphaned database rows behind after deleting or merging `.strm` files, permanently blocking recreation of that title
+- Folder rename/merge database updates could corrupt a sibling folder's paths when one folder name was a literal prefix of another (e.g. "Alien (1979)" vs. "Alien (1979) Directors Cut")
+- Duplicate-folder merges could silently delete a file that was never actually copied over first
+- Plex's fast-start MP4 cache could corrupt sample offsets for CDN files with a second data block after the `moov` atom (dual-mdat layout)
+- HTTP suffix byte-ranges (`bytes=-N`) were parsed as the first N bytes instead of the last N
+- CSRF protection was effectively disabled on roughly 27 internal API routes because the exemption predated the frontend actually sending the CSRF token
+- Several background jobs (series monitor, retry queue) could abort an entire batch when a single item raised an unexpected error instead of continuing with the rest
+- Assorted smaller fixes: SQLite `LIKE` wildcard characters in folder names could cause wrong-path matches during renames; a webplayer seek race could start two concurrent FFmpeg processes for the same session; two `/api/*` routes referenced an unimported module and would have raised on use
+
 ## [0.6.0] - 2026-07-04
 
 ### Credits

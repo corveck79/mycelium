@@ -459,7 +459,7 @@ def fix_imdb_titles() -> dict:
                     old_folder_path.rmdir() if not any(old_folder_path.iterdir()) else None
                 else:
                     old_folder_path.rename(new_folder_path)
-                db.update_virtual_strm_path_prefix(str(old_folder_path), str(new_folder_path))
+                db.rename_virtual_item_paths(str(old_folder_path), str(new_folder_path))
                 renamed = True
 
             fixed.append({'imdb_id': imdb_id, 'old': old_title, 'new': new_title,
@@ -759,6 +759,11 @@ def create_lazy_movie_strm(info_hash: str, magnet: str, title: str,
         year=year,
     )
     written = _write_strm(path, catbox.proxy_url(token))
+    if not written:
+        # Don't leave a virtual_item row with no backing .strm - it would
+        # permanently block retries via the "already exists" guard above.
+        db.delete_virtual_item(token)
+        return False
     if written:
         _write_spore_stubs(path, token, folder, quality, size_gb)
         if imdb_id or tmdb_id:
@@ -827,6 +832,11 @@ def create_lazy_episode_strm(info_hash: str, magnet: str, title: str,
         episode=episode,
     )
     written = _write_strm(path, catbox.proxy_url(token))
+    if not written:
+        # Don't leave a virtual_item row with no backing .strm - it would
+        # permanently block retries via the imdb_id+season+episode guard above.
+        db.delete_virtual_item(token)
+        return False
     if written:
         _write_spore_stubs(path, token, ep_name, quality, size_gb)
         if imdb_id:
@@ -1518,13 +1528,20 @@ def _write_strm(path: Path, url: str) -> bool:
         return False
     # Fuzzy duplicate check: skip if any existing sibling folder normalizes to the same title.
     # Catches "The Minecraft Movie (2025)" vs "Minecraft Movie The (2025)", case differences, etc.
-    parent = path.parent.parent  # movies/ or series/
-    norm = _norm_title(path.parent.name)
+    # For movies path.parent is the title folder directly under movies/. For
+    # episodes path.parent is a "Season NN" folder, so the title folder (and
+    # its siblings under series/) is one level further up.
+    if re.match(r"^Season \d+$", path.parent.name):
+        title_folder = path.parent.parent
+    else:
+        title_folder = path.parent
+    parent = title_folder.parent  # movies/ or series/
+    norm = _norm_title(title_folder.name)
     if parent.is_dir():
         for existing in parent.iterdir():
-            if existing.is_dir() and existing != path.parent and _norm_title(existing.name) == norm:
-                if any(existing.glob("*.strm")):
-                    log.info("Skipping duplicate strm %s  -  already have %s", path.parent.name, existing.name)
+            if existing.is_dir() and existing != title_folder and _norm_title(existing.name) == norm:
+                if any(existing.glob("*.strm")) or any(existing.rglob("*.strm")):
+                    log.info("Skipping duplicate strm %s  -  already have %s", title_folder.name, existing.name)
                     return False
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1684,7 +1701,6 @@ def scan_torbox_library() -> dict:
     lands in a properly named, deduplicated folder (same canonical-title path
     normal requests use), and falls back to the raw parsed name otherwise.
     """
-    import torbox as torbox_mod
     import tmdb
     items = torbox_mod.list_torrents(force_refresh=True)
     scanned = imported = skipped = failed = 0
@@ -1873,9 +1889,6 @@ def migrate_to_canonical_names() -> dict:
 
     Returns: {scanned, renamed, merged, skipped, errors, no_imdb}
     """
-    import re as _re
-    import shutil
-
     if not _maintenance_lock.acquire(blocking=False):
         log.warning("migrate_to_canonical_names: maintenance already running  -  skipping")
         return {"scanned": 0, "renamed": 0, "merged": 0, "skipped": 0, "errors": 0, "no_imdb": 0}
@@ -1912,8 +1925,13 @@ def _migrate_to_canonical_names_locked() -> dict:
     def _do_rename(old: Path, new: Path) -> bool:
         try:
             old.rename(new)
-            # Update DB strm_path: any virtual_item pointing into old folder
-            db.update_virtual_strm_path_prefix(str(old), str(new))
+            # Update DB strm_path: any virtual_item pointing into old folder.
+            # rename_virtual_item_paths() anchors the match to a directory
+            # boundary (trailing "/"), unlike update_virtual_strm_path_prefix()
+            # - without that, renaming "Alien (1979)" would also corrupt
+            # strm_path rows for a sibling folder like "Alien (1979) Directors
+            # Cut" whose name happens to start with the same string.
+            db.rename_virtual_item_paths(str(old), str(new))
             # Rename .strm/.nfo files inside that still use the old folder stem
             old_stem = old.name
             new_stem = new.name
@@ -1924,14 +1942,36 @@ def _migrate_to_canonical_names_locked() -> dict:
                     if not new_file.exists():
                         old_file.rename(new_file)
                         if suffix == ".strm":
-                            db.update_virtual_strm_path_prefix(str(old_file), str(new_file))
+                            db.update_virtual_item_strm_path(str(old_file), str(new_file))
             log.info("migrate: renamed '%s' → '%s'", old.name, new.name)
             return True
         except Exception as exc:
             log.error("migrate: rename failed %s → %s: %s", old.name, new.name, exc)
             return False
 
-    def _do_delete(folder: Path) -> None:
+    def _do_delete(folder: Path, keep: Path) -> None:
+        """Merge any .strm this duplicate has that `keep` doesn't, then remove
+        it - unlike a plain rmtree, this can't silently lose a differently
+        named/quality .strm (or its virtual_item row) that only existed in
+        the folder being discarded."""
+        fully_merged = True
+        for strm in folder.glob("*.strm"):
+            dest = keep / strm.name
+            if dest.exists():
+                db.delete_virtual_item_by_strm_path(str(strm))
+                continue
+            try:
+                content = strm.read_text(encoding="utf-8")
+                dest.write_text(content, encoding="utf-8")
+            except Exception as exc:
+                log.warning("migrate: could not copy %s to %s: %s", strm, dest, exc)
+                fully_merged = False
+                continue
+            db.update_virtual_item_strm_path(str(strm), str(dest))
+        if not fully_merged:
+            log.warning("migrate: not all files could be merged out of '%s' - leaving folder in place",
+                        folder.name)
+            return
         try:
             shutil.rmtree(folder)
             log.info("migrate: deleted duplicate '%s'", folder.name)
@@ -2007,7 +2047,7 @@ def _migrate_to_canonical_names_locked() -> dict:
                 for dup in ordered[1:]:
                     if dup.resolve() == keep.resolve():
                         continue
-                    _do_delete(dup)
+                    _do_delete(dup, keep)
                     merged += 1
 
         except Exception as exc:
@@ -2247,7 +2287,7 @@ def _cleanup_duplicate_strms_locked() -> dict:
             if not new_path.exists():
                 try:
                     keep.rename(new_path)
-                    db.update_virtual_strm_path_prefix(str(keep), str(new_path))
+                    db.update_virtual_item_strm_path(str(keep), str(new_path))
                     nfo_old = keep.with_suffix(".nfo")
                     nfo_new = new_path.with_suffix(".nfo")
                     if nfo_old.exists() and not nfo_new.exists():

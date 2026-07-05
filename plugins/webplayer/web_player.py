@@ -780,6 +780,7 @@ class HLSSession:
     file_info:    dict = field(default_factory=dict)
     started_at:   float = field(default_factory=time.monotonic)
     last_request: float = field(default_factory=time.monotonic)
+    seeking:      bool = False
     _hb:          threading.Thread = field(default=None, repr=False)
 
     def touch(self):
@@ -808,36 +809,51 @@ def seek_session(token: str, position_s: float) -> str | None:
     Returns the (unchanged) stream URL so the frontend can reload Hls.js."""
     with _sessions_lock:
         session = _sessions.get(token)
-    if not session:
-        return None
+        if not session:
+            return None
+        if session.seeking:
+            # A seek for this token is already in flight - letting a second
+            # one run concurrently would terminate/restart ffmpeg twice and
+            # leave two processes writing into the same tmp_dir. _start_hls
+            # below replaces the dict entry with a fresh session (seeking
+            # defaults to False again), so nothing needs resetting here.
+            return None
+        session.seeking = True
 
-    multi_audio = len(session.file_info.get("audio_tracks", [])) > 1
-
-    # Stop current process
-    session.proc.terminate()
     try:
-        session.proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        session.proc.kill()
-        session.proc.wait(timeout=1)
+        multi_audio = len(session.file_info.get("audio_tracks", [])) > 1
 
-    tmp_dir = session.tmp_dir
+        # Stop current process
+        session.proc.terminate()
+        try:
+            session.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            session.proc.kill()
+            session.proc.wait(timeout=1)
 
-    # Remove old segments and playlists.
-    for pattern in ("seg*.ts", "seg*.m4s", "seg_*_*.ts", "seg_*_*.m4s", "init*.mp4"):
-        for f in tmp_dir.glob(pattern):
-            f.unlink(missing_ok=True)
-    for name in (["playlist.m3u8", "video.m3u8", "master.m3u8"]
-                 + [f"audio_{i}.m3u8" for i in range(10)]):
-        (tmp_dir / name).unlink(missing_ok=True)
+        tmp_dir = session.tmp_dir
 
-    # Restart at new position (registers updated session under same token)
-    _start_hls(token, session.cdn_url, session.file_info, tmp_dir,
-               seek_offset=position_s)
+        # Remove old segments and playlists.
+        for pattern in ("seg*.ts", "seg*.m4s", "seg_*_*.ts", "seg_*_*.m4s", "init*.mp4"):
+            for f in tmp_dir.glob(pattern):
+                f.unlink(missing_ok=True)
+        for name in (["playlist.m3u8", "video.m3u8", "master.m3u8"]
+                     + [f"audio_{i}.m3u8" for i in range(10)]):
+            (tmp_dir / name).unlink(missing_ok=True)
 
-    # Wait for first segments (multi-audio already waits inside _start_hls)
-    if not multi_audio:
-        _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT)
+        # Restart at new position (registers updated session under same token)
+        _start_hls(token, session.cdn_url, session.file_info, tmp_dir,
+                   seek_offset=position_s)
+
+        # Wait for first segments (multi-audio already waits inside _start_hls)
+        if not multi_audio:
+            _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT)
+    except Exception:
+        # _start_hls normally replaces the dict entry with a fresh session
+        # (seeking=False). If we never got that far, clear the flag on the
+        # old object so this token isn't permanently locked out of seeking.
+        session.seeking = False
+        raise
 
     return (f"/stream/{token}/hls/master.m3u8" if multi_audio
             else f"/stream/{token}/hls/playlist.m3u8")

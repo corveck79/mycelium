@@ -65,6 +65,13 @@ export default function DetailModal({
           return;
         }
         const res = await fetch(`/ui/api/requests/status?imdb_id=${pollingImdbId}`);
+        if (res.status === 401) {
+          // Session expired mid-poll - match api.ts's http() wrapper behavior
+          // instead of silently polling a dead session for up to 3 minutes.
+          setPollingImdbId(null);
+          if (!window.location.pathname.endsWith('/login')) window.location.href = '/login';
+          return;
+        }
         if (!res.ok) return;
         const data = await res.json();
         if (data.status === 'success') {

@@ -24,10 +24,18 @@ export default function Search() {
   };
   const [detail, setDetail] = useState<{ id: number; type: MediaType } | null>(null);
 
+  // Debounce the value that actually triggers a search request so fast typing
+  // doesn't fire one TMDB call per keystroke - the input itself stays instant.
+  const [debouncedQ, setDebouncedQ] = useState(q);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQ(q), 300);
+    return () => clearTimeout(timer);
+  }, [q]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['search', q],
-    queryFn: () => api.search(q).then((r) => r.results),
-    enabled: q.trim().length > 0,
+    queryKey: ['search', debouncedQ],
+    queryFn: () => api.search(debouncedQ).then((r) => r.results),
+    enabled: debouncedQ.trim().length > 0,
   });
 
   const filtered = (data || []).filter((i) =>

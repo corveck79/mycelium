@@ -12,7 +12,7 @@ import type {
   PersonDetail,
 } from './types';
 
-const csrfToken = (): string => {
+export const csrfToken = (): string => {
   return document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '';
 };
 

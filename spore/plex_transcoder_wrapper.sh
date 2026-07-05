@@ -4,6 +4,17 @@
 # so FFmpeg reads from the CDN directly (MKV) or via moov-first proxy (MP4).
 
 SPORE_LOG=/config/spore-wrap-debug.log
+FFMPEG_STDERR_LOG=/config/spore-ffmpeg-stderr.log
+
+# These logs are appended to on every transcode session with no rotation -
+# truncate once they cross ~20MB so a long-running Plex container doesn't
+# grow them unbounded.
+for _log in "$SPORE_LOG" "$FFMPEG_STDERR_LOG"; do
+    if [ -f "$_log" ] && [ "$(stat -c%s "$_log" 2>/dev/null || echo 0)" -gt 20971520 ]; then
+        : > "$_log"
+    fi
+done
+
 echo "$(date '+%H:%M:%S') WRAP started" >> "$SPORE_LOG"
 
 # ── EAE_ROOT discovery ─────────────────────────────────────────────────────────
@@ -45,7 +56,7 @@ for a in "$@"; do
                 echo "SPORE-WRAP: .strm path $a -> token=$tok -> spore-stream" >&2
                 a="http://127.0.0.1:8088/spore-stream/$tok"
                 spore_replaced=1
-                _strm_tmp_minfo="/tmp/spore-minfo-$tok.txt"
+                _strm_tmp_minfo=$(mktemp "/tmp/spore-minfo-$tok.XXXXXX")
                 curl -sf "http://127.0.0.1:8088/ui/api/spore-minfo/$tok" \
                      -o "$_strm_tmp_minfo" 2>/dev/null \
                      || echo "token=$tok" > "$_strm_tmp_minfo"
@@ -58,7 +69,7 @@ for a in "$@"; do
             echo "SPORE-WRAP: -i stream URL tok=$tok -> spore-stream/$tok" >&2
             a="http://127.0.0.1:8088/spore-stream/$tok"
             spore_replaced=1
-            _strm_tmp_minfo="/tmp/spore-minfo-$tok.txt"
+            _strm_tmp_minfo=$(mktemp "/tmp/spore-minfo-$tok.XXXXXX")
             curl -sf "http://127.0.0.1:8088/ui/api/spore-minfo/$tok" \
                  -o "$_strm_tmp_minfo" 2>/dev/null \
                  || echo "token=$tok" > "$_strm_tmp_minfo"
@@ -155,7 +166,7 @@ if [ "$spore_replaced" = "1" ]; then
                 # Always remove PCM hints. For EAE hints: only remove on copy mode.
                 _is_pcm=0
                 [[ "$next_arg" =~ ^pcm_s[0-9]+(le|be)$ ]] && _is_pcm=1
-                if [ "$_is_pcm" = "1" ] || [ "$_audio_output_is_copy" = "1" ]; then
+                if [ "$_is_pcm" = "1" ] || [ "$_audio_output_is_copy" = "1" ] || [ -n "$_strm_tmp_minfo" ]; then
                     skip_next=1
                     stream_n="${arg#-codec:}"
                     removed_eae_indices+=("$stream_n")
@@ -170,7 +181,7 @@ if [ "$spore_replaced" = "1" ]; then
             # When transcoding (e.g. EAC3->AC3 for MiTV), -eae_prefix tells
             # eac3_eae which watchfolder to use. Removing it causes EAE timeout.
             if [ "$idx" -lt "$i_pos" ] && { [[ "$arg" =~ ^-eae_prefix:[0-9]+$ ]] || [[ "$arg" =~ ^-eae_prefix:[a-z]:[0-9]+$ ]]; }; then
-                if [ "$_audio_output_is_copy" = "1" ]; then
+                if [ "$_audio_output_is_copy" = "1" ] || [ -n "$_strm_tmp_minfo" ]; then
                     skip_next=1
                     echo "$(date '+%H:%M:%S') WRAP removed -eae_prefix: $arg $next_arg (copy mode, no EAE)" >> "$SPORE_LOG"
                     echo "SPORE-WRAP: removed EAE prefix hint: $arg" >&2
@@ -281,7 +292,7 @@ if [ "$spore_replaced" = "1" ]; then
         # Inject native decoder only when audio output is copy -- EAE not needed,
         # native decoder prevents eac3_eae from being auto-selected on HTTP input.
         # Stale PCM + EAC3 CDN case is handled above via force-copy (_needs_eae=1).
-        if [ "$i_pos_n" -gt 0 ] && [ "$_audio_output_is_copy" = "1" ]; then
+        if [ "$i_pos_n" -gt 0 ] && { [ "$_audio_output_is_copy" = "1" ] || [ -n "$_strm_tmp_minfo" ]; }; then
             front=("${newargs[@]:0:$i_pos_n}")
             back=("${newargs[@]:$i_pos_n}")
             # Use removed EAE stream indices if available; otherwise default to 1
@@ -532,8 +543,12 @@ if [ "$spore_replaced" = "1" ]; then
 fi
 
 if [ "$spore_replaced" = "1" ]; then
-    echo "=== $(date '+%H:%M:%S') SPORE session ===" >> /config/spore-ffmpeg-stderr.log
+    echo "=== $(date '+%H:%M:%S') SPORE session ===" >> "$FFMPEG_STDERR_LOG"
+    # The EXIT trap above never fires here: exec replaces this process image
+    # instead of letting the shell exit normally, so clean up explicitly first.
+    [ -n "$_strm_tmp_minfo" ] && rm -f "$_strm_tmp_minfo"
     exec '/usr/lib/plexmediaserver/Plex Transcoder.real' "${newargs[@]}" \
-        2>>/config/spore-ffmpeg-stderr.log
+        2>>"$FFMPEG_STDERR_LOG"
 fi
+[ -n "$_strm_tmp_minfo" ] && rm -f "$_strm_tmp_minfo"
 exec '/usr/lib/plexmediaserver/Plex Transcoder.real' "${newargs[@]}"

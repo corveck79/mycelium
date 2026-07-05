@@ -1,8 +1,31 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api';
+import { api, csrfToken } from '../api';
 import type { GenreRule } from '../api';
 import { usePlugins } from '../hooks/usePlugins';
+
+/** Shared fetch helper for this page's raw fetch() maintenance actions:
+ * redirects to /login on 401 (matching api.ts's http() wrapper) and throws
+ * a readable error instead of feeding a 4xx/5xx HTML error page into
+ * .json(), which used to surface as an opaque "Unexpected token '<'". */
+async function fetchJsonOrThrow(url: string, init?: RequestInit): Promise<any> {
+  const r = await fetch(url, init);
+  if (r.status === 401) {
+    if (typeof window !== 'undefined' && !window.location.pathname.endsWith('/login')) {
+      window.location.href = '/login';
+    }
+    throw new Error('unauthorized');
+  }
+  if (!r.ok) {
+    let detail = `${r.status}`;
+    try {
+      const j = await r.json();
+      detail = j.error || detail;
+    } catch { /* body wasn't JSON */ }
+    throw new Error(detail);
+  }
+  return r.json();
+}
 
 export default function Admin() {
   const qc = useQueryClient();
@@ -295,7 +318,11 @@ function ArrImportPanel() {
             onClick={async () => {
               if (!confirm('Import all Sonarr series + search for all episodes and create .strm files. This runs in the background and may take a while. Continue?')) return;
               setMsg('Series backfill started  -  runs in background, check logs for progress…');
-              await fetch('/ui/api/series-backfill', { method: 'POST' });
+              try {
+                await fetchJsonOrThrow('/ui/api/series-backfill', { method: 'POST', headers: { 'X-CSRFToken': csrfToken() } });
+              } catch (e: any) {
+                setMsg(`Error: ${e.message}`);
+              }
             }}
             disabled={s?.running}
             className="px-3 py-1.5 rounded bg-accent text-sm font-semibold disabled:opacity-50"
@@ -576,8 +603,7 @@ function MaintenancePanel() {
     setBusy(true);
     setResult('Scanning .strm files…');
     try {
-      const r = await fetch('/ui/api/repair-strms', { method: 'POST' });
-      const data = await r.json();
+      const data = await fetchJsonOrThrow('/ui/api/repair-strms', { method: 'POST', headers: { 'X-CSRFToken': csrfToken() } });
       const parts: string[] = [`scanned: ${data.scanned}`, `ok: ${data.ok}`];
       if (data.missing_strm) parts.push(`missing strm fixed: ${data.missing_strm}`);
       if (data.orphaned_tokens) parts.push(`orphaned tokens fixed: ${data.orphaned_tokens}`);
@@ -597,8 +623,7 @@ function MaintenancePanel() {
     setBusy(true);
     setResult('Scanning for duplicate .strm files…');
     try {
-      const r = await fetch('/ui/api/cleanup-duplicate-strms', { method: 'POST' });
-      const data = await r.json();
+      const data = await fetchJsonOrThrow('/ui/api/cleanup-duplicate-strms', { method: 'POST', headers: { 'X-CSRFToken': csrfToken() } });
       const parts = [`scanned: ${data.scanned}`, `cleaned: ${data.cleaned}`];
       if (data.skipped) parts.push(`skipped: ${data.skipped}`);
       setResult('Done  -  ' + parts.join(', ') + (data.cleaned > 0 ? '  -  do a full Jellyfin library rescan now' : '  -  nothing to clean'));
@@ -613,8 +638,7 @@ function MaintenancePanel() {
     setBusy(true);
     setResult('Scanning TorBox library…');
     try {
-      const r = await fetch('/ui/api/torbox/scan-library', { method: 'POST' });
-      const data = await r.json();
+      const data = await fetchJsonOrThrow('/ui/api/torbox/scan-library', { method: 'POST', headers: { 'X-CSRFToken': csrfToken() } });
       const parts = [
         `scanned: ${data.scanned}`,
         `imported: ${data.imported}`,
@@ -634,8 +658,7 @@ function MaintenancePanel() {
     setBusy(true);
     setResult('Migrating to canonical names…');
     try {
-      const r = await fetch('/ui/api/migrate-canonical', { method: 'POST' });
-      const data = await r.json();
+      const data = await fetchJsonOrThrow('/ui/api/migrate-canonical', { method: 'POST', headers: { 'X-CSRFToken': csrfToken() } });
       const parts = [
         `scanned: ${data.scanned}`,
         `renamed: ${data.renamed}`,

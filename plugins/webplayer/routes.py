@@ -1,7 +1,6 @@
 import db
 import auth
 from flask import Blueprint, abort, jsonify, redirect, request, send_file, Response
-from flask import session as flask_session
 from . import web_player
 
 bp = Blueprint("webplayer_routes", __name__)
@@ -12,6 +11,18 @@ def _check_enabled():
     if not rec or not rec.get("webplayer_enabled"):
         abort(403)
     return rec
+
+
+def _require_session():
+    """Guard for the /stream/<token>/* playback endpoints.
+
+    Only /prepare used to check anything; every other route here was
+    reachable by anyone who obtained a token, with no login check at all.
+    Delegates to _check_enabled() - the same "real, webplayer_enabled user"
+    requirement /prepare already enforces - rather than just "someone is
+    logged in", which would let any authenticated user (including ones
+    without the Web Player feature) hit another user's token."""
+    _check_enabled()
 
 
 @bp.post("/ui/api/web-player/prepare")
@@ -30,6 +41,7 @@ def web_player_prepare():
 
 @bp.get("/ui/api/web-player/status/<job_id>")
 def web_player_status(job_id: str):
+    _check_enabled()
     job = web_player.get_job(job_id)
     if not job:
         abort(404)
@@ -52,6 +64,7 @@ def stream_hls_file(token: str, filename: str):
     Supports mpegts (.ts) and fragmented MP4 (.m4s + init.mp4) segments,
     plus all playlist variants (.m3u8).
     """
+    _require_session()
     if "/" in filename:
         abort(400)
     s = web_player.get_session(token)
@@ -75,6 +88,7 @@ def stream_hls_file(token: str, filename: str):
 @bp.get("/stream/<token>/direct")
 def stream_direct(token: str):
     """Redirect to the TorBox CDN URL for direct H264 playback."""
+    _require_session()
     s = web_player.get_direct_session(token)
     if not s:
         abort(404)
@@ -85,6 +99,7 @@ def stream_direct(token: str):
 @bp.post("/stream/<token>/convert-hls")
 def stream_convert_hls(token: str):
     """Trigger HLS transcoding for a direct session (called when browser can't play)."""
+    _require_session()
     ok = web_player.start_hls_conversion(token)
     if not ok:
         abort(404)
@@ -94,6 +109,7 @@ def stream_convert_hls(token: str):
 @bp.get("/stream/<token>/hls-status")
 def stream_hls_status(token: str):
     """Poll whether HLS conversion is done."""
+    _require_session()
     s = web_player.get_direct_session(token)
     if not s:
         abort(404)
@@ -110,11 +126,13 @@ def stream_hls_status(token: str):
 
 @bp.get("/stream/<token>/subtitles")
 def stream_subtitles_list(token: str):
+    _require_session()
     return jsonify(subtitles=web_player.list_subtitles(token))
 
 
 @bp.get("/stream/<token>/subtitles/<filename>")
 def stream_subtitle_file(token: str, filename: str):
+    _require_session()
     if "/" in filename or not filename.endswith(".vtt"):
         abort(400)
     s = web_player.get_session(token)
@@ -129,6 +147,7 @@ def stream_subtitle_file(token: str, filename: str):
 @bp.post("/stream/<token>/seek")
 def stream_seek(token: str):
     """Restart FFmpeg at a new position so the user can jump anywhere."""
+    _require_session()
     d = request.json or {}
     position_s = float(d.get("position_s", 0))
     stream_url = web_player.seek_session(token, position_s)
@@ -139,12 +158,10 @@ def stream_seek(token: str):
 
 @bp.post("/stream/<token>/position")
 def stream_save_position(token: str):
+    rec = _check_enabled()
     d = request.json or {}
-    user_id = flask_session.get("user_id")
-    if not user_id:
-        abort(401)
     db.save_playback_position(
-        user_id    = user_id,
+        user_id    = rec["id"],
         token      = token,
         position_s = float(d.get("position_s", 0)),
         duration_s = d.get("duration_s"),
@@ -251,6 +268,7 @@ echo "Install IINA from https://iina.io for best results."
 @bp.get("/ui/api/web-player/install-macos")
 def web_player_install_macos():
     """Download the macOS installer shell script for the mycelium:// URL scheme."""
+    _check_enabled()
     return Response(
         _INSTALLER_SCRIPT,
         mimetype="application/x-sh",

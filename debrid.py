@@ -12,7 +12,6 @@ that's added.
 """
 import logging
 
-import settings as _settings
 import torbox
 
 log = logging.getLogger(__name__)

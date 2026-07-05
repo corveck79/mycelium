@@ -69,7 +69,7 @@ configure_logging()
 log_buffer.install()
 log = logging.getLogger("mycelium")
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.6.1"
 
 with open(_path.join(_path.dirname(__file__), "releases.json"), encoding="utf-8") as _f:
     RELEASES: list[dict] = _json.load(_f)
@@ -86,14 +86,19 @@ if LITE_MODE:
     log.info("LITE_MODE enabled  -  heavy background schedulers and startup tasks disabled")
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
-if cfg.AUTH_SESSION_SECRET == "mycelium-please-change-me":
-    import warnings
-    warnings.warn(
-        "AUTH_SESSION_SECRET is still the default value. "
-        "Set a random string in your environment for production use.",
-        stacklevel=1,
-    )
 import secrets as _secrets_mod
+_session_secret = cfg.AUTH_SESSION_SECRET
+if _session_secret == "mycelium-please-change-me":
+    # Never sign session cookies with the well-known default - anyone could
+    # forge an admin session. Auto-generate and persist one instead, same
+    # pattern as WEBHOOK_SECRET_AUTO below.
+    _session_secret = _settings_mod.get("AUTH_SESSION_SECRET_AUTO", "")
+    if not _session_secret:
+        _session_secret = _secrets_mod.token_urlsafe(32)
+        _settings_mod.set("AUTH_SESSION_SECRET_AUTO", _session_secret)
+        log.info("Auto-generated AUTH_SESSION_SECRET - set your own in the environment to keep sessions valid across DB restores")
+    else:
+        log.debug("Using auto-generated AUTH_SESSION_SECRET from settings")
 if not WEBHOOK_SECRET:
     _stored = _settings_mod.get("WEBHOOK_SECRET_AUTO", "")
     if not _stored:
@@ -102,7 +107,7 @@ if not WEBHOOK_SECRET:
         log.info("Auto-generated WEBHOOK_SECRET - copy from Admin > Settings > Webhooks to your Seerr config")
     else:
         log.debug("Using auto-generated WEBHOOK_SECRET from settings")
-app.secret_key = cfg.AUTH_SESSION_SECRET
+app.secret_key = _session_secret
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SECURE"] = cfg.COOKIE_SECURE
@@ -523,7 +528,7 @@ def _check_auth() -> None:
         # Migrate to the X-Webhook-Secret header.
         log.warning("Webhook secret passed via ?secret= query param from %s"
                     " - migrate to X-Webhook-Secret header", request.remote_addr)
-    if provided != secret:
+    if not provided or not hmac.compare_digest(provided, secret):
         log.warning("Rejected webhook with bad/missing secret from %s", request.remote_addr)
         abort(401)
 
@@ -627,6 +632,8 @@ def ui_dashboard():
     import settings as _settings
     if not _settings.get("SETUP_COMPLETE", False):
         return redirect(url_for("setup_wizard"))
+    if not auth.is_admin():
+        return redirect(url_for("login_view", next="/admin"))
     return render_template(
         "ui.html",
         repair_items=db.get_repair_items(200),
@@ -700,8 +707,14 @@ def setup_save():
 @app.post("/setup/test/<kind>")
 @limiter.limit("20 per minute")
 def setup_test(kind: str):
-    """Test a single integration using values posted from the wizard form."""
-    if db.user_count() > 0 and not auth.is_admin():
+    """Test a single integration using values posted from the wizard form.
+
+    Only reachable without an admin session while the setup wizard itself is
+    still incomplete - once SETUP_COMPLETE is set this is a real admin-only
+    action (it makes the server issue requests to an attacker-chosen host),
+    independent of auth.is_admin()'s "auth disabled = full access" shortcut."""
+    import settings as _settings
+    if _settings.get("SETUP_COMPLETE", False) and not auth.is_admin():
         return jsonify(error="unauthorized"), 401
     f = request.form
     try:
@@ -827,6 +840,8 @@ def setup_test(kind: str):
 
 @app.post("/ui/submit")
 def ui_submit():
+    if not auth.is_admin():
+        abort(403)
     imdb_id = (request.form.get("imdb_id") or "").strip()
     media_type = request.form.get("media_type", "movie")
     seasons_raw = request.form.get("seasons", "1")
@@ -854,6 +869,8 @@ def ui_submit():
 
 @app.post("/ui/search-episode")
 def ui_search_episode():
+    if not auth.is_admin():
+        abort(403)
     imdb_id = request.form.get("imdb_id", "")
     title = request.form.get("title", imdb_id)
     season = int(request.form.get("season", 1))
@@ -869,6 +886,8 @@ def ui_search_episode():
 
 @app.post("/ui/download-movie")
 def ui_download_movie():
+    if not auth.is_admin():
+        abort(403)
     imdb_id = request.form.get("imdb_id", "")
     display_title = tmdb.display_title(imdb_id, "movie") or imdb_id
     media_request = MediaRequest(
@@ -883,6 +902,8 @@ def ui_download_movie():
 
 @app.post("/ui/sync-movies")
 def ui_sync_movies():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=monitor.sync_movies, name="movie-sync-manual", daemon=True).start()
     flash("Movie sync started", "ok")
     return redirect(url_for("ui_dashboard") + "#movies")
@@ -895,6 +916,8 @@ def ui_logs():
 
 @app.post("/ui/run-cleanup")
 def ui_run_cleanup():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=cleanup.run_cleanup, name="cleanup-manual", daemon=True).start()
     flash("Cleanup scan started  -  check Repair tab for results", "ok")
     return redirect(url_for("ui_dashboard") + "#repair")
@@ -902,6 +925,8 @@ def ui_run_cleanup():
 
 @app.post("/ui/repair-all")
 def ui_repair_all():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=cleanup.run_cleanup, name="repair-all-manual", daemon=True).start()
     flash("Repair All started  -  check Repair tab for results", "ok")
     return redirect(url_for("ui_dashboard") + "#repair")
@@ -909,6 +934,8 @@ def ui_repair_all():
 
 @app.post("/ui/refresh-images")
 def ui_refresh_images():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=jellyfin.refresh_missing_images, name="jf-images", daemon=True).start()
     flash("Jellyfin image refresh started  -  missing posters will be fetched", "ok")
     return redirect(url_for("ui_dashboard") + "#repair")
@@ -916,13 +943,14 @@ def ui_refresh_images():
 
 @app.post("/ui/merge-series")
 def ui_merge_series():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=cleanup.merge_series_duplicates, name="merge-series", daemon=True).start()
     flash("Series merge started  -  duplicate folders will be consolidated", "ok")
     return redirect(url_for("ui_dashboard") + "#repair")
 
 
 @app.post("/ui/api/repair-tvshow-titles")
-@_csrf.exempt
 @auth.require_role("admin")
 def ui_api_repair_tvshow_titles():
     """Rewrite tvshow.nfo files whose title is 'Season XX' instead of the real show name."""
@@ -931,7 +959,6 @@ def ui_api_repair_tvshow_titles():
 
 
 @app.post("/ui/api/fix-imdb-titles")
-@_csrf.exempt
 @auth.require_role("admin")
 def ui_api_fix_imdb_titles():
     """Find items whose title is still a raw IMDB code, fetch real title from TMDB,
@@ -942,6 +969,8 @@ def ui_api_fix_imdb_titles():
 
 @app.post("/ui/generate-nfos")
 def ui_generate_nfos():
+    if not auth.is_admin():
+        abort(403)
     def _run():
         nfo_generator.generate_all()
         nfo_generator.fetch_local_images()
@@ -951,15 +980,17 @@ def ui_generate_nfos():
 
 
 @app.post("/api/run-cleanup")
-@_csrf.exempt
 def api_run_cleanup():
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     threading.Thread(target=cleanup.run_cleanup, name="cleanup-api", daemon=True).start()
     return jsonify(ok=True, started="run_cleanup")
 
 
 @app.post("/api/generate-nfos")
-@_csrf.exempt
 def api_generate_nfos():
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     def _run():
         nfo_generator.generate_all()
         nfo_generator.fetch_local_images()
@@ -968,7 +999,6 @@ def api_generate_nfos():
 
 
 @app.post("/ui/api/repair-strms")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_repair_strms():
     """Scan movie .strm files for expired direct TorBox CDN URLs and repair them.
@@ -983,7 +1013,6 @@ def ui_api_repair_strms():
 
 
 @app.post("/ui/api/torbox/scan-library")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_torbox_scan_library():
     """Scan TorBox's own library for torrents we have no record of (e.g. after
@@ -996,7 +1025,6 @@ def ui_api_torbox_scan_library():
 
 
 @app.post("/ui/api/spore/backfill")
-@_csrf.exempt
 @auth.require_role("admin")
 def ui_api_spore_backfill():
     """Generate missing Spore stub .mkv + .minfo files for all existing virtual_items."""
@@ -1005,7 +1033,6 @@ def ui_api_spore_backfill():
 
 
 @app.post("/ui/api/spore/regenerate")
-@_csrf.exempt
 @auth.require_role("admin")
 def ui_api_spore_regenerate():
     """Force-regenerate stub MKVs with correct codec metadata.
@@ -1016,25 +1043,28 @@ def ui_api_spore_regenerate():
 
 
 @app.post("/ui/api/migrate-canonical")
-@_csrf.exempt
 def ui_api_migrate_canonical():
     """Rename all movie folders to TMDB canonical names and merge duplicates."""
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     result = strm_generator.migrate_to_canonical_names()
     return jsonify(**result)
 
 
 @app.post("/ui/api/cleanup-duplicate-strms")
-@_csrf.exempt
 def ui_api_cleanup_duplicate_strms():
     """Remove extra .strm files from folders that have more than one."""
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     result = strm_generator.cleanup_duplicate_strms()
     return jsonify(**result)
 
 
 @app.post("/ui/api/series-backfill")
-@_csrf.exempt
 def ui_api_series_backfill():
     """Import all Sonarr series + run series check to create .strm files for all episodes."""
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     threading.Thread(target=monitor.run_series_backfill, name="series-backfill", daemon=True).start()
     return jsonify(ok=True, started="series_backfill")
 
@@ -1093,6 +1123,8 @@ def ui_api_torbox_list():
 
 @app.post("/ui/torbox-delete")
 def ui_torbox_delete():
+    if not auth.is_admin():
+        abort(403)
     torrent_id = request.form.get("torrent_id")
     if not torrent_id:
         return jsonify(error="missing torrent_id"), 400
@@ -1106,6 +1138,8 @@ def ui_torbox_delete():
 
 @app.post("/ui/strm-rescan")
 def ui_strm_rescan():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=strm_generator.run_and_refresh, name="strm-manual", daemon=True).start()
     flash("strm rescan started", "ok")
     return redirect(url_for("ui_dashboard"))
@@ -1113,12 +1147,16 @@ def ui_strm_rescan():
 
 @app.post("/ui/test-notify")
 def ui_test_notify():
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     results = notify.test()
     return jsonify(results)
 
 
 @app.post("/ui/api/search-candidates")
 def ui_api_search_candidates():
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     imdb_id = (request.form.get("imdb_id") or "").strip()
     media_type = request.form.get("media_type", "movie")
     season = int(request.form.get("season", 1))
@@ -1155,6 +1193,8 @@ def ui_api_search_candidates():
 
 @app.post("/ui/add-magnet")
 def ui_add_magnet():
+    if not auth.is_admin():
+        abort(403)
     magnet = (request.form.get("magnet") or "").strip()
     if not magnet.startswith("magnet:"):
         flash("Not a magnet link", "err")
@@ -1170,6 +1210,8 @@ def ui_add_magnet():
 
 @app.post("/ui/retry-request/<int:row_id>")
 def ui_retry_request(row_id: int):
+    if not auth.is_admin():
+        abort(403)
     rows = [r for r in db.get_recent(1000) if r["id"] == row_id]
     if not rows:
         flash("Request not found", "err")
@@ -1211,7 +1253,6 @@ def ui_api_favorite_actors_list():
 
 
 @app.post("/ui/api/favorite-actors/<int:person_id>")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_favorite_actors_add(person_id: int):
     rec = auth.current_user_record()
@@ -1223,7 +1264,6 @@ def ui_api_favorite_actors_add(person_id: int):
 
 
 @app.post("/ui/api/favorite-actors/<int:person_id>/remove")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_favorite_actors_remove(person_id: int):
     rec = auth.current_user_record()
@@ -1248,7 +1288,6 @@ def ui_api_auto_approve_genre_rules_get():
 
 
 @app.post("/ui/api/auto-approve/genre-rules")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_auto_approve_genre_rules_set():
     if not auth.is_admin():
@@ -1262,7 +1301,6 @@ def ui_api_auto_approve_genre_rules_set():
 
 
 @app.post("/ui/api/auto-approve/run-now")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_auto_approve_run_now():
     if not auth.is_admin():
@@ -1273,6 +1311,33 @@ def ui_api_auto_approve_run_now():
 
 
 # ── Catbox lazy materialization ───────────────────────────────────────────────
+
+def _parse_byte_range(range_hdr: str, file_size: int) -> tuple[int, int]:
+    """Parse a single-range RFC 7233 'Range: bytes=...' header.
+
+    Handles all three forms: 'start-end', 'start-' (to EOF), and the suffix
+    form '-N' (last N bytes) - the suffix form was previously parsed as
+    start=0,end=N (first N bytes) instead of the last N, since split("-", 1)
+    on "-500" yields ("", "500") same as the "start-" case would if start
+    were empty. Raises ValueError on anything unparsable."""
+    _, ranges_str = range_hdr.split("=", 1)
+    r_start_s, r_end_s = ranges_str.split("-", 1)
+    if not r_start_s:
+        if not r_end_s:
+            raise ValueError(f"empty range: {range_hdr!r}")
+        suffix_len = int(r_end_s)
+        r_start = max(0, file_size - suffix_len)
+        r_end = file_size - 1
+    else:
+        r_start = int(r_start_s)
+        r_end = int(r_end_s) if r_end_s else file_size - 1
+    if r_start < 0 or r_start >= file_size or r_start > r_end:
+        # e.g. bytes=999999999- on a smaller file: without this, callers would
+        # clamp r_end to file_size-1 and compute a negative Content-Length
+        # instead of the correct 416 Range Not Satisfiable.
+        raise ValueError(f"range {range_hdr!r} not satisfiable for file_size={file_size}")
+    return r_start, r_end
+
 
 @app.get("/stream/<token>")
 def stream_redirect(token: str):
@@ -1387,10 +1452,7 @@ def spore_stream_proxy(token: str):
         range_hdr = request.headers.get("Range")
         if range_hdr:
             try:
-                _, ranges_str = range_hdr.split("=", 1)
-                r_start_s, r_end_s = ranges_str.split("-", 1)
-                r_start = int(r_start_s) if r_start_s else 0
-                r_end   = int(r_end_s)   if r_end_s   else file_size - 1
+                r_start, r_end = _parse_byte_range(range_hdr, file_size)
             except Exception:
                 abort(416)
             r_end  = min(r_end, file_size - 1)
@@ -1470,10 +1532,7 @@ def spore_stream_proxy(token: str):
 
     if range_hdr:
         try:
-            _, ranges_str    = range_hdr.split("=", 1)
-            r_start_s, r_end_s = ranges_str.split("-", 1)
-            v_start = int(r_start_s) if r_start_s else 0
-            v_end   = int(r_end_s)   if r_end_s   else file_size - 1
+            v_start, v_end = _parse_byte_range(range_hdr, file_size)
         except Exception:
             abort(416)
         v_end  = min(v_end, file_size - 1)
@@ -1525,9 +1584,10 @@ def ui_api_virtual_items():
 
 
 @app.post("/ui/api/virtual-items/<token>/re-resolve")
-@_csrf.exempt
 def ui_api_re_resolve(token: str):
     """Clear fail state for a token and trigger a fresh materialize attempt."""
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     item = db.get_virtual_item(token)
     if not item:
         return jsonify(error="unknown token"), 404
@@ -1581,9 +1641,10 @@ def ui_api_zilean_status():
 
 
 @app.post("/ui/api/zilean/sync")
-@_csrf.exempt
 def ui_api_zilean_sync():
     """Trigger an immediate native Zilean hashlist sync in the background."""
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     import threading as _threading
     import zilean_index
     force = bool(request.get_json(silent=True) and request.get_json(silent=True).get("force"))
@@ -1592,11 +1653,12 @@ def ui_api_zilean_sync():
 
 
 @app.post("/ui/api/zilean/import")
-@_csrf.exempt
 def ui_api_zilean_import():
     """One-time bulk import from an existing external Zilean's Postgres database
     into the native index. Connection settings come from the Zilean native
     settings group (Postgres host/port/db/user/password)."""
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     host = _settings_mod.get("ZILEAN_PG_HOST", cfg.ZILEAN_PG_HOST)
     if not host:
         return jsonify(error="ZILEAN_PG_HOST not configured"), 400
@@ -1615,6 +1677,8 @@ def ui_api_zilean_import():
 
 @app.post("/ui/catbox-gc")
 def ui_catbox_gc():
+    if not auth.is_admin():
+        abort(403)
     n = catbox.release_idle()
     flash(f"Released {n} idle torrent(s)", "ok")
     return redirect(url_for("ui_dashboard") + "#catbox")
@@ -1627,6 +1691,8 @@ def ui_api_blacklist():
 
 @app.post("/ui/blacklist-clear/<info_hash>")
 def ui_blacklist_clear(info_hash: str):
+    if not auth.is_admin():
+        abort(403)
     db.clear_failed_hash(info_hash)
     flash(f"Cleared blacklist for {info_hash[:12]}…", "ok")
     return redirect(url_for("ui_dashboard") + "#blacklist")
@@ -1646,6 +1712,8 @@ def ui_api_backups():
 
 @app.post("/ui/backup-restore")
 def ui_backup_restore():
+    if not auth.is_admin():
+        abort(403)
     name = request.form.get("name", "").strip()
     if not backup.restore(name):
         flash(f"Restore failed for {name}", "err")
@@ -1658,6 +1726,8 @@ def ui_backup_restore():
 
 @app.post("/ui/auto-upgrade")
 def ui_auto_upgrade():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=upgrader.run_auto_upgrade, name="upgrade-manual", daemon=True).start()
     flash("Auto-upgrade scan started", "ok")
     return redirect(url_for("ui_dashboard") + "#overview")
@@ -1665,6 +1735,8 @@ def ui_auto_upgrade():
 
 @app.post("/ui/pack-consolidate")
 def ui_pack_consolidate():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=upgrader.run_pack_consolidation, name="pack-manual", daemon=True).start()
     flash("Season-pack consolidation started", "ok")
     return redirect(url_for("ui_dashboard") + "#overview")
@@ -1672,6 +1744,8 @@ def ui_pack_consolidate():
 
 @app.post("/ui/trending-now")
 def ui_trending_now():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=trending.run, name="trending-manual", daemon=True).start()
     flash("Trending pre-cache started", "ok")
     return redirect(url_for("ui_dashboard") + "#overview")
@@ -1679,6 +1753,8 @@ def ui_trending_now():
 
 @app.post("/ui/continue-watching")
 def ui_continue_watching():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=continue_watching.prioritize_next_episodes,
                      name="cw-manual", daemon=True).start()
     flash("Continue-watching scan started", "ok")
@@ -1687,6 +1763,8 @@ def ui_continue_watching():
 
 @app.get("/ui/api/settings")
 def ui_api_settings():
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     import settings
     return jsonify(groups=settings.all_for_ui(), hot_reload=list(settings.HOT_RELOAD))
 
@@ -1696,7 +1774,6 @@ _NOTIFICATION_KEYS = {"NOTIFY_ON_SUCCESS", "NOTIFY_ON_FAILURE",
 
 
 @app.post("/ui/api/settings/notifications")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_settings_notifications_set():
     """Focused write endpoint for the React Settings page's Notifications card."""
@@ -1716,6 +1793,8 @@ def ui_api_settings_notifications_set():
 
 @app.post("/ui/settings")
 def ui_save_settings():
+    if not auth.is_admin():
+        abort(403)
     import settings
     saved = 0
     for raw_key, raw_value in request.form.items():
@@ -1742,6 +1821,8 @@ def ui_save_settings():
 
 @app.post("/ui/settings-reset/<key>")
 def ui_settings_reset(key: str):
+    if not auth.is_admin():
+        abort(403)
     import settings
     settings.set(key, None)
     flash(f"Reset {key} to .env default", "ok")
@@ -1765,6 +1846,8 @@ def _library_import_and_resolve():
 
 @app.post("/ui/library-import")
 def ui_library_import():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=_library_import_and_resolve,
                      name="lib-import", daemon=True).start()
     flash("Library import started  -  check Logs for progress", "ok")
@@ -1773,6 +1856,8 @@ def ui_library_import():
 
 @app.post("/ui/recovery")
 def ui_recovery():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=recovery.run, name="recovery-wizard", daemon=True).start()
     flash("Recovery wizard started  -  runs integrity check + cleanup + import + strm scan", "ok")
     return redirect(url_for("ui_dashboard") + "#overview")
@@ -1780,6 +1865,8 @@ def ui_recovery():
 
 @app.post("/ui/db-vacuum")
 def ui_db_vacuum():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=db.vacuum, name="db-vacuum", daemon=True).start()
     flash("DB vacuum started", "ok")
     return redirect(url_for("ui_dashboard") + "#overview")
@@ -1787,6 +1874,8 @@ def ui_db_vacuum():
 
 @app.post("/ui/db-prune")
 def ui_db_prune():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=lambda: db.prune_old(90), name="db-prune", daemon=True).start()
     flash("Pruning rows older than 90 days", "ok")
     return redirect(url_for("ui_dashboard") + "#overview")
@@ -1794,6 +1883,8 @@ def ui_db_prune():
 
 @app.post("/ui/quota-check")
 def ui_quota_check():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(
         target=lambda: torbox.check_quota_and_warn(QUOTA_WARN_TORRENT_COUNT, QUOTA_WARN_SIZE_GB),
         name="quota-manual", daemon=True,
@@ -1833,8 +1924,9 @@ def ui_api_failed_requests():
 
 
 @app.post("/ui/api/requests/<int:row_id>/retry")
-@_csrf.exempt
 def ui_api_retry_request(row_id: int):
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     rows = [r for r in db.get_recent(1000) if r["id"] == row_id]
     if not rows:
         return jsonify(error="not found"), 404
@@ -1850,8 +1942,9 @@ def ui_api_retry_request(row_id: int):
 
 
 @app.post("/ui/api/requests/<int:row_id>/delete")
-@_csrf.exempt
 def ui_api_delete_request(row_id: int):
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     with db._connect() as conn:
         cur = conn.execute("DELETE FROM requests WHERE id=?", (row_id,))
         conn.commit()
@@ -1884,6 +1977,8 @@ def ui_api_show_overrides():
 
 @app.post("/ui/show-override")
 def ui_show_override():
+    if not auth.is_admin():
+        abort(403)
     imdb_id = (request.form.get("imdb_id") or "").strip()
     if not re.fullmatch(r"tt\d{6,10}", imdb_id):
         flash("Invalid IMDB ID", "err")
@@ -1901,6 +1996,8 @@ def ui_show_override():
 
 @app.post("/ui/show-override-delete/<imdb_id>")
 def ui_show_override_delete(imdb_id: str):
+    if not auth.is_admin():
+        abort(403)
     db.delete_show_override(imdb_id)
     flash(f"Cleared override for {imdb_id}", "ok")
     return redirect(url_for("ui_dashboard") + "#overrides")
@@ -2144,7 +2241,6 @@ def ui_api_discover_genre_tabs_config_get():
 
 
 @app.post("/ui/api/discover/genre-tabs/config")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_discover_genre_tabs_config_set():
     if not auth.is_admin():
@@ -2376,8 +2472,9 @@ def ui_api_wanted_movies():
 
 
 @app.post("/ui/api/wanted-recheck")
-@_csrf.exempt
 def ui_api_wanted_recheck():
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     def _run():
         try:
             upgrader.recheck_wanted()
@@ -2390,6 +2487,8 @@ def ui_api_wanted_recheck():
 
 @app.post("/ui/search-all-wanted")
 def ui_search_all_wanted():
+    if not auth.is_admin():
+        abort(403)
     def _run():
         upgrader.recheck_wanted()
         monitor.run_series_check()
@@ -2724,7 +2823,6 @@ def ui_api_mdblist_status():
 
 
 @app.post("/ui/api/mdblist/connect")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_mdblist_connect():
     rec = auth.current_user_record()
@@ -2739,7 +2837,6 @@ def ui_api_mdblist_connect():
 
 
 @app.post("/ui/api/mdblist/disconnect")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_mdblist_disconnect():
     rec = auth.current_user_record()
@@ -2760,7 +2857,6 @@ def ui_api_mdblist_lists():
 
 
 @app.post("/ui/api/mdblist/lists")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_mdblist_set_lists():
     rec = auth.current_user_record()
@@ -2775,7 +2871,6 @@ def ui_api_mdblist_set_lists():
 
 
 @app.post("/ui/api/mdblist/sync")
-@_csrf.exempt
 @auth.require_auth
 def ui_api_mdblist_sync():
     rec = auth.current_user_record()
@@ -2900,6 +2995,8 @@ def ui_api_backfill_nfo():
     Safe to run multiple times. Triggers a Plex library refresh afterward if
     PLEX_URL and PLEX_TOKEN are configured.
     """
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     result = strm_generator.backfill_nfo_streamdetails()
     return jsonify(result)
 
@@ -2954,6 +3051,8 @@ def ui_api_auto_add_now():
 
 @app.get("/ui/api/arr-import/status")
 def ui_api_arr_import_status():
+    if not auth.is_admin():
+        return jsonify(error="admin required"), 403
     import arr_import
     return jsonify(arr_import.get_status())
 
@@ -2987,8 +3086,8 @@ def ui_api_arr_import_test_radarr():
     if not auth.is_admin():
         return jsonify(error="admin required"), 403
     p = request.get_json(silent=True) or {}
-    url = p.get("url") or settings.get("RADARR_URL", cfg.RADARR_URL)
-    key = p.get("api_key") or settings.get("RADARR_API_KEY", cfg.RADARR_API_KEY)
+    url = p.get("url") or _settings_mod.get("RADARR_URL", cfg.RADARR_URL)
+    key = p.get("api_key") or _settings_mod.get("RADARR_API_KEY", cfg.RADARR_API_KEY)
     if not url or not key:
         return jsonify(ok=False, error="url + api_key required"), 400
     import radarr
@@ -3000,8 +3099,8 @@ def ui_api_arr_import_test_sonarr():
     if not auth.is_admin():
         return jsonify(error="admin required"), 403
     p = request.get_json(silent=True) or {}
-    url = p.get("url") or settings.get("SONARR_URL", cfg.SONARR_URL)
-    key = p.get("api_key") or settings.get("SONARR_API_KEY", cfg.SONARR_API_KEY)
+    url = p.get("url") or _settings_mod.get("SONARR_URL", cfg.SONARR_URL)
+    key = p.get("api_key") or _settings_mod.get("SONARR_API_KEY", cfg.SONARR_API_KEY)
     if not url or not key:
         return jsonify(ok=False, error="url + api_key required"), 400
     import sonarr

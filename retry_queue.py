@@ -63,7 +63,16 @@ def run_due() -> int:
         except Exception:
             pass
         # Serial: process inline so we observe quota between items instead of
-        # firing N parallel createtorrent calls at once.
-        processor.process(req, _retry_attempt=row["attempt"])
+        # firing N parallel createtorrent calls at once. processor.process()
+        # already catches its own failures and re-schedules via schedule()
+        # below, but the row was just removed from the queue above - if
+        # something outside that internal handling still raises (e.g. a DB
+        # error in insert_request), the retry must not be lost, and one bad
+        # item must not abort the rest of this batch.
+        try:
+            processor.process(req, _retry_attempt=row["attempt"])
+        except Exception as exc:
+            log.error("Retry: processing %s raised unexpectedly, re-queueing: %s", req.title, exc)
+            schedule(req, row["attempt"])
         processed += 1
     return processed

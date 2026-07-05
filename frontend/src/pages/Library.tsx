@@ -208,7 +208,10 @@ function LibraryPosterCard({ movie, onClick }: { movie: any; onClick: () => void
   // Lazy-fetch poster when not already cached in the library response
   const { data: lazyPoster } = useQuery({
     queryKey: ['poster', movie.imdb_id],
-    queryFn: () => fetch(`/ui/api/poster/${movie.imdb_id}?type=movie`).then(r => r.json()),
+    queryFn: () => fetch(`/ui/api/poster/${movie.imdb_id}?type=movie`).then(r => {
+      if (!r.ok) throw new Error(`${r.status}`);
+      return r.json();
+    }),
     enabled: !movie.poster_path && !!movie.imdb_id,
     staleTime: Infinity,
     retry: false,
@@ -244,7 +247,10 @@ function SeriesPanel() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { data, isLoading } = useQuery({
     queryKey: ['library-series-episodes'],
-    queryFn: () => fetch('/ui/api/library/series-episodes').then(r => r.json()),
+    queryFn: () => fetch('/ui/api/library/series-episodes').then(r => {
+      if (!r.ok) throw new Error(`${r.status}`);
+      return r.json();
+    }),
   });
   const { data: session } = useQuery({ queryKey: ['session'], queryFn: api.session });
   const canPlay = !!(session?.user as any)?.webplayer_enabled;

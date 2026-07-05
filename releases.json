@@ -1,5 +1,24 @@
 [
   {
+    "version": "0.6.1",
+    "date": "2026-07-05",
+    "notes": [
+      "Security: OIDC/trusted-proxy logins no longer implicitly become admin - a real per-user role is resolved/created instead",
+      "Security: session secret no longer signs cookies with the well-known default value if left unchanged",
+      "Security: added missing admin-only checks to ~30 previously-unprotected admin routes",
+      "Security: Web Player streaming routes now require an authenticated, enabled session (previously open once a token was known)",
+      "Security: trusted-proxy default narrowed to loopback only, webhook secret comparison is now constant-time",
+      "Security: Spore TCP server now binds to loopback by default instead of all interfaces",
+      "Fix: a transient scraper/cache error on one episode could mark an entire multi-season request failed, discarding already-added seasons",
+      "Fix: the retry queue could silently drop a failed retry and stall the rest of that cycle's batch",
+      "Fix: cleanup/repair and folder-migration could leave orphaned database rows behind, permanently blocking recreation of a title",
+      "Fix: folder rename/merge could corrupt a sibling folder's database paths when one folder name was a prefix of another",
+      "Fix: Plex fast-start MP4 cache could corrupt sample offsets for CDN files with a second data block after the moov atom",
+      "Fix: HTTP suffix byte-ranges (bytes=-N) were parsed as the first N bytes instead of the last N",
+      "Fix: CSRF protection was effectively disabled on ~27 internal API routes"
+    ]
+  },
+  {
     "version": "0.6.0",
     "date": "2026-07-04",
     "notes": [

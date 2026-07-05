@@ -84,7 +84,11 @@ _token_locks_lock = threading.Lock()
 # every scan is slow and churns TorBox's createtorrent quota. Items already live
 # in TorBox still resolve cheaply (mylist is cached), so they probe fine.
 _SCAN_WINDOW_SEC = 25
-_SCAN_DISTINCT_THRESHOLD = 4
+# Deliberately above this deployment's realistic concurrent-user count (a
+# handful of real users, see CLAUDE.md) so several people starting different
+# titles within the same 25s window isn't misread as a library scan and
+# denied re-add. A real scan opens far more than this many distinct items.
+_SCAN_DISTINCT_THRESHOLD = 8
 _recent_tokens: dict[str, float] = {}
 _recent_lock = threading.Lock()
 
@@ -731,8 +735,39 @@ def _schedule_next_episode_preload(token: str) -> None:
         log.debug("Catbox: next-episode preload scheduling failed: %s", exc)
 
 
+def _sweep_caches() -> None:
+    """Prune expired entries from the in-memory caches that are only cleaned
+    on read (_url_cache, _fail_cache, _search_cache) or on next scan-burst
+    check (_recent_tokens). A token that's cached once and never queried
+    again would otherwise sit in memory forever on a long-running instance.
+
+    _token_locks is deliberately NOT swept here: a lock object can be handed
+    out to a caller and acquired moments after this check finds it free,
+    so deleting it here could let two callers end up serialized on two
+    different Lock objects for the same token instead of one - a real
+    correctness bug, not just a leak. Left as a known, harmless memory growth."""
+    now_mono = time.monotonic()
+
+    with _url_cache_lock:
+        for t in [t for t, (_, exp) in _url_cache.items() if exp <= now_mono]:
+            del _url_cache[t]
+
+    with _fail_cache_lock:
+        for t in [t for t, exp in _fail_cache.items() if exp <= now_mono]:
+            del _fail_cache[t]
+
+    with _search_cache_lock:
+        for k in [k for k, (exp, _) in _search_cache.items() if exp <= now_mono]:
+            del _search_cache[k]
+
+    with _recent_lock:
+        for t in [t for t, ts in _recent_tokens.items() if now_mono - ts > _SCAN_WINDOW_SEC]:
+            del _recent_tokens[t]
+
+
 def release_idle() -> int:
     """Remove TorBox items idle longer than CATBOX_IDLE_MINUTES. Returns count released."""
+    _sweep_caches()
     idle_minutes = _settings.get("CATBOX_IDLE_MINUTES", _CATBOX_IDLE_MINUTES_DEFAULT)
     cutoff = datetime.utcnow() - timedelta(minutes=idle_minutes)
     cutoff_iso = cutoff.strftime("%Y-%m-%d %H:%M:%S")

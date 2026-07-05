@@ -9,7 +9,7 @@ fill percentage. De-bounced so it doesn't spam.
 import logging
 import shutil
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import db

@@ -86,14 +86,21 @@ def fetch_streams(
 def _fetch_streams_native(imdb_id: str, season: int | None, episode: int | None) -> list[TorrentioStream]:
     import tmdb
     import zilean_index
-    title = tmdb.display_title(imdb_id, media_type="tv" if season is not None else "movie")
-    if not title:
-        log.warning("Zilean (native): could not resolve title for %s, skipping", imdb_id)
+    try:
+        title = tmdb.display_title(imdb_id, media_type="tv" if season is not None else "movie")
+        if not title:
+            log.warning("Zilean (native): could not resolve title for %s, skipping", imdb_id)
+            return []
+        raw_list = zilean_index.search(title, season=season, episode=episode)
+        parsed = [_from_native(r, season) for r in raw_list]
+        log.info("Zilean (native) returned %d results for %r", len(parsed), title)
+        return parsed
+    except Exception as exc:
+        # Match _fetch_streams_external's fail-open behavior: a DB error
+        # (disk I/O, lock contention on the shared zilean_index file) must
+        # not propagate up into processor.py's season loop.
+        log.warning("Zilean (native) unavailable for %s: %s", imdb_id, exc)
         return []
-    raw_list = zilean_index.search(title, season=season, episode=episode)
-    parsed = [_from_native(r, season) for r in raw_list]
-    log.info("Zilean (native) returned %d results for %r", len(parsed), title)
-    return parsed
 
 
 def _fetch_streams_external(

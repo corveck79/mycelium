@@ -45,7 +45,10 @@ export interface PluginMeta {
 function usePlugins() {
   const { data } = useQuery<{ plugins: PluginMeta[] }>({
     queryKey: ['plugins'],
-    queryFn:  () => fetch('/ui/api/plugins').then(r => r.json()),
+    queryFn:  () => fetch('/ui/api/plugins').then(r => {
+      if (!r.ok) throw new Error(`${r.status}`)
+      return r.json()
+    }),
     staleTime: Infinity,  // plugins don't change at runtime
   })
   return {

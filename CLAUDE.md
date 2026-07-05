@@ -21,7 +21,7 @@ Self-hosted media-request-and-stream pipeline. Watchlist clicks → `.strm` file
 | Container | `mycelium`, poort 8088 |
 | Jellyfin | container `jellyfin`, poort 8096 |
 | Plex | container `plex`, poort 32400, docker-compose in `/volume1/docker/plex/` |
-| Debrid | TorBox only (geen RealDebrid) |
+| Debrid | TorBox primair; optionele RealDebrid-fallback via `MULTI_DEBRID_ENABLED` (standaard uit) |
 | Gebruikers | 4-6 echte gebruikers |
 | Repo | corveck79/mycelium (publiek GitHub) |
 | Branch | main |

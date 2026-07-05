@@ -652,7 +652,6 @@ def get_wanted_episodes(max_attempts: int = 10) -> list[dict]:
 
 def get_series_folder_imdb_map() -> dict[str, str]:
     """Map series folder names to imdb_id via virtual_items strm_path."""
-    import re
     with _connect() as conn:
         rows = conn.execute(
             "SELECT DISTINCT imdb_id, strm_path FROM virtual_items "
@@ -762,10 +761,14 @@ def rekey_media_item(old_id: str, new_id: str, media_type: str) -> bool:
             )
             conn.commit()
             return cur.rowcount > 0
-        except Exception:
+        except sqlite3.IntegrityError:
             conn.rollback()
             # new_id already exists (UNIQUE conflict)  -  the unknown_ row is a duplicate;
-            # just delete it so the canonical entry remains.
+            # just delete it so the canonical entry remains. Only a real
+            # UNIQUE-constraint violation means this - any other exception
+            # (disk I/O, lock timeout) must not be treated the same way, or
+            # a transient error would silently delete data instead of
+            # surfacing the real problem.
             try:
                 conn.execute(
                     "DELETE FROM media_items WHERE imdb_id=? AND media_type=?",
@@ -1018,21 +1021,24 @@ def update_virtual_rd_id(token: str, rd_id: str | None) -> None:
         conn.commit()
 
 
-def update_virtual_strm_path_prefix(old_prefix: str, new_prefix: str) -> int:
-    """Update strm_path for all virtual_items whose path starts with old_prefix."""
+def _escape_like(s: str) -> str:
+    """Escape SQLite LIKE metacharacters so a literal prefix match doesn't
+    accidentally also match unrelated paths (e.g. a folder name containing
+    an underscore, which LIKE treats as "any single character")."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def update_virtual_item_strm_path(old_path: str, new_path: str) -> int:
+    """Point virtual_items.strm_path at a new path after a single file move/rename
+    (as opposed to rename_virtual_item_paths, which rewrites a whole directory
+    prefix - anchored to a "/" boundary - and assumes filenames are unchanged)."""
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT token, strm_path FROM virtual_items WHERE strm_path LIKE ?",
-            (old_prefix + "%",),
-        ).fetchall()
-        count = 0
-        for row in rows:
-            new_path = new_prefix + row["strm_path"][len(old_prefix):]
-            conn.execute("UPDATE virtual_items SET strm_path=? WHERE token=?",
-                         (new_path, row["token"]))
-            count += 1
+        cur = conn.execute(
+            "UPDATE virtual_items SET strm_path=? WHERE strm_path=?",
+            (new_path, old_path),
+        )
         conn.commit()
-        return count
+        return cur.rowcount
 
 
 def save_spore_tracks(token: str, tracks: dict) -> None:
@@ -1108,8 +1114,8 @@ def rename_virtual_item_paths(old_dir: str, new_dir: str) -> int:
         cur = conn.execute(
             """UPDATE virtual_items
                SET strm_path = ? || SUBSTR(strm_path, ?)
-               WHERE strm_path LIKE ?""",
-            (new_prefix, len(old_prefix) + 1, old_prefix + "%"),
+               WHERE strm_path LIKE ? ESCAPE '\\'""",
+            (new_prefix, len(old_prefix) + 1, _escape_like(old_prefix) + "%"),
         )
         conn.commit()
         return cur.rowcount
@@ -1163,13 +1169,17 @@ def clear_failed_hash(info_hash: str) -> None:
 # ── webhook idempotency ───────────────────────────────────────────────────────
 
 def webhook_seen(dedup_key: str) -> bool:
-    """Record a webhook event; return True if already seen (within DB)."""
+    """Record a webhook event; return True if already seen (within DB).
+
+    Only a UNIQUE-constraint violation on dedup_key means "already seen" -
+    any other DB error (lock timeout, disk full, ...) must not be treated as
+    a silent duplicate, or the webhook event would just vanish."""
     try:
         with _connect() as conn:
             conn.execute("INSERT INTO webhook_events (dedup_key) VALUES (?)", (dedup_key,))
             conn.commit()
             return False
-    except Exception:
+    except sqlite3.IntegrityError:
         return True
 
 
@@ -1635,7 +1645,9 @@ def get_degraded_items(min_failures: int = 3) -> list[dict]:
                FROM playability_state ps
                LEFT JOIN virtual_items vi ON (
                    vi.imdb_id = ps.content_key
-                   OR ps.content_key LIKE vi.imdb_id || ':%'
+                   OR ps.content_key LIKE
+                      REPLACE(REPLACE(REPLACE(vi.imdb_id, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+                      || ':%' ESCAPE '\\'
                )
                WHERE ps.status='degraded' AND ps.consecutive_failures >= ?
                ORDER BY ps.consecutive_failures DESC, ps.updated_at DESC

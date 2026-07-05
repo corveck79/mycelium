@@ -109,9 +109,13 @@ def _try_add_magnet(stream: TorrentioStream, label: str) -> bool:
     when the hourly createtorrent budget is gone, so the request is rescheduled
     rather than wasting the quota or marking a good torrent bad. We do NOT retry
     a 429 inline  -  the hourly window won't reset in seconds."""
-    # Skip createtorrent entirely if this hash is already in our TorBox library  - 
+    # Skip createtorrent entirely if this hash is already in our TorBox library  -
     # re-adding it would waste a 60/hour quota slot for content we already have.
-    existing = torbox.find_by_hash(stream.info_hash)
+    try:
+        existing = torbox.find_by_hash(stream.info_hash)
+    except Exception as exc:
+        log.warning("Library lookup failed for %s, proceeding as not-yet-added: %s", label, exc)
+        existing = None
     if existing and torbox._is_ready(existing):
         log.info("Already in TorBox library (id=%s)  -  skipping createtorrent for %s",
                  existing.get("id"), label)
@@ -149,7 +153,14 @@ def _add_best_from(candidates: list, label: str) -> tuple[bool, Optional[Torrent
         log.warning("All candidates for %s are blacklisted", label)
         return False, None
     import debrid
-    multi = debrid.check_cached_multi([s.info_hash for s in candidates])
+    try:
+        multi = debrid.check_cached_multi([s.info_hash for s in candidates])
+    except Exception as exc:
+        # A network/API error here must not propagate: for series it would
+        # bubble through the season loop in _process_locked and mark the
+        # WHOLE request failed. Treat it like "nothing cached yet" instead.
+        log.warning("Cache-check failed for %s, treating as uncached: %s", label, exc)
+        multi = {}
     cached_hashes = multi.get("torbox", set())
     rd_only = (multi.get("realdebrid", set()) or set()) - cached_hashes
     if rd_only:
@@ -185,7 +196,11 @@ def _lazy_register_movie(req: MediaRequest, candidates: list) -> Optional[Torren
     if not candidates:
         return None
     import debrid
-    cached_hashes = debrid.check_cached_multi([s.info_hash for s in candidates]).get("torbox", set())
+    try:
+        cached_hashes = debrid.check_cached_multi([s.info_hash for s in candidates]).get("torbox", set())
+    except Exception as exc:
+        log.warning("Lazy cache-check failed for %s: %s", req.title, exc)
+        return None
     cached = [s for s in candidates if s.info_hash in cached_hashes]
     if not cached:
         log.info("Lazy: no cached release for %s  -  will wait in wanted", req.title)
@@ -342,14 +357,25 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
     """Catbox lazy mode for series. Tries a cached season pack first, then falls
     back to per-episode cached registration. Returns (any_written, first_stream)."""
     import debrid
-    pack_candidates = _fetch_season_candidates(req, season, episode=1, prefer_season_pack=True)
+    try:
+        pack_candidates = _fetch_season_candidates(req, season, episode=1, prefer_season_pack=True)
+    except Exception as exc:
+        # Must not propagate: it would bubble through the `for season in
+        # req.seasons` loop in _process_locked and mark the WHOLE request
+        # failed, discarding any earlier season's already-registered strms.
+        log.warning("Lazy fetch failed for %s S%02d: %s", req.title, season, exc)
+        return False, None
     pack_candidates = blacklist.filter_candidates(pack_candidates)
     if not pack_candidates:
         log.info("Lazy series: no candidates for %s S%02d  -  marking wanted", req.title, season)
         return False, None
 
     hashes = [s.info_hash for s in pack_candidates]
-    cached_hashes = debrid.check_cached_multi(hashes).get("torbox", set())
+    try:
+        cached_hashes = debrid.check_cached_multi(hashes).get("torbox", set())
+    except Exception as exc:
+        log.warning("Lazy cache-check failed for %s S%02d: %s", req.title, season, exc)
+        return False, None
 
     # --- Try season pack first ---
     packs = [s for s in pack_candidates if s.is_season_pack and s.info_hash in cached_hashes]
@@ -389,12 +415,23 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
         if episode == 1:
             ep_candidates = [s for s in pack_candidates if s.info_hash in cached_hashes]
         else:
-            ep_cands_raw = _fetch_season_candidates(req, season, episode=episode)
+            try:
+                ep_cands_raw = _fetch_season_candidates(req, season, episode=episode)
+            except Exception as exc:
+                # Same reasoning as the pack-candidates fetch above: stop this
+                # season here rather than letting the error abort the whole
+                # multi-season request.
+                log.warning("Lazy fetch failed for %s S%02dE%02d: %s", req.title, season, episode, exc)
+                break
             ep_cands_raw = blacklist.filter_candidates(ep_cands_raw)
             if not ep_cands_raw:
                 break
             ep_hashes = [s.info_hash for s in ep_cands_raw]
-            ep_cached = debrid.check_cached_multi(ep_hashes).get("torbox", set())
+            try:
+                ep_cached = debrid.check_cached_multi(ep_hashes).get("torbox", set())
+            except Exception as exc:
+                log.warning("Lazy cache-check failed for %s S%02dE%02d: %s", req.title, season, episode, exc)
+                break
             ep_candidates = [s for s in ep_cands_raw if s.info_hash in ep_cached]
 
         if not ep_candidates:
@@ -441,7 +478,14 @@ def _process_season(req: MediaRequest, season: int) -> tuple[bool, Optional[Torr
         # _lazy_register_season set neither ok nor _WANTED → treat as failed
         return False, None
 
-    pack_candidates = _fetch_season_candidates(req, season, episode=1, prefer_season_pack=True)
+    try:
+        pack_candidates = _fetch_season_candidates(req, season, episode=1, prefer_season_pack=True)
+    except Exception as exc:
+        # Must not propagate: it would bubble through the `for season in
+        # req.seasons` loop in _process_locked and mark the WHOLE request
+        # failed, discarding any earlier season's already-added torrents.
+        log.warning("Fetch failed for %s S%02d pack candidates: %s", req.title, season, exc)
+        pack_candidates = []
 
     if pack_candidates and pack_candidates[0].is_season_pack:
         log.info("Trying season pack(s) for %s S%02d", req.title, season)
@@ -473,7 +517,14 @@ def _process_season(req: MediaRequest, season: int) -> tuple[bool, Optional[Torr
         if episode == 1:
             candidates = [s for s in pack_candidates if not s.is_season_pack] or pack_candidates
         else:
-            candidates = _fetch_season_candidates(req, season, episode=episode)
+            try:
+                candidates = _fetch_season_candidates(req, season, episode=episode)
+            except Exception as exc:
+                # Same reasoning as the pack-candidates fetch above: stop
+                # this season here (keeping whatever was already added) rather
+                # than letting the error abort the whole multi-season request.
+                log.warning("Fetch failed for %s S%02dE%02d: %s", req.title, season, episode, exc)
+                break
         if not candidates:
             log.info("No more episodes returned at S%02dE%02d", season, episode)
             break
@@ -603,13 +654,21 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
         # lazy mode the winners aren't in TorBox and the per-season .strm files were
         # already written during registration, so this loop no-ops.)
         for w in season_winners:
-            item = torbox.find_by_hash(w.info_hash) if w else None
-            torrent_id = item.get('id') if item else None
-            if not torrent_id:
+            try:
+                item = torbox.find_by_hash(w.info_hash) if w else None
+                torrent_id = item.get('id') if item else None
+                if not torrent_id:
+                    continue
+                strm_generator.create_strm_for_torrent(torrent_id, req.title, req.media_type,
+                                                        imdb_id=req.imdb_id,
+                                                        tmdb_id=getattr(req, 'tmdb_id', None))
+            except Exception as exc:
+                # One winner's lookup/strm-write failing must not skip strm
+                # generation for the other already-successful winners, nor
+                # the refresh_library/notify/metrics calls after this loop.
+                log.warning("Strm generation failed for %s (hash=%s): %s",
+                            req.title, getattr(w, "info_hash", None), exc)
                 continue
-            strm_generator.create_strm_for_torrent(torrent_id, req.title, req.media_type,
-                                                    imdb_id=req.imdb_id,
-                                                    tmdb_id=getattr(req, 'tmdb_id', None))
             # Best-effort subtitle fetch (movies only)
             try:
                 import subtitles

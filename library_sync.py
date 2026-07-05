@@ -381,6 +381,10 @@ def dedup_movie_folders() -> dict:
             try:
                 shutil.rmtree(dupe)
                 removed += 1
+                # This is a destructive, unattended, fuzzy-match-based delete -
+                # log it to the visible activity feed (not just the text log)
+                # so a bad match is discoverable, not just silently gone.
+                db.log_activity("dedup_removed", dupe.name, f"kept {keeper.name!r}", True)
             except Exception as exc:
                 log.warning("dedup: could not remove %s: %s", dupe, exc)
 
