@@ -1404,20 +1404,6 @@ def spore_nfs_size(token: str):
     item = db.get_virtual_item(token)
     if not item:
         abort(404)
-
-    # Pre-warm: an isolated size lookup (not part of a many-token library
-    # scan burst) means Plex just asked about this ONE file in isolation --
-    # the pattern a user opening this item's detail page produces, well
-    # before they actually press play. Kick materialize() off in the
-    # background so it's already warm in TorBox by the time they do,
-    # instead of paying that latency (up to ON_PLAY_READY_TIMEOUT_SEC) at
-    # the start of the actual /spore-stream/<token> read.
-    if not catbox._is_scan_burst(token):
-        threading.Thread(
-            target=catbox.materialize, args=(token,),
-            daemon=True, name=f"prewarm-{token[:8]}",
-        ).start()
-
     by_hash = torbox.check_cached_files([item["info_hash"]])
     entry = by_hash.get(item["info_hash"].lower())
     if not entry:
