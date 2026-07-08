@@ -1107,6 +1107,17 @@ def make_stub_mkv(title: str, quality: str | None = None,
         )
         next_num += 1
 
+    # Forced PGS (image-based) subtitle track, always present regardless of
+    # real subtitle tracks: no client soft-renders PGS, so Plex must burn it
+    # into the video via a real transcode session, guaranteeing the
+    # transcoder (and our wrapper) is invoked instead of Direct Play. The
+    # wrapper strips the burn-in filter and forces a plain video copy, so
+    # this costs nothing extra once the wrapper takes over.
+    tracks_data += _ebml_subtitle_track_entry(
+        track_num=next_num, codec_mkv="S_HDMV/PGS", lang="und",
+    )
+    next_num += 1
+
     tracks_el = _ebml_el(b'\x16\x54\xAE\x6B', tracks_data)
 
     # Minimal empty Cluster (Timecode=0, no frames).
