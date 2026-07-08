@@ -1357,7 +1357,7 @@ _spore_cold_sizes: dict = {}  # token -> file_size, avoids repeated HEAD on CDN
 _spore_probing: set  = set()  # tokens currently running a background probe
 
 
-@app.get("/ui/api/spore-nfs/tree")
+@app.get("/spore-nfs/tree")
 def spore_nfs_tree():
     """Virtual directory tree for the spore-nfs server: one entry per playable
     virtual item, reusing the same movies/series folder layout as the Jellyfin

@@ -73,12 +73,16 @@ func (t *tree) refreshIfStale() {
 }
 
 func (t *tree) refresh() {
-	resp, err := httpClient.Get(myceliumBase + "/ui/api/spore-nfs/tree")
+	resp, err := httpClient.Get(myceliumBase + "/spore-nfs/tree")
 	if err != nil {
 		log.Printf("tree refresh: %v", err)
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("tree refresh: unexpected status %d", resp.StatusCode)
+		return
+	}
 	var out struct {
 		Entries []treeEntry `json:"entries"`
 	}
