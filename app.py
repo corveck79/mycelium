@@ -1365,16 +1365,26 @@ def spore_nfs_tree():
     media container instead of .strm. spore-nfs polls this to build its
     in-memory filesystem; it does not touch the filesystem itself."""
     from pathlib import Path
-    media_root = Path(cfg.MEDIA_PATH)
     entries = []
     for item in db.get_all_virtual_items():
         strm_path_str = item.get("strm_path")
         if not strm_path_str:
             continue
-        try:
-            rel = Path(strm_path_str).relative_to(media_root)
-        except ValueError:
+        parts = Path(strm_path_str).parts
+        # Take everything from the last "movies"/"series" segment onward,
+        # regardless of what absolute prefix precedes it -- strm_path in the
+        # DB isn't guaranteed to have been written with today's MEDIA_PATH
+        # (older rows can predate an env change or come from a different
+        # mount context), so relative_to() against the current MEDIA_PATH
+        # silently drops anything that doesn't match exactly.
+        rel_idx = None
+        for i in range(len(parts) - 1, -1, -1):
+            if parts[i] in ("movies", "series"):
+                rel_idx = i
+                break
+        if rel_idx is None:
             continue
+        rel = Path(*parts[rel_idx:])
         entries.append({
             "token": item["token"],
             # Real container is unknown until first probe; .mkv is a safe
