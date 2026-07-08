@@ -434,60 +434,89 @@ func (d dirInfo) Sys() interface{}   { return nil }
 // per-file-handle state doesn't survive between reads -- the read-ahead
 // buffer has to live per-token instead, shared across those short-lived
 // sporeFile instances.
-const readAheadSize = 16 << 20 // 16MB
+const (
+	readAheadSize    = 16 << 20 // 16MB per window
+	readAheadWindows = 3        // slots per token
+)
 
-type readAheadBuffer struct {
-	mu    sync.Mutex
+// A single window worked for one sequential reader, but real sessions have
+// more than one: Plex's background analysis/thumbnail pass can read the
+// same file concurrently at a different offset than the main playback
+// stream. With only one slot, each reader kept evicting the other's window
+// -- observed on the NAS as offsets ping-ponging between two regions,
+// re-fetching 16MB on nearly every read instead of reusing it. A small set
+// of windows (LRU-evicted) lets a few concurrent readers each keep their
+// own recent window without stepping on each other.
+type readAheadWindow struct {
 	data  []byte
-	start int64 // offset of data[0] in the real file
+	start int64
+	used  int64 // logical clock for LRU eviction
+}
+
+type readAheadSet struct {
+	mu      sync.Mutex
+	windows [readAheadWindows]readAheadWindow
+	clock   int64
 }
 
 var (
 	readAheadMu sync.Mutex
-	readAheads  = map[string]*readAheadBuffer{}
+	readAheads  = map[string]*readAheadSet{}
 )
 
-// bufferedRead serves offset..offset+want from a 16MB read-ahead window,
-// fetching a new window only when the request falls outside the current
-// one. Sequential playback -- the overwhelmingly common case -- then costs
-// one network round trip per 16MB instead of one per NFS read chunk (which
-// ramps from ~128KB up to ~1MB), directly cutting the per-request latency
-// tax observed on the NAS (~1 request/sec regardless of chunk size).
 func bufferedRead(token string, offset, want, fileSize int64) ([]byte, error) {
 	readAheadMu.Lock()
-	b, ok := readAheads[token]
+	s, ok := readAheads[token]
 	if !ok {
-		b = &readAheadBuffer{start: -1}
-		readAheads[token] = b
+		s = &readAheadSet{}
+		readAheads[token] = s
 	}
 	readAheadMu.Unlock()
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clock++
 
-	covered := b.data != nil && offset >= b.start && offset+want <= b.start+int64(len(b.data))
-	if !covered {
-		fetchLen := int64(readAheadSize)
-		if want > fetchLen {
-			fetchLen = want // requester wants more than one window; honor it
+	for i := range s.windows {
+		w := &s.windows[i]
+		if w.data != nil && offset >= w.start && offset+want <= w.start+int64(len(w.data)) {
+			w.used = s.clock
+			rel := offset - w.start
+			end := rel + want
+			if end > int64(len(w.data)) {
+				end = int64(len(w.data))
+			}
+			return w.data[rel:end], nil
 		}
-		if offset+fetchLen > fileSize {
-			fetchLen = fileSize - offset
-		}
-		data, err := readRange(token, offset, fetchLen)
-		if err != nil {
-			return nil, err
-		}
-		b.data = data
-		b.start = offset
 	}
 
-	rel := offset - b.start
-	end := rel + want
-	if end > int64(len(b.data)) {
-		end = int64(len(b.data))
+	// Not covered by any window: fetch a fresh one, replacing the least
+	// recently used slot.
+	fetchLen := int64(readAheadSize)
+	if want > fetchLen {
+		fetchLen = want // requester wants more than one window; honor it
 	}
-	return b.data[rel:end], nil
+	if offset+fetchLen > fileSize {
+		fetchLen = fileSize - offset
+	}
+	data, err := readRange(token, offset, fetchLen)
+	if err != nil {
+		return nil, err
+	}
+
+	lru := 0
+	for i := range s.windows {
+		if s.windows[i].used < s.windows[lru].used {
+			lru = i
+		}
+	}
+	s.windows[lru] = readAheadWindow{data: data, start: offset, used: s.clock}
+
+	end := want
+	if end > int64(len(data)) {
+		end = int64(len(data))
+	}
+	return data[:end], nil
 }
 
 type sporeFile struct {
