@@ -356,6 +356,19 @@ func main() {
 	t := newTree()
 	t.refresh()
 
+	// Retry independently of incoming NFS requests: on a fresh start this
+	// container can win the race against mycelium's own startup, and
+	// refreshIfStale() alone won't retry again until something actually
+	// asks the filesystem for a file, which never happens on a client
+	// that gave up mounting after an empty first listing.
+	go func() {
+		ticker := time.NewTicker(treeTTL)
+		defer ticker.Stop()
+		for range ticker.C {
+			t.refresh()
+		}
+	}()
+
 	fs := &sporeFS{tree: t}
 	handler := nfshelper.NewNullAuthHandler(fs)
 	cacheHelper := nfshelper.NewCachingHandler(handler, 4096)
