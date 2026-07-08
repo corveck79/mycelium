@@ -155,6 +155,46 @@ func (t *tree) children(dir string) []string {
 
 // ---- HTTP-backed file size / content -----------------------------------
 
+// go-nfs's onRead() calls both fs.Open() and fs.Stat() on every single NFS
+// READ RPC (NFSv3 is stateless -- see nfs_onread.go). Without this cache,
+// every read chunk would trigger its own materializing HEAD to
+// /spore-stream/<token>, throttling playback to whatever that round trip
+// costs per chunk regardless of NFS rsize.
+var (
+	realSizeCacheMu sync.RWMutex
+	realSizeCache   = map[string]struct {
+		size    int64
+		expires time.Time
+	}{}
+)
+
+func peekRealSize(token string) (int64, bool) {
+	realSizeCacheMu.RLock()
+	defer realSizeCacheMu.RUnlock()
+	e, ok := realSizeCache[token]
+	if !ok || time.Now().After(e.expires) {
+		return 0, false
+	}
+	return e.size, true
+}
+
+func cachedRealSize(token string) (int64, error) {
+	if size, ok := peekRealSize(token); ok {
+		return size, nil
+	}
+	size, err := realSize(token)
+	if err != nil {
+		return 0, err
+	}
+	realSizeCacheMu.Lock()
+	realSizeCache[token] = struct {
+		size    int64
+		expires time.Time
+	}{size: size, expires: time.Now().Add(30 * time.Minute)}
+	realSizeCacheMu.Unlock()
+	return size, nil
+}
+
 func realSize(token string) (int64, error) {
 	req, err := http.NewRequest(http.MethodHead, myceliumBase+"/spore-stream/"+token, nil)
 	if err != nil {
@@ -308,7 +348,7 @@ func (fs *sporeFS) Open(filename string) (billy.File, error) {
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	size, err := realSize(tok)
+	size, err := cachedRealSize(tok)
 	if err != nil {
 		return nil, err
 	}
@@ -323,6 +363,15 @@ func (fs *sporeFS) Stat(filename string) (os.FileInfo, error) {
 	tok, ok := fs.tree.tokenFor(p)
 	if !ok {
 		return nil, os.ErrNotExist
+	}
+	// go-nfs calls Stat() on every single READ RPC (NFSv3 is stateless --
+	// this server re-derives EOF/size per read, it doesn't hold an open
+	// file across reads). If this token was already opened for real
+	// playback, reuse that size instead of a second network round trip;
+	// otherwise (library scan, never played) fall back to the cheap,
+	// non-materializing lookup.
+	if size, ok := peekRealSize(tok); ok {
+		return fileInfo{name: path.Base(p), size: size}, nil
 	}
 	size, err := cheapSize(tok)
 	if err != nil {
