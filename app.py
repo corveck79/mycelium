@@ -1395,6 +1395,25 @@ def spore_nfs_tree():
     return jsonify({"entries": entries})
 
 
+@app.get("/spore-nfs/size/<token>")
+def spore_nfs_size(token: str):
+    """Cheap file-size lookup for spore-nfs's Attr()/ReadDir(): a TorBox
+    checkcached call, which reports cached files without adding anything to
+    the account. Used for library scans; actual playback still goes through
+    /spore-stream/<token>, which materializes for real."""
+    item = db.get_virtual_item(token)
+    if not item:
+        abort(404)
+    files_by_hash = torbox.check_cached_files([item["info_hash"]])
+    files = files_by_hash.get(item["info_hash"].lower()) or []
+    main = strm_generator._pick_main_movie_file(files)
+    if not main:
+        # Not cached (or a torrent Mycelium has never checked yet): no size
+        # to report without materializing, which a bulk scan must not do.
+        return jsonify({"size": 0})
+    return jsonify({"size": int(main.get("size") or 0)})
+
+
 @app.get("/spore-stream/<token>")
 def spore_stream_proxy(token: str):
     """Plex Spore proxy: serves moov-first MP4 with Range support.

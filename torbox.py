@@ -348,6 +348,31 @@ def check_cached(hashes: list[str], timeout: int = 15) -> set[str]:
     return cached
 
 
+def check_cached_files(hashes: list[str], timeout: int = 15) -> dict[str, list[dict]]:
+    """Like check_cached(), but keeps the per-hash file list (name/size) that
+    TorBox's checkcached response already includes for free. Used to answer
+    "how big is this" without add_magnet/materialize -- no torrent is added
+    to the account, this is a pure cache-status lookup."""
+    if not hashes:
+        return {}
+    _BATCH = 100
+    if len(hashes) > _BATCH:
+        out: dict[str, list[dict]] = {}
+        for i in range(0, len(hashes), _BATCH):
+            out.update(check_cached_files(hashes[i:i + _BATCH], timeout=timeout))
+        return out
+    url = f"{_base_url().rstrip('/')}/torrents/checkcached"
+    params = {"hash": ",".join(hashes), "format": "object"}
+    try:
+        resp = requests.get(url, headers=_headers(), params=params, timeout=timeout)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        log.warning("TorBox checkcached (files) failed: %s", exc)
+        return {}
+    data = (resp.json() or {}).get("data") or {}
+    return {h.lower(): (v.get("files") or []) for h, v in data.items()}
+
+
 def title_exists(title: str) -> bool:
     """Return True if any torrent in mylist appears to match the given title."""
     needle = title.lower()

@@ -175,6 +175,29 @@ func realSize(token string) (int64, error) {
 	return strconv.ParseInt(cl, 10, 64)
 }
 
+// cheapSize asks Mycelium's TorBox checkcached-backed lookup for a file's
+// size WITHOUT materializing it (no torrent add, no CDN URL fetch). Used
+// for library scans (Attr/Stat/ReadDir), where realSize()'s materializing
+// HEAD would otherwise add every single scanned item to TorBox just to
+// learn its size.
+func cheapSize(token string) (int64, error) {
+	resp, err := httpClient.Get(myceliumBase + "/spore-nfs/size/" + token)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("size lookup %s: status %d", token, resp.StatusCode)
+	}
+	var out struct {
+		Size int64 `json:"size"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, err
+	}
+	return out.Size, nil
+}
+
 func readRange(token string, offset, length int64) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, myceliumBase+"/spore-stream/"+token, nil)
 	if err != nil {
@@ -241,7 +264,7 @@ func (fs *sporeFS) Stat(filename string) (os.FileInfo, error) {
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	size, err := realSize(tok)
+	size, err := cheapSize(tok)
 	if err != nil {
 		return nil, err
 	}
@@ -262,10 +285,10 @@ func (fs *sporeFS) ReadDir(dirname string) ([]os.FileInfo, error) {
 		if !ok {
 			continue
 		}
-		size, err := realSize(tok)
+		size, err := cheapSize(tok)
 		if err != nil {
-			// Item not materializable right now (TorBox/CDN hiccup): still
-			// list it so the library entry exists, just report 0 for now.
+			// Item not checkable right now (TorBox/CDN hiccup): still list
+			// it so the library entry exists, just report 0 for now.
 			size = 0
 		}
 		out = append(out, fileInfo{name: name, size: size})
