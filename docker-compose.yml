@@ -7,6 +7,7 @@ services:
     ports:
       - "8088:8088"
       - "8089:8089"
+      - "2049:2049"
     env_file:
       - .env
     environment:
@@ -26,24 +27,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
-
-  spore-nfs:
-    build: ./spore-nfs
-    image: ghcr.io/corveck79/mycelium-spore-nfs:latest
-    container_name: spore-nfs
-    restart: unless-stopped
-    depends_on:
-      - mycelium
-    environment:
-      - MYCELIUM_BASE=http://mycelium:8088
-      - LISTEN_ADDR=:2049
-    ports:
-      - "2049:2049"
     logging:
       driver: json-file
       options:
