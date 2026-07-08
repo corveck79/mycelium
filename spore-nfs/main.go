@@ -457,6 +457,7 @@ type readAheadSet struct {
 	mu      sync.Mutex
 	windows [readAheadWindows]readAheadWindow
 	clock   int64
+	pending map[int64]bool // window start offsets currently being prefetched
 }
 
 var (
@@ -464,11 +465,36 @@ var (
 	readAheads  = map[string]*readAheadSet{}
 )
 
+// prefetch fetches the window starting at offset in the background and
+// installs it in the LRU slot once it arrives, so a reader that later
+// crosses into that offset doesn't have to wait on the fetch itself.
+func (s *readAheadSet) prefetch(token string, offset, fileSize int64) {
+	fetchLen := int64(readAheadSize)
+	if offset+fetchLen > fileSize {
+		fetchLen = fileSize - offset
+	}
+	data, err := readRange(token, offset, fetchLen)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.pending, offset)
+	if err != nil {
+		return
+	}
+	lru := 0
+	for i := range s.windows {
+		if s.windows[i].used < s.windows[lru].used {
+			lru = i
+		}
+	}
+	s.windows[lru] = readAheadWindow{data: data, start: offset, used: s.clock}
+}
+
 func bufferedRead(token string, offset, want, fileSize int64) ([]byte, error) {
 	readAheadMu.Lock()
 	s, ok := readAheads[token]
 	if !ok {
-		s = &readAheadSet{}
+		s = &readAheadSet{pending: map[int64]bool{}}
 		readAheads[token] = s
 	}
 	readAheadMu.Unlock()
@@ -486,12 +512,25 @@ func bufferedRead(token string, offset, want, fileSize int64) ([]byte, error) {
 			if end > int64(len(w.data)) {
 				end = int64(len(w.data))
 			}
+			// Past the midpoint of this window: start fetching the next one
+			// now, in the background, so it's likely ready by the time a
+			// sequential reader actually reaches its edge instead of
+			// blocking on a fresh 16MB fetch at that point.
+			if rel > int64(len(w.data))/2 {
+				next := w.start + int64(len(w.data))
+				if next < fileSize && !s.pending[next] {
+					s.pending[next] = true
+					go s.prefetch(token, next, fileSize)
+				}
+			}
 			return w.data[rel:end], nil
 		}
 	}
 
 	// Not covered by any window: fetch a fresh one, replacing the least
-	// recently used slot.
+	// recently used slot. This still blocks the caller -- unavoidable for a
+	// genuine cache miss (e.g. a seek) -- prefetch only removes the wait
+	// for the common sequential case.
 	fetchLen := int64(readAheadSize)
 	if want > fetchLen {
 		fetchLen = want // requester wants more than one window; honor it
