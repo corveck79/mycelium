@@ -1357,6 +1357,34 @@ _spore_cold_sizes: dict = {}  # token -> file_size, avoids repeated HEAD on CDN
 _spore_probing: set  = set()  # tokens currently running a background probe
 
 
+@app.get("/ui/api/spore-nfs/tree")
+def spore_nfs_tree():
+    """Virtual directory tree for the spore-nfs server: one entry per playable
+    virtual item, reusing the same movies/series folder layout as the Jellyfin
+    .strm tree (strm_path), just with the extension swapped for the real
+    media container instead of .strm. spore-nfs polls this to build its
+    in-memory filesystem; it does not touch the filesystem itself."""
+    from pathlib import Path
+    media_root = Path(cfg.MEDIA_PATH)
+    entries = []
+    for item in db.get_all_virtual_items():
+        strm_path_str = item.get("strm_path")
+        if not strm_path_str:
+            continue
+        try:
+            rel = Path(strm_path_str).relative_to(media_root)
+        except ValueError:
+            continue
+        entries.append({
+            "token": item["token"],
+            # Real container is unknown until first probe; .mkv is a safe
+            # default since our proxy transparently redirects/remuxes
+            # regardless of the client-visible extension.
+            "path": str(rel.with_suffix(".mkv")),
+        })
+    return jsonify({"entries": entries})
+
+
 @app.get("/spore-stream/<token>")
 def spore_stream_proxy(token: str):
     """Plex Spore proxy: serves moov-first MP4 with Range support.
