@@ -1426,26 +1426,11 @@ def spore_stream_proxy(token: str):
         finally:
             _spore_probing.discard(tok)
 
-    if info is None:
-        # Cold cache: build .fsh in background, immediately proxy Range requests
-        # to CDN so FFmpeg doesn't stall. _spore_cold_sizes caches file_size so
-        # repeated Range requests (FFmpeg seeks) skip the HEAD round-trip.
-        if token not in _spore_cold_sizes:
-            threading.Thread(
-                target=_build_then_probe,
-                args=(cdn_url, token),
-                daemon=True,
-                name=f"fsh-{token[:8]}",
-            ).start()
-            import requests as _req
-            try:
-                head = _req.head(cdn_url, timeout=10, allow_redirects=True)
-                _spore_cold_sizes[token] = int(head.headers.get("Content-Length", 0))
-            except Exception as exc:
-                log.warning("spore-stream: HEAD failed for cold token=%s: %s", token, exc)
-                abort(502)
-
-        file_size = _spore_cold_sizes.get(token, 0)
+    def _cold_proxy_response(file_size: int):
+        """Range-passthrough straight to the CDN. Used both while the .fsh
+        cache is still building and for the already-fast-start case below,
+        where we still proxy (rather than 302) so Plex never caches the raw
+        CDN URL."""
         if not file_size:
             abort(502)
 
@@ -1499,6 +1484,27 @@ def spore_stream_proxy(token: str):
 
         return resp
 
+    if info is None:
+        # Cold cache: build .fsh in background, immediately proxy Range requests
+        # to CDN so FFmpeg doesn't stall. _spore_cold_sizes caches file_size so
+        # repeated Range requests (FFmpeg seeks) skip the HEAD round-trip.
+        if token not in _spore_cold_sizes:
+            threading.Thread(
+                target=_build_then_probe,
+                args=(cdn_url, token),
+                daemon=True,
+                name=f"fsh-{token[:8]}",
+            ).start()
+            import requests as _req
+            try:
+                head = _req.head(cdn_url, timeout=10, allow_redirects=True)
+                _spore_cold_sizes[token] = int(head.headers.get("Content-Length", 0))
+            except Exception as exc:
+                log.warning("spore-stream: HEAD failed for cold token=%s: %s", token, exc)
+                abort(502)
+
+        return _cold_proxy_response(_spore_cold_sizes.get(token, 0))
+
     # CDN file is already moov-first (or MKV redirect sentinel).
     # MKV files (ftyp_size == 0): redirect to CDN — FFmpeg reads MKV from byte 0,
     #   no seeking needed, and CDN redirect avoids unnecessary proxy bandwidth.
@@ -1525,7 +1531,7 @@ def spore_stream_proxy(token: str):
         # Already fast-start MP4: proxy bytes; Plex stores our URL not the CDN URL.
         log.info("spore-stream: token=%s already fast-start MP4, proxying bytes", token)
         _spore_cold_sizes[token] = info["cdn_size"]
-        info = None  # fall through to cold-proxy path below
+        return _cold_proxy_response(info["cdn_size"])
 
     file_size = info["cdn_size"]
     range_hdr = request.headers.get("Range")
