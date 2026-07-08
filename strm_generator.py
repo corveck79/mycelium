@@ -959,14 +959,16 @@ def _ebml_audio_track_entry(track_num: int, codec_mkv: str, lang: str,
     return _ebml_el(b'\xAE', body)
 
 
-def _ebml_subtitle_track_entry(track_num: int, codec_mkv: str, lang: str) -> bytes:
+def _ebml_subtitle_track_entry(track_num: int, codec_mkv: str, lang: str,
+                                is_default: bool = False, is_forced: bool = False) -> bytes:
     lang_bytes = lang.encode("ascii", errors="replace")[:3].ljust(3)[:3]
     body = (
         _ebml_el(b'\xD7', _ebml_uint(track_num)) +
         _ebml_el(b'\x73\xC5', _ebml_uint(track_num)) +
         _ebml_el(b'\x83', _ebml_uint(0x11)) +
         _ebml_el(b'\xB9', _ebml_uint(1)) +
-        _ebml_el(b'\x88', _ebml_uint(0)) +
+        _ebml_el(b'\x88', _ebml_uint(1 if is_default else 0)) +
+        _ebml_el(b'\x55\xAA', _ebml_uint(1 if is_forced else 0)) +
         _ebml_el(b'\x22\xB5\x9C', lang_bytes) +
         _ebml_el(b'\x86', codec_mkv.encode())
     )
@@ -1096,25 +1098,22 @@ def make_stub_mkv(title: str, quality: str | None = None,
         )
         next_num = 3
 
-    for st in (subtitle_tracks or []):
-        mkv_codec = _FFCODEC_TO_MKV_SUB.get(
-            (st.get("codec") or "").lower(), "S_TEXT/UTF8"
-        )
-        tracks_data += _ebml_subtitle_track_entry(
-            track_num=next_num,
-            codec_mkv=mkv_codec,
-            lang=(st.get("language") or "und")[:3],
-        )
-        next_num += 1
-
-    # Forced PGS (image-based) subtitle track, always present regardless of
-    # real subtitle tracks: no client soft-renders PGS, so Plex must burn it
-    # into the video via a real transcode session, guaranteeing the
-    # transcoder (and our wrapper) is invoked instead of Direct Play. The
-    # wrapper strips the burn-in filter and forces a plain video copy, so
-    # this costs nothing extra once the wrapper takes over.
+    # Real subtitle tracks (subtitle_tracks) are intentionally NOT declared in
+    # the stub anymore: Plex prefers a soft/text track (SRT) over image-based
+    # PGS whenever both are available in the same language, which lets it pick
+    # SRT and skip the burn-in requirement entirely, undoing the trick below.
+    # Real subtitle metadata still lives in the DB (save_spore_tracks).
+    #
+    # Forced default PGS (image-based) subtitle track: no client soft-renders
+    # PGS, so Plex must burn it into the video via a real transcode session,
+    # guaranteeing the transcoder (and our wrapper) is invoked instead of
+    # Direct Play. default+forced so Plex can't just ignore it in favor of a
+    # (nonexistent, since we no longer declare one) text track. The wrapper
+    # strips the burn-in filter and forces a plain video copy, so this costs
+    # nothing extra once the wrapper takes over.
     tracks_data += _ebml_subtitle_track_entry(
         track_num=next_num, codec_mkv="S_HDMV/PGS", lang="und",
+        is_default=True, is_forced=True,
     )
     next_num += 1
 
