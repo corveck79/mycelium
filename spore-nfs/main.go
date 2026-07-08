@@ -198,17 +198,77 @@ func cheapSize(token string) (int64, error) {
 	return out.Size, nil
 }
 
+// MKV items are served by spore-stream as a 302 to the real TorBox CDN URL
+// once warm (offsets map 1:1, no moov rewriting needed for MKV). Chasing
+// that redirect on every single NFS read adds a full extra network hop per
+// chunk, which at 1MB-ish NFS read sizes adds up to real stutter on a
+// 20+Mbps stream. Cache the resolved CDN URL per token and read directly
+// from it afterwards -- only ever populated from an *observed* redirect, so
+// it's never used for content spore-stream serves itself (e.g. the MP4
+// virtual-moov layout, where byte offsets do NOT map to the raw CDN file).
+var (
+	cdnURLMu    sync.RWMutex
+	cdnURLCache = map[string]struct {
+		url     string
+		expires time.Time
+	}{}
+)
+
+var noRedirectClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
 func readRange(token string, offset, length int64) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, myceliumBase+"/spore-stream/"+token, nil)
+	target := myceliumBase + "/spore-stream/" + token
+	cdnURLMu.RLock()
+	cached, ok := cdnURLCache[token]
+	cdnURLMu.RUnlock()
+	if ok && time.Now().Before(cached.expires) {
+		target = cached.url
+	}
+
+	req, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
-	resp, err := httpClient.Do(req)
+	resp, err := noRedirectClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusMovedPermanently {
+		loc := resp.Header.Get("Location")
+		if loc == "" {
+			return nil, fmt.Errorf("range GET %s: redirect with no Location", token)
+		}
+		cdnURLMu.Lock()
+		cdnURLCache[token] = struct {
+			url     string
+			expires time.Time
+		}{url: loc, expires: time.Now().Add(50 * time.Minute)}
+		cdnURLMu.Unlock()
+
+		req2, err := http.NewRequest(http.MethodGet, loc, nil)
+		if err != nil {
+			return nil, err
+		}
+		req2.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
+		resp2, err := httpClient.Do(req2)
+		if err != nil {
+			return nil, err
+		}
+		defer resp2.Body.Close()
+		if resp2.StatusCode != 206 && resp2.StatusCode != 200 {
+			return nil, fmt.Errorf("range GET (redirected) %s: status %d", token, resp2.StatusCode)
+		}
+		return io.ReadAll(io.LimitReader(resp2.Body, length))
+	}
+
 	if resp.StatusCode != 206 && resp.StatusCode != 200 {
 		return nil, fmt.Errorf("range GET %s: status %d", token, resp.StatusCode)
 	}
