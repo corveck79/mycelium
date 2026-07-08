@@ -1404,14 +1404,18 @@ def spore_nfs_size(token: str):
     item = db.get_virtual_item(token)
     if not item:
         abort(404)
-    files_by_hash = torbox.check_cached_files([item["info_hash"]])
-    files = files_by_hash.get(item["info_hash"].lower()) or []
-    main = strm_generator._pick_main_movie_file(files)
-    if not main:
+    by_hash = torbox.check_cached_files([item["info_hash"]])
+    entry = by_hash.get(item["info_hash"].lower())
+    if not entry:
         # Not cached (or a torrent Mycelium has never checked yet): no size
         # to report without materializing, which a bulk scan must not do.
         return jsonify({"size": 0})
-    return jsonify({"size": int(main.get("size") or 0)})
+    files = entry.get("files") or []
+    main = strm_generator._pick_main_movie_file(files) if files else None
+    # Single-file torrents (the common case for movies) have no "files"
+    # list at all -- size/name live directly on the entry.
+    size = main.get("size") if main else entry.get("size")
+    return jsonify({"size": int(size or 0)})
 
 
 @app.get("/spore-stream/<token>")
