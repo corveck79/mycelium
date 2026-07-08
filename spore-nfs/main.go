@@ -430,6 +430,66 @@ func (d dirInfo) Sys() interface{}   { return nil }
 
 // ---- billy.File: reads proxy to spore-stream via Range ------------------
 
+// go-nfs re-Opens the file on every single READ RPC (see nfs_onread.go), so
+// per-file-handle state doesn't survive between reads -- the read-ahead
+// buffer has to live per-token instead, shared across those short-lived
+// sporeFile instances.
+const readAheadSize = 16 << 20 // 16MB
+
+type readAheadBuffer struct {
+	mu    sync.Mutex
+	data  []byte
+	start int64 // offset of data[0] in the real file
+}
+
+var (
+	readAheadMu sync.Mutex
+	readAheads  = map[string]*readAheadBuffer{}
+)
+
+// bufferedRead serves offset..offset+want from a 16MB read-ahead window,
+// fetching a new window only when the request falls outside the current
+// one. Sequential playback -- the overwhelmingly common case -- then costs
+// one network round trip per 16MB instead of one per NFS read chunk (which
+// ramps from ~128KB up to ~1MB), directly cutting the per-request latency
+// tax observed on the NAS (~1 request/sec regardless of chunk size).
+func bufferedRead(token string, offset, want, fileSize int64) ([]byte, error) {
+	readAheadMu.Lock()
+	b, ok := readAheads[token]
+	if !ok {
+		b = &readAheadBuffer{start: -1}
+		readAheads[token] = b
+	}
+	readAheadMu.Unlock()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	covered := b.data != nil && offset >= b.start && offset+want <= b.start+int64(len(b.data))
+	if !covered {
+		fetchLen := int64(readAheadSize)
+		if want > fetchLen {
+			fetchLen = want // requester wants more than one window; honor it
+		}
+		if offset+fetchLen > fileSize {
+			fetchLen = fileSize - offset
+		}
+		data, err := readRange(token, offset, fetchLen)
+		if err != nil {
+			return nil, err
+		}
+		b.data = data
+		b.start = offset
+	}
+
+	rel := offset - b.start
+	end := rel + want
+	if end > int64(len(b.data)) {
+		end = int64(len(b.data))
+	}
+	return b.data[rel:end], nil
+}
+
 type sporeFile struct {
 	name  string
 	token string
@@ -450,7 +510,7 @@ func (f *sporeFile) Read(p []byte) (int, error) {
 	if f.pos+want > f.size {
 		want = f.size - f.pos
 	}
-	buf, err := readRange(f.token, f.pos, want)
+	buf, err := bufferedRead(f.token, f.pos, want, f.size)
 	if err != nil {
 		return 0, err
 	}
