@@ -1075,21 +1075,24 @@ def make_stub_mkv(title: str, quality: str | None = None,
                 track_num=next_num,
                 codec_mkv=mkv_codec,
                 lang=(at.get("language") or "und")[:3],
-                channels=int(at.get("channels") or 2),
+                # Declared channel count is floored at 10: HDMI/eARC passthrough
+                # tops out at 8ch, so >8 guarantees no client (Shield included)
+                # can ever Direct Play the stub, regardless of the real CDN
+                # track's actual channel count. The wrapper doesn't read this
+                # value (maps by stream index), only Plex's direct-play check does.
+                channels=max(int(at.get("channels") or 2), 10),
                 sample_rate=float(at.get("sample_rate") or 48000),
                 is_default=(i == 0),
             )
             next_num += 1
     else:
-        # EAC3 5.1 placeholder.
-        #   - A_EAC3 6ch: Plex chooses Direct Stream audio (copy output) for
-        #     clients that support EAC3 passthrough (Shield TV + AV receiver via
-        #     eARC). No EAE needed. Audio packets copied from CDN.
-        #   - For clients that transcode (MiTV -> AC3), EAE decodes EAC3 via
-        #     eac3_eae IPC. The wrapper keeps -eae_prefix for transcode sessions.
+        # EAC3 10ch placeholder: >8ch guarantees no client can Direct Play the
+        # stub (HDMI/eARC passthrough max is 8ch), forcing the transcoder (and
+        # our wrapper) to always be invoked. The wrapper forces video copy to
+        # avoid the wasteful full re-encode this would otherwise trigger.
         tracks_data += _ebml_audio_track_entry(
             track_num=2, codec_mkv="A_EAC3", lang="und",
-            channels=6, sample_rate=48000.0, is_default=True,
+            channels=10, sample_rate=48000.0, is_default=True,
         )
         next_num = 3
 
