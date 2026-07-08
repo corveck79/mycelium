@@ -465,29 +465,53 @@ var (
 	readAheads  = map[string]*readAheadSet{}
 )
 
-// prefetch fetches the window starting at offset in the background and
-// installs it in the LRU slot once it arrives, so a reader that later
-// crosses into that offset doesn't have to wait on the fetch itself.
-func (s *readAheadSet) prefetch(token string, offset, fileSize int64) {
-	fetchLen := int64(readAheadSize)
-	if offset+fetchLen > fileSize {
-		fetchLen = fileSize - offset
-	}
-	data, err := readRange(token, offset, fetchLen)
+// gridStart rounds offset down to a fixed readAheadSize boundary. Windows
+// used to start wherever a cache miss happened to land, which meant two
+// readers a few hundred KB apart opened two different, barely-overlapping
+// 16MB windows instead of sharing one -- observed on the NAS as offsets
+// crawling forward by ~1MB every ~5s, a fresh 16MB fetch every single time,
+// nowhere near real-time bitrate. A fixed grid means every reader near the
+// same position converges on the exact same window.
+func gridStart(offset int64) int64 {
+	return (offset / readAheadSize) * readAheadSize
+}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.pending, offset)
-	if err != nil {
-		return
+func (s *readAheadSet) findWindow(start int64) (*readAheadWindow, bool) {
+	for i := range s.windows {
+		if s.windows[i].data != nil && s.windows[i].start == start {
+			return &s.windows[i], true
+		}
 	}
+	return nil, false
+}
+
+func (s *readAheadSet) store(w readAheadWindow) {
 	lru := 0
 	for i := range s.windows {
 		if s.windows[i].used < s.windows[lru].used {
 			lru = i
 		}
 	}
-	s.windows[lru] = readAheadWindow{data: data, start: offset, used: s.clock}
+	s.windows[lru] = w
+}
+
+// prefetch fetches the grid-aligned window at start in the background and
+// installs it once it arrives, so a reader that later crosses into it
+// doesn't have to wait on the fetch itself.
+func (s *readAheadSet) prefetch(token string, start, fileSize int64) {
+	fetchLen := int64(readAheadSize)
+	if start+fetchLen > fileSize {
+		fetchLen = fileSize - start
+	}
+	data, err := readRange(token, start, fetchLen)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.pending, start)
+	if err != nil {
+		return
+	}
+	s.store(readAheadWindow{data: data, start: start, used: s.clock})
 }
 
 func bufferedRead(token string, offset, want, fileSize int64) ([]byte, error) {
@@ -499,63 +523,55 @@ func bufferedRead(token string, offset, want, fileSize int64) ([]byte, error) {
 	}
 	readAheadMu.Unlock()
 
+	start := gridStart(offset)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clock++
 
-	for i := range s.windows {
-		w := &s.windows[i]
-		if w.data != nil && offset >= w.start && offset+want <= w.start+int64(len(w.data)) {
-			w.used = s.clock
-			rel := offset - w.start
-			end := rel + want
-			if end > int64(len(w.data)) {
-				end = int64(len(w.data))
+	w, ok := s.findWindow(start)
+	if !ok {
+		// Genuine cache miss (first read, or a seek) -- unavoidably blocks
+		// the caller. want can exceed one grid cell if the requester asks
+		// for more than readAheadSize in one go; fetchWindow always fetches
+		// at least a full cell from `start`, so extend it here if needed.
+		fetchLen := int64(readAheadSize)
+		if offset+want-start > fetchLen {
+			fetchLen = offset + want - start
+		}
+		if start+fetchLen > fileSize {
+			fetchLen = fileSize - start
+		}
+		data, err := readRange(token, start, fetchLen)
+		if err != nil {
+			return nil, err
+		}
+		nw := readAheadWindow{data: data, start: start, used: s.clock}
+		s.store(nw)
+		w = &nw
+	} else {
+		w.used = s.clock
+	}
+
+	rel := offset - w.start
+	end := rel + want
+	if end > int64(len(w.data)) {
+		end = int64(len(w.data))
+	}
+
+	// Past the midpoint of this grid cell: start fetching the next one now,
+	// in the background, so it's ready before a sequential reader reaches
+	// the edge instead of blocking on a fresh fetch at that point.
+	if rel > int64(len(w.data))/2 {
+		next := start + readAheadSize
+		if next < fileSize {
+			if _, have := s.findWindow(next); !have && !s.pending[next] {
+				s.pending[next] = true
+				go s.prefetch(token, next, fileSize)
 			}
-			// Past the midpoint of this window: start fetching the next one
-			// now, in the background, so it's likely ready by the time a
-			// sequential reader actually reaches its edge instead of
-			// blocking on a fresh 16MB fetch at that point.
-			if rel > int64(len(w.data))/2 {
-				next := w.start + int64(len(w.data))
-				if next < fileSize && !s.pending[next] {
-					s.pending[next] = true
-					go s.prefetch(token, next, fileSize)
-				}
-			}
-			return w.data[rel:end], nil
 		}
 	}
-
-	// Not covered by any window: fetch a fresh one, replacing the least
-	// recently used slot. This still blocks the caller -- unavoidable for a
-	// genuine cache miss (e.g. a seek) -- prefetch only removes the wait
-	// for the common sequential case.
-	fetchLen := int64(readAheadSize)
-	if want > fetchLen {
-		fetchLen = want // requester wants more than one window; honor it
-	}
-	if offset+fetchLen > fileSize {
-		fetchLen = fileSize - offset
-	}
-	data, err := readRange(token, offset, fetchLen)
-	if err != nil {
-		return nil, err
-	}
-
-	lru := 0
-	for i := range s.windows {
-		if s.windows[i].used < s.windows[lru].used {
-			lru = i
-		}
-	}
-	s.windows[lru] = readAheadWindow{data: data, start: offset, used: s.clock}
-
-	end := want
-	if end > int64(len(data)) {
-		end = int64(len(data))
-	}
-	return data[:end], nil
+	return w.data[rel:end], nil
 }
 
 type sporeFile struct {
