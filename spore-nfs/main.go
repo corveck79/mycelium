@@ -457,8 +457,10 @@ func (d dirInfo) Sys() interface{}   { return nil }
 // buffer has to live per-token instead, shared across those short-lived
 // sporeFile instances.
 const (
-	readAheadSize    = 16 << 20 // 16MB per window
-	readAheadWindows = 3        // slots per token
+	readAheadSize      = 16 << 20  // 16MB per window
+	readAheadWindows   = 3         // slots per token
+	scanProbeThreshold = 256 << 10 // below this, treat as a metadata probe, not streaming
+	probeMinFetch      = 1 << 20   // floor for probe-sized fetches (avoid 1:1 tiny requests)
 )
 
 // A single window worked for one sequential reader, but real sessions have
@@ -554,10 +556,24 @@ func bufferedRead(token string, offset, want, fileSize int64) ([]byte, error) {
 	w, ok := s.findWindow(start)
 	if !ok {
 		// Genuine cache miss (first read, or a seek) -- unavoidably blocks
-		// the caller. want can exceed one grid cell if the requester asks
-		// for more than readAheadSize in one go; fetchWindow always fetches
-		// at least a full cell from `start`, so extend it here if needed.
+		// the caller. Forcing a full 16MB fetch here regardless of `want`
+		// made small one-off reads (e.g. Plex's library scanner probing a
+		// file's header for duration/codec info, not streaming it) wait for
+		// a full window before getting anything back -- observed on the NAS
+		// as several titles getting a wrong, truncated duration recorded
+		// because the scanner gave up before that fetch completed. Below
+		// scanProbeThreshold, fetch close to what's actually needed (with a
+		// small floor so it's not literally one HTTP request per byte);
+		// real sequential playback naturally asks for much more than this
+		// per read, so it still gets the full-window batching that fixed
+		// the earlier per-chunk-latency stutter.
 		fetchLen := int64(readAheadSize)
+		if want < scanProbeThreshold {
+			fetchLen = want
+			if fetchLen < probeMinFetch {
+				fetchLen = probeMinFetch
+			}
+		}
 		if offset+want-start > fetchLen {
 			fetchLen = offset + want - start
 		}
