@@ -7,13 +7,13 @@ COPY frontend/ ./
 COPY plugins/ /plugins/
 RUN npm run build
 
-# -- Stage 2: build spore-nfs (Go) ------------------------------------------------------
-FROM golang:1.25-alpine AS spore-nfs
+# -- Stage 2: build spore-9p (Go) ------------------------------------------------------
+FROM golang:1.25-alpine AS spore-9p
 WORKDIR /src
-COPY spore-nfs/go.mod spore-nfs/go.sum* ./
+COPY spore-9p/go.mod spore-9p/go.sum* ./
 RUN go mod download
-COPY spore-nfs/main.go ./
-RUN CGO_ENABLED=0 go build -o /spore-nfs .
+COPY spore-9p/main.go ./
+RUN CGO_ENABLED=0 go build -o /spore-9p .
 
 # -- Stage 3: Python runtime ----------------------------------------------------------
 FROM python:3.12-slim
@@ -59,12 +59,12 @@ COPY docs/ ./docs/
 COPY --from=frontend /static/app/ ./static/app/
 # Also copy pre-built SPA if present (skips npm build when static/app/ is tracked)
 COPY static/ ./static/
-COPY --from=spore-nfs /spore-nfs /usr/local/bin/spore-nfs
+COPY --from=spore-9p /spore-9p /usr/local/bin/spore-9p
 
 ENV MYCELIUM_BASE=http://127.0.0.1:8088 \
-    LISTEN_ADDR=:2049
+    LISTEN_ADDR=0.0.0.0:5640
 
-EXPOSE 8088 2049
+EXPOSE 8088 5640
 
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
   CMD python -c "import urllib.request,os,sys; \
@@ -72,4 +72,4 @@ port=os.environ.get('LISTEN_PORT','8088'); \
 r=urllib.request.urlopen(f'http://127.0.0.1:{port}/health',timeout=5); \
 sys.exit(0 if r.status==200 else 1)" || exit 1
 
-CMD ["sh", "-c", "spore-nfs & exec gunicorn --bind ${LISTEN_HOST}:${LISTEN_PORT} --workers 1 --threads 8 --access-logfile - app:app"]
+CMD ["sh", "-c", "spore-9p & exec gunicorn --bind ${LISTEN_HOST}:${LISTEN_PORT} --workers 1 --threads 8 --access-logfile - app:app"]
