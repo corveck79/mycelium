@@ -261,15 +261,51 @@ var noRedirectClient = &http.Client{
 	},
 }
 
+// fetchRange issues a single Range GET against a known URL (either the
+// mycelium spore-stream endpoint or a directly-cached CDN url) and returns
+// up to length bytes, or an error for anything other than 200/206.
+func fetchRange(client *http.Client, url string, offset, length int64) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 206 && resp.StatusCode != 200 {
+		return nil, fmt.Errorf("range GET %s: status %d", url, resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, length))
+}
+
 func readRange(token string, offset, length int64) ([]byte, error) {
-	target := myceliumBase + "/spore-stream/" + token
+	// Try a cached direct-CDN url first, if we have one. TorBox presigned
+	// urls and catbox's own materialize cache both expire well before our
+	// 50min TTL does in practice (idle cleanup, TorBox rotating the link),
+	// so a cache hit here is not a guarantee the url still works -- treat
+	// any failure as "stale", drop it, and fall through to re-resolving via
+	// spore-stream instead of surfacing the error to the NFS caller.
+	// Silent failures here previously showed up as ffmpeg's "I/O error"
+	// with nothing at all logged on the mycelium side, since a cached-url
+	// read bypasses mycelium entirely.
 	cdnURLMu.RLock()
 	cached, ok := cdnURLCache[token]
 	cdnURLMu.RUnlock()
 	if ok && time.Now().Before(cached.expires) {
-		target = cached.url
+		data, err := fetchRange(httpClient, cached.url, offset, length)
+		if err == nil {
+			return data, nil
+		}
+		log.Printf("cached CDN url for %s failed (%v), re-resolving via spore-stream", token, err)
+		cdnURLMu.Lock()
+		delete(cdnURLCache, token)
+		cdnURLMu.Unlock()
 	}
 
+	target := myceliumBase + "/spore-stream/" + token
 	req, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
 		return nil, err
@@ -292,21 +328,7 @@ func readRange(token string, offset, length int64) ([]byte, error) {
 			expires time.Time
 		}{url: loc, expires: time.Now().Add(50 * time.Minute)}
 		cdnURLMu.Unlock()
-
-		req2, err := http.NewRequest(http.MethodGet, loc, nil)
-		if err != nil {
-			return nil, err
-		}
-		req2.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
-		resp2, err := httpClient.Do(req2)
-		if err != nil {
-			return nil, err
-		}
-		defer resp2.Body.Close()
-		if resp2.StatusCode != 206 && resp2.StatusCode != 200 {
-			return nil, fmt.Errorf("range GET (redirected) %s: status %d", token, resp2.StatusCode)
-		}
-		return io.ReadAll(io.LimitReader(resp2.Body, length))
+		return fetchRange(httpClient, loc, offset, length)
 	}
 
 	if resp.StatusCode != 206 && resp.StatusCode != 200 {
