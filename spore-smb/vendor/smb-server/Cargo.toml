@@ -1,0 +1,98 @@
+[package]
+name = "smb-server"
+version = "0.4.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/paltaio/rust-smb-server"
+description = "SMB2/3 file-sharing server library with pluggable storage backends."
+
+[workspace]
+resolver = "2"
+members = [
+    ".",
+    "examples/minimal",
+]
+
+[workspace.package]
+version = "0.4.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/paltaio/rust-smb-server"
+
+[workspace.dependencies]
+smb-server = { path = ".", version = "0.4.1" }
+
+tokio = { version = "1.40", features = ["full"] }
+binrw = "0.15"
+bytes = "1.7"
+async-trait = "0.1"
+tracing = "0.1"
+thiserror = "1"
+uuid = { version = "1.10", features = ["v4"] }
+cap-std = "3"
+
+# RustCrypto family
+hmac  = "0.12"
+sha2  = "0.10"
+md-5  = "0.10"
+md4   = "0.10"
+aes   = "0.8"
+cmac  = "0.7"
+rc4   = "0.2"
+
+[dependencies]
+tokio = { workspace = true }
+bytes.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+# Used as the wire codec inside negotiate-context payload encoders. Justified:
+# the internal proto module exposes binrw-derived structs (`PreauthIntegrityCapabilities`
+# etc) and we need `BinWrite::write` to serialize them into a context body.
+binrw = { workspace = true }
+# Cryptographically-strong randomness for the NTLM server challenge and the
+# 3.1.1 negotiate-context salt.
+getrandom = "0.4"
+cap-std = { workspace = true, optional = true }
+hmac.workspace = true
+sha2.workspace = true
+md-5.workspace = true
+md4.workspace = true
+aes.workspace = true
+cmac.workspace = true
+rc4.workspace = true
+
+[features]
+default = ["localfs"]
+localfs = ["dep:cap-std"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+tracing-subscriber = "0.3"
+tempfile = "3"
+hex = "0.4"
+
+[[test]]
+name = "integration_localfs"
+path = "tests/integration_localfs.rs"
+required-features = ["localfs"]
+
+[[test]]
+name = "integration_localfs_write"
+path = "tests/integration_localfs_write.rs"
+required-features = ["localfs"]
+
+[[test]]
+name = "integration_negotiate"
+path = "tests/integration_negotiate.rs"
+required-features = ["localfs"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

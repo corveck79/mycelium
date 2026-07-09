@@ -15,7 +15,14 @@ RUN go mod download
 COPY spore-nfs/main.go ./
 RUN CGO_ENABLED=0 go build -o /spore-nfs .
 
-# -- Stage 3: Python runtime ----------------------------------------------------------
+# -- Stage 3: build spore-smb (Rust) ---------------------------------------------------
+FROM rust:slim AS spore-smb
+RUN apt-get update -qq && apt-get install -y -qq pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY spore-smb/ ./
+RUN cargo build --release && cp target/release/spore-smb /spore-smb
+
+# -- Stage 4: Python runtime ----------------------------------------------------------
 FROM python:3.12-slim
 
 ARG BUILD_VERSION=dev
@@ -60,11 +67,11 @@ COPY --from=frontend /static/app/ ./static/app/
 # Also copy pre-built SPA if present (skips npm build when static/app/ is tracked)
 COPY static/ ./static/
 COPY --from=spore-nfs /spore-nfs /usr/local/bin/spore-nfs
+COPY --from=spore-smb /spore-smb /usr/local/bin/spore-smb
 
-ENV MYCELIUM_BASE=http://127.0.0.1:8088 \
-    LISTEN_ADDR=:2049
+ENV MYCELIUM_BASE=http://127.0.0.1:8088
 
-EXPOSE 8088 2049
+EXPOSE 8088 2049 445
 
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
   CMD python -c "import urllib.request,os,sys; \
@@ -72,4 +79,4 @@ port=os.environ.get('LISTEN_PORT','8088'); \
 r=urllib.request.urlopen(f'http://127.0.0.1:{port}/health',timeout=5); \
 sys.exit(0 if r.status==200 else 1)" || exit 1
 
-CMD ["sh", "-c", "spore-nfs & exec gunicorn --bind ${LISTEN_HOST}:${LISTEN_PORT} --workers 1 --threads 8 --access-logfile - app:app"]
+CMD ["sh", "-c", "LISTEN_ADDR=:2049 spore-nfs & LISTEN_ADDR=:445 spore-smb & exec gunicorn --bind ${LISTEN_HOST}:${LISTEN_PORT} --workers 1 --threads 8 --access-logfile - app:app"]

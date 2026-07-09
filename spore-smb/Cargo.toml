@@ -1,0 +1,22 @@
+[package]
+name = "spore-smb"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "spore-smb"
+path = "src/main.rs"
+
+[dependencies]
+# Vendored + patched locally: upstream 0.4.0 doesn't publicly export
+# BackendCapabilities/FileTimes/SmbError/SmbResult/SmbPath, which
+# ShareBackend/Handle need in every method signature. See vendor/smb-server/src/lib.rs.
+smb-server = { path = "vendor/smb-server", default-features = false }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+async-trait = "0.1"
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
