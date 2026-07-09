@@ -223,25 +223,36 @@ def build_and_cache(cdn_url: str, token: str) -> bool:
             head = req_lib.head(cdn_url, timeout=_CONNECT_TIMEOUT, allow_redirects=True)
             cdn_size = int(head.headers["Content-Length"])
 
-            # ftyp: first box  -  read header to get actual size, then fetch full box
+            def _atomic_write(dest: Path, data: bytes) -> None:
+                tmp = dest.with_suffix(".tmp")
+                tmp.write_bytes(data)
+                tmp.replace(dest)
+
+            # ftyp: first box  -  read header to get actual size, then fetch full box.
+            # An oversized "size" here isn't necessarily a malformed MP4 -- it's
+            # the expected result of parsing a non-MP4 container's first bytes
+            # as an MP4 box header. MKV's EBML magic (0x1A45DFA3 = 440786851)
+            # parses this way every time, so this must fall through to the same
+            # "not an MP4" redirect-sentinel path _locate_moov() uses below,
+            # not bail out -- bailing out here left build_and_cache() failing
+            # forever for these tokens (no .fsh ever written -> every request
+            # stuck on the slow cold-proxy path indefinitely).
             ftyp_hdr = _get(cdn_url, 0, 15)
             _, ftyp_size, _ = _box_header(ftyp_hdr, 0)
             if ftyp_size > _MAX_FTYP_BYTES:
-                log.warning(
-                    "FastStart: ftyp size %d for token=%s exceeds cap %d - "
-                    "refusing to buffer (malformed/hostile CDN response?)",
+                log.info(
+                    "FastStart: ftyp size %d for token=%s exceeds cap %d "
+                    "(likely non-MP4, e.g. MKV's EBML magic) - redirect sentinel",
                     ftyp_size, token, _MAX_FTYP_BYTES,
                 )
-                return False
+                meta = struct.pack(">QQQQ", 0, 0, cdn_size, 0)
+                _atomic_write(path, meta)
+                return True
             ftyp_raw = _get(cdn_url, 0, ftyp_size - 1)
             ftyp = ftyp_raw[:ftyp_size]
 
             # Locate moov by scanning box headers
             result = _locate_moov(cdn_url, cdn_size)
-            def _atomic_write(dest: Path, data: bytes) -> None:
-                tmp = dest.with_suffix(".tmp")
-                tmp.write_bytes(data)
-                tmp.replace(dest)
 
             if result is None:
                 # Not an MP4 (likely MKV): write redirect sentinel so spore-stream
