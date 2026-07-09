@@ -7,7 +7,7 @@ services:
     ports:
       - "8088:8088"
       - "8089:8089"
-      - "5640:5640"
+      - "2049:2049"
     env_file:
       - .env
     environment:
