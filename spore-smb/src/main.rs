@@ -23,7 +23,7 @@ use smb_server::{
     BackendCapabilities, DirEntry, FileInfo, FileTimes, Handle, OpenOptions, Share, ShareBackend,
     SmbError, SmbPath, SmbResult, SmbServer,
 };
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 
 fn env_or(k: &str, def: &str) -> String {
     std::env::var(k).unwrap_or_else(|_| def.to_string())
@@ -214,6 +214,14 @@ struct AppState {
     real_size_cache: RwLock<HashMap<String, (i64, Instant)>>,
     cdn_url_cache: RwLock<HashMap<String, (String, Instant)>>,
     read_aheads: RwLock<HashMap<String, Arc<Mutex<ReadAheadSet>>>>,
+    // Now that dispatch is concurrent (see vendor/smb-server's reader.rs),
+    // several reads -- from one client's read-ahead, or several concurrent
+    // viewers sharing the connection -- can hit read_range() at once. Left
+    // unbounded, a burst of fresh-window fetches has been observed to trip
+    // TorBox's CDN rate limit (HTTP 429) under smbclient's own parallel_read
+    // acceleration. Cap concurrent CDN/backend fetches so bursts queue
+    // client-side instead of hammering the CDN.
+    fetch_limiter: Semaphore,
 }
 
 impl AppState {
@@ -297,6 +305,11 @@ impl AppState {
     // drops it and re-resolves via /spore-stream/<token> instead of
     // surfacing an opaque I/O error to the SMB client with nothing logged.
     async fn read_range(&self, token: &str, offset: i64, length: i64) -> Result<Bytes, SmbError> {
+        let _permit = self
+            .fetch_limiter
+            .acquire()
+            .await
+            .expect("fetch_limiter is never closed");
         let cached = {
             let g = self.cdn_url_cache.read().await;
             g.get(token).cloned()
@@ -617,6 +630,7 @@ impl Handle for SporeHandle {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base_url = env_or("MYCELIUM_BASE", "http://127.0.0.1:8088");
     let listen: std::net::SocketAddr = env_or("LISTEN_ADDR", "0.0.0.0:445").parse()?;
+    let max_concurrent_fetches: usize = env_or("MAX_CONCURRENT_FETCHES", "4").parse()?;
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -634,6 +648,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         real_size_cache: RwLock::new(HashMap::new()),
         cdn_url_cache: RwLock::new(HashMap::new()),
         read_aheads: RwLock::new(HashMap::new()),
+        fetch_limiter: Semaphore::new(max_concurrent_fetches),
     });
 
     state.tree.refresh(&state).await;
