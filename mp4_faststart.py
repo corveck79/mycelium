@@ -201,15 +201,29 @@ def _get(url: str, start: int, end: int, max_retries: int = _MAX_429_RETRIES) ->
             attempt += 1
             continue
         if resp.status_code == 200:
-            # CDN ignored the Range header and is about to send the WHOLE file
-            # starting at byte 0, not at `start` - every offset computed from
-            # this response would be wrong. Bail out instead of silently
-            # buffering/misreading it (every real TorBox CDN response uses 206).
-            raise ValueError(
-                f"CDN returned HTTP 200 (ignored Range header) for bytes={start}-{end} - "
-                "refusing to treat body as if it started at the requested offset"
+            # Usually means the CDN ignored the Range header and is about to
+            # send the WHOLE file starting at byte 0, not at `start` - every
+            # offset computed from this response would be wrong. But when the
+            # requested range legitimately covers the entire resource (a
+            # small file, or app.py's cold-proxy passthrough requesting a
+            # file that fits in one CHUNK), a 200 with a body exactly the
+            # requested length is a spec-legal (RFC 7233) and correct
+            # response, not a Range-ignoring one - reject only when we can't
+            # confirm that.
+            content_length = resp.headers.get("Content-Length")
+            requested_length = end - start + 1
+            whole_range_covers_body = (
+                start == 0
+                and content_length is not None
+                and content_length.isdigit()
+                and int(content_length) == requested_length
             )
-        if resp.status_code != 206:
+            if not whole_range_covers_body:
+                raise ValueError(
+                    f"CDN returned HTTP 200 (ignored Range header) for bytes={start}-{end} - "
+                    "refusing to treat body as if it started at the requested offset"
+                )
+        elif resp.status_code != 206:
             raise ValueError(f"CDN returned HTTP {resp.status_code} for bytes={start}-{end}")
         data = bytearray()
         for chunk in resp.iter_content(1 << 17):

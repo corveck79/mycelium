@@ -8,6 +8,7 @@ use crate::proto::framing::{FRAME_HEADER_LEN, decode_frame_header};
 use tokio::io::{AsyncReadExt, ReadHalf};
 use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
+use tracing::{debug, error};
 
 use crate::conn::state::Connection;
 use crate::server::ServerState;
@@ -69,11 +70,11 @@ pub async fn reader_task(
         let frame = match read_one_frame(&mut reader).await {
             Ok(Some(b)) => b,
             Ok(None) => {
-                eprintln!("client closed connection");
+                debug!("client closed connection");
                 return Ok(());
             }
             Err(e) => {
-                eprintln!("frame read error: {e}");
+                error!(error = %e, "frame read error");
                 return Err(e);
             }
         };
@@ -82,7 +83,7 @@ pub async fn reader_task(
             .shutting_down
             .load(std::sync::atomic::Ordering::Acquire)
         {
-            eprintln!("server shutting down; dropping connection");
+            debug!("server shutting down; dropping connection");
             return Ok(());
         }
         // The writer task exits (and drops its receiver) on a socket write
@@ -93,7 +94,7 @@ pub async fn reader_task(
         // frames and spawning dispatch tasks (each potentially doing a real
         // CDN fetch) for a connection that could never receive a response.
         if tx.is_closed() {
-            eprintln!("writer channel closed; reader exiting");
+            debug!("writer channel closed; reader exiting");
             return Ok(());
         }
 

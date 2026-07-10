@@ -519,6 +519,31 @@ fn grid_start(offset: i64) -> i64 {
     (offset / READ_AHEAD_SIZE) * READ_AHEAD_SIZE
 }
 
+/// RAII guard for a `pending` grid-window claim: removes the entry and wakes
+/// waiters when dropped, on every exit path -- normal return, an early `?`
+/// return on error, or a panic -- not just the success path. Without this,
+/// a fetch that panics instead of returning `Err` would leave `start` stuck
+/// in `pending` forever (a spawned task's panic just unwinds that task,
+/// skipping any manual cleanup code after the `.await`), and every later
+/// reader for that window would pay the full dedup-wait timeout before
+/// falling back to fetching it themselves, repeating indefinitely.
+struct PendingGuard {
+    set: Arc<Mutex<ReadAheadSet>>,
+    start: i64,
+}
+
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        let set = self.set.clone();
+        let start = self.start;
+        tokio::spawn(async move {
+            let mut s = set.lock().await;
+            s.pending.remove(&start);
+            s.notify.notify_waiters();
+        });
+    }
+}
+
 async fn get_read_ahead_set(state: &Arc<AppState>, token: &str) -> Arc<Mutex<ReadAheadSet>> {
     if let Some(s) = state.read_aheads.read().await.get(token) {
         return s.clone();
@@ -530,21 +555,25 @@ async fn get_read_ahead_set(state: &Arc<AppState>, token: &str) -> Arc<Mutex<Rea
 }
 
 async fn prefetch(state: Arc<AppState>, set: Arc<Mutex<ReadAheadSet>>, token: String, start: i64, file_size: i64) {
+    // Caller already inserted `start` into `pending` before spawning this;
+    // this guard's Drop cleans it up (and wakes anyone waiting on this
+    // window -- a real read can land on the same grid cell a background
+    // prefetch is already fetching) on every exit path, including a panic.
+    let _pending_guard = PendingGuard {
+        set: set.clone(),
+        start,
+    };
     let mut fetch_len = READ_AHEAD_SIZE;
     if start + fetch_len > file_size {
         fetch_len = file_size - start;
     }
     let result = state.read_range(&token, start, fetch_len).await;
-    let mut s = set.lock().await;
-    s.pending.remove(&start);
     if let Ok(data) = result {
+        let mut s = set.lock().await;
         s.clock += 1;
         let clock = s.clock;
         s.store(Window { data, start, used: clock });
     }
-    // Wake anyone waiting on this window -- a real read can land on the
-    // same grid cell a background prefetch is already fetching.
-    s.notify.notify_waiters();
 }
 
 async fn buffered_read(state: &Arc<AppState>, token: &str, offset: i64, want: i64, file_size: i64) -> Result<Bytes, SmbError> {
@@ -585,7 +614,16 @@ async fn buffered_read(state: &Arc<AppState>, token: &str, offset: i64, want: i6
             // in-flight fetch instead of duplicating it; if it doesn't
             // resolve promptly (slow, or it failed and gave up), fall
             // through and fetch it ourselves.
-            const DEDUP_WAIT_ATTEMPTS: u32 = 100;
+            // Bounded well under a plausible fetch duration (up to 30s on
+            // reqwest's own timeout, longer still with 429 backoff): this is
+            // a bet that a fetch already in progress will finish soon, not a
+            // promise to wait for it. Held the whole time is this read's
+            // in_flight dispatch permit (reader.rs), so waiting past the
+            // point a fetch is likely to be genuinely slow just holds that
+            // permit -- and every other cache-hit read on the same
+            // connection queued behind it -- for no benefit once we give up
+            // and fetch it ourselves anyway.
+            const DEDUP_WAIT_ATTEMPTS: u32 = 20;
             const DEDUP_WAIT_STEP: Duration = Duration::from_millis(50);
             let mut waited_window = None;
             if s.pending.contains(&start) {
@@ -600,7 +638,18 @@ async fn buffered_read(state: &Arc<AppState>, token: &str, offset: i64, want: i6
                     let _ = tokio::time::timeout(DEDUP_WAIT_STEP, notified).await;
                     s = set.lock().await;
                     if let Some(w) = s.find(start) {
-                        waited_window = Some(w);
+                        // Only usable if it actually covers our requested
+                        // offset. Whoever fetched it may have sized it for
+                        // their own, possibly smaller, need (e.g. a
+                        // probe-sized read fetches as little as
+                        // PROBE_MIN_FETCH) -- adopting it unconditionally
+                        // let `rel` (below) exceed the window's length,
+                        // which panics on the final slice() rather than just
+                        // returning short. If it doesn't cover us, fall
+                        // through and fetch our own correctly-sized window.
+                        if offset - w.start < w.data.len() as i64 {
+                            waited_window = Some(w);
+                        }
                         break;
                     }
                     if !s.pending.contains(&start) {
@@ -617,11 +666,15 @@ async fn buffered_read(state: &Arc<AppState>, token: &str, offset: i64, want: i6
                 None => {
                     s.pending.insert(start);
                     drop(s);
-                    let result = state.read_range(token, start, fetch_len).await;
+                    // Guard cleans up `pending` (and wakes waiters) on every
+                    // exit path -- including the `?` below and a panic --
+                    // not just a normal return.
+                    let _pending_guard = PendingGuard {
+                        set: set.clone(),
+                        start,
+                    };
+                    let data = state.read_range(token, start, fetch_len).await?;
                     let mut s2 = set.lock().await;
-                    s2.pending.remove(&start);
-                    s2.notify.notify_waiters();
-                    let data = result?;
                     let w = Window { data, start, used: clock };
                     s2.store(w.clone());
                     w
