@@ -79,4 +79,4 @@ port=os.environ.get('LISTEN_PORT','8088'); \
 r=urllib.request.urlopen(f'http://127.0.0.1:{port}/health',timeout=5); \
 sys.exit(0 if r.status==200 else 1)" || exit 1
 
-CMD ["sh", "-c", "LISTEN_ADDR=:2049 spore-nfs & LISTEN_ADDR=:445 spore-smb & exec gunicorn --bind ${LISTEN_HOST}:${LISTEN_PORT} --workers 1 --threads 8 --access-logfile - app:app"]
+CMD ["sh", "-c", "LISTEN_ADDR=:2049 spore-nfs & LISTEN_ADDR=0.0.0.0:445 spore-smb & exec gunicorn --bind ${LISTEN_HOST}:${LISTEN_PORT} --workers 1 --threads 8 --access-logfile - app:app"]
