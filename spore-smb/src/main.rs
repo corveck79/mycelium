@@ -121,18 +121,18 @@ impl Tree {
         let resp = match state.client.get(&url).send().await {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!("tree refresh: {e}");
+                eprintln!("tree refresh: {e}");
                 return;
             }
         };
         if !resp.status().is_success() {
-            tracing::warn!("tree refresh: unexpected status {}", resp.status());
+            eprintln!("tree refresh: unexpected status {}", resp.status());
             return;
         }
         let parsed: TreeResponse = match resp.json().await {
             Ok(v) => v,
             Err(e) => {
-                tracing::warn!("tree refresh decode: {e}");
+                eprintln!("tree refresh decode: {e}");
                 return;
             }
         };
@@ -162,7 +162,7 @@ impl Tree {
         g.dirs = dirs;
         g.fetched_at = Some(Instant::now());
         drop(g);
-        tracing::info!("tree refreshed: {count} files, {dcount} dirs");
+        eprintln!("tree refreshed: {count} files, {dcount} dirs");
     }
 
     async fn token_for(&self, state: &AppState, p: &str) -> Option<String> {
@@ -306,7 +306,7 @@ impl AppState {
                 match self.fetch_range(&self.client, &url, offset, length).await {
                     Ok(b) => return Ok(b),
                     Err(e) => {
-                        tracing::warn!("cached CDN url for {token} failed ({e:?}), re-resolving via spore-stream");
+                        eprintln!("cached CDN url for {token} failed ({e:?}), re-resolving via spore-stream");
                         self.cdn_url_cache.write().await.remove(token);
                     }
                 }
@@ -612,8 +612,6 @@ impl Handle for SporeHandle {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt().init();
-
     let base_url = env_or("MYCELIUM_BASE", "http://127.0.0.1:8088");
     let listen: std::net::SocketAddr = env_or("LISTEN_ADDR", "0.0.0.0:445").parse()?;
 
@@ -656,7 +654,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .share(Share::new("media", backend).public_read_only())
         .build()?;
 
-    tracing::info!("spore-smb listening on {listen}, backing store = {}", state.base_url);
+    eprintln!("spore-smb listening on {listen}, backing store = {}", state.base_url);
     server.bind().await?;
     server.serve().await?;
     Ok(())
