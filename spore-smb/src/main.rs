@@ -584,7 +584,20 @@ async fn buffered_read(state: &Arc<AppState>, token: &str, offset: i64, want: i6
     s.clock += 1;
     let clock = s.clock;
 
-    let window = match s.find(start) {
+    // A cached (or freshly-waited-for) window only satisfies this read if it
+    // actually contains the requested offset -- a window for the same grid
+    // cell can be smaller than READ_AHEAD_SIZE (a probe-sized read fetches
+    // as little as PROBE_MIN_FETCH), so a *different*, larger read landing
+    // on the same cell must not adopt it. Without this check the tail of
+    // this function computes `rel` (offset - window.start) that can exceed
+    // window.data.len(), and window.data.slice(rel..end) panics rather than
+    // just returning short -- this was reachable through the plain cache-hit
+    // path below even before dedup-wait existed, since a small probe read
+    // and a later real playback read from the same client routinely land in
+    // the same 16MB cell.
+    let covers = |w: &Window| offset - w.start < w.data.len() as i64;
+
+    let window = match s.find(start).filter(covers) {
         Some(w) => {
             drop(s);
             w
@@ -638,16 +651,10 @@ async fn buffered_read(state: &Arc<AppState>, token: &str, offset: i64, want: i6
                     let _ = tokio::time::timeout(DEDUP_WAIT_STEP, notified).await;
                     s = set.lock().await;
                     if let Some(w) = s.find(start) {
-                        // Only usable if it actually covers our requested
-                        // offset. Whoever fetched it may have sized it for
-                        // their own, possibly smaller, need (e.g. a
-                        // probe-sized read fetches as little as
-                        // PROBE_MIN_FETCH) -- adopting it unconditionally
-                        // let `rel` (below) exceed the window's length,
-                        // which panics on the final slice() rather than just
-                        // returning short. If it doesn't cover us, fall
-                        // through and fetch our own correctly-sized window.
-                        if offset - w.start < w.data.len() as i64 {
+                        // Only usable if it covers our requested offset (see
+                        // `covers` above) -- otherwise fall through and
+                        // fetch our own correctly-sized window.
+                        if covers(&w) {
                             waited_window = Some(w);
                         }
                         break;
