@@ -38,6 +38,12 @@ _MAX_MOOV_BYTES  = 128 * 1024 * 1024  # refuse to buffer a moov bigger than this
 _MAX_FTYP_BYTES  = 1024 * 1024        # real ftyp boxes are a few dozen bytes; same cap idea as moov
 _MAX_429_RETRIES = 4
 _RETRY_BASE_DELAY_S = 0.3
+# gunicorn runs with a small, fixed thread count for the whole app (see
+# Dockerfile) -- serve_bytes() calls _get() inline on a live request thread
+# while streaming a response, unlike build_and_cache()'s backgrounded calls,
+# so it gets a much smaller retry budget (worst case ~0.9s vs ~4.5s) to
+# bound how long a sustained CDN rate limit can hold one of those threads.
+_LIVE_REQUEST_MAX_429_RETRIES = 2
 _CACHE_DIR: Path | None = None # set by init()
 # Per-token locks instead of one global lock, so building the fast-start
 # cache for one movie doesn't block every other concurrent cold-start build.
@@ -160,7 +166,7 @@ def _find_box_in(data: bytes, typ: bytes) -> int:
 
 # ── Fetch + cache ─────────────────────────────────────────────────────────────
 
-def _get(url: str, start: int, end: int) -> bytes:
+def _get(url: str, start: int, end: int, max_retries: int = _MAX_429_RETRIES) -> bytes:
     headers = {"Range": f"bytes={start}-{end}"}
     attempt = 0
     while True:
@@ -170,7 +176,7 @@ def _get(url: str, start: int, end: int) -> bytes:
             timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT),
             stream=True,
         )
-        if resp.status_code == 429 and attempt < _MAX_429_RETRIES:
+        if resp.status_code == 429 and attempt < max_retries:
             # A caller (spore-nfs/spore-smb) that hit this via the streaming
             # /spore-stream proxy has no chance to retry itself: Flask has
             # already committed the response status/Content-Length before
@@ -179,10 +185,17 @@ def _get(url: str, start: int, end: int) -> bytes:
             # every caller since had to treat as a hard failure. Retry
             # inline instead so a transient CDN rate limit doesn't turn
             # into a truncated stream.
+            #
+            # max_retries is caller-tunable because not every caller can
+            # afford the full backoff budget: build_and_cache()'s calls run
+            # in a background thread and can wait it out, but serve_bytes()
+            # runs inline on a live gunicorn request thread (of which there
+            # are only a handful total) while streaming a response, so it
+            # passes a smaller budget to bound how long it can block one.
             backoff = _RETRY_BASE_DELAY_S * (2 ** attempt)
             log.warning(
                 "CDN rate limited (429) for bytes=%d-%d, retrying in %.1fs (attempt %d/%d)",
-                start, end, backoff, attempt + 1, _MAX_429_RETRIES,
+                start, end, backoff, attempt + 1, max_retries,
             )
             time.sleep(backoff)
             attempt += 1
@@ -416,11 +429,12 @@ def serve_bytes(info: dict, cdn_url: str, v_start: int, v_end: int) -> bytes:
     # Region 2: mdat1 (before moov in CDN) — cdn = virtual - moov_size
     if pos <= v_end and pos < mdat2_start:
         chunk_end = min(v_end, mdat2_start - 1)
-        out += _get(cdn_url, pos - moov_size, chunk_end - moov_size)
+        out += _get(cdn_url, pos - moov_size, chunk_end - moov_size,
+                     max_retries=_LIVE_REQUEST_MAX_429_RETRIES)
         pos = chunk_end + 1
 
     # Region 3: mdat2 (after moov in CDN) — cdn = virtual
     if pos <= v_end:
-        out += _get(cdn_url, pos, v_end)
+        out += _get(cdn_url, pos, v_end, max_retries=_LIVE_REQUEST_MAX_429_RETRIES)
 
     return bytes(out)

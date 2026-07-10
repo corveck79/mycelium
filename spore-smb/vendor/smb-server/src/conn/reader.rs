@@ -8,7 +8,6 @@ use crate::proto::framing::{FRAME_HEADER_LEN, decode_frame_header};
 use tokio::io::{AsyncReadExt, ReadHalf};
 use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
-use tracing::{debug, error};
 
 use crate::conn::state::Connection;
 use crate::server::ServerState;
@@ -70,11 +69,11 @@ pub async fn reader_task(
         let frame = match read_one_frame(&mut reader).await {
             Ok(Some(b)) => b,
             Ok(None) => {
-                debug!("client closed connection");
+                eprintln!("client closed connection");
                 return Ok(());
             }
             Err(e) => {
-                error!(error = %e, "frame read error");
+                eprintln!("frame read error: {e}");
                 return Err(e);
             }
         };
@@ -83,7 +82,18 @@ pub async fn reader_task(
             .shutting_down
             .load(std::sync::atomic::Ordering::Acquire)
         {
-            debug!("server shutting down; dropping connection");
+            eprintln!("server shutting down; dropping connection");
+            return Ok(());
+        }
+        // The writer task exits (and drops its receiver) on a socket write
+        // error, which closes every clone of `tx`. Without this check, a
+        // half-closed connection (write side dead, read side still
+        // delivering frames -- e.g. a NAT dropping only the outbound
+        // direction) left the reader spinning forever: it kept reading
+        // frames and spawning dispatch tasks (each potentially doing a real
+        // CDN fetch) for a connection that could never receive a response.
+        if tx.is_closed() {
+            eprintln!("writer channel closed; reader exiting");
             return Ok(());
         }
 
@@ -98,10 +108,17 @@ pub async fn reader_task(
         tokio::spawn(async move {
             let response =
                 crate::dispatch::dispatch_frame(&dispatch_server, &dispatch_conn, &frame).await;
-            drop(permit);
             if let Some(bytes) = response {
                 let _ = dispatch_tx.send(bytes).await;
             }
+            // Held until the response is actually handed to the writer (or
+            // dropped, if there was none) -- not right after dispatch_frame
+            // computes it -- so MAX_IN_FLIGHT_PER_CONN bounds outstanding
+            // work-plus-pending-write, not just compute. Otherwise a stalled
+            // writer (full/slow socket) lets fast dispatches free their
+            // permits immediately while sitting blocked on `send`, and the
+            // reader keeps spawning past the intended cap.
+            drop(permit);
         });
     }
 }

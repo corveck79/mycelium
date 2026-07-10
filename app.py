@@ -1508,18 +1508,26 @@ def spore_stream_proxy(token: str):
 
         length = r_end - r_start + 1
 
-        import requests as _req
-
         def _gen_passthrough():
             CHUNK = 2 << 20
             pos = r_start
             while pos <= r_end:
                 end = min(pos + CHUNK - 1, r_end)
-                hdrs = {"Range": f"bytes={pos}-{end}"}
                 try:
-                    resp = _req.get(cdn_url, headers=hdrs, timeout=(10, 60), stream=True)
-                    for chunk in resp.iter_content(65536):
-                        yield chunk
+                    # Route through mp4_faststart's _get() instead of a raw
+                    # requests.get(): it already validates the CDN status
+                    # code (retries on 429, raises on anything else) before
+                    # returning bytes. A bare requests.get() here previously
+                    # had no status check at all, so a CDN error body would
+                    # get piped to the client as if it were video data.
+                    # This runs inline on a live gunicorn request thread
+                    # (small, fixed pool -- see Dockerfile), so it gets the
+                    # same reduced retry budget as mp4_faststart.serve_bytes.
+                    data = mp4_faststart._get(
+                        cdn_url, pos, end,
+                        max_retries=mp4_faststart._LIVE_REQUEST_MAX_429_RETRIES,
+                    )
+                    yield data
                     pos = end + 1
                 except Exception as exc:
                     log.warning("spore-stream cold proxy: error pos=%d token=%s: %s",

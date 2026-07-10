@@ -23,7 +23,7 @@ use smb_server::{
     BackendCapabilities, DirEntry, FileInfo, FileTimes, Handle, OpenOptions, Share, ShareBackend,
     SmbError, SmbPath, SmbResult, SmbServer,
 };
-use tokio::sync::{Mutex, RwLock, Semaphore};
+use tokio::sync::{Mutex, Notify, RwLock, Semaphore};
 
 fn env_or(k: &str, def: &str) -> String {
     std::env::var(k).unwrap_or_else(|_| def.to_string())
@@ -416,6 +416,15 @@ impl AppState {
             }
         }
 
+        // NOTE: range_get_with_retry's 429-branch is effectively inert here.
+        // Flask commits spore_stream_proxy's status/Content-Length before its
+        // streaming generator runs, so a CDN 429 hit mid-stream never reaches
+        // us as a literal 429 -- it surfaces as an already-200/206 response
+        // whose body simply ends short (see mp4_faststart.py's _get(), which
+        // is the actual 429 defense for this call site). We still route
+        // through range_get_with_retry for the redirect/200/206 handling it
+        // shares with fetch_range, and because a raw 429 *would* be retried
+        // correctly if mycelium's own behavior ever changed.
         let target = format!("{}/spore-stream/{}", self.base_url, token);
         let resp = self
             .range_get_with_retry(&self.no_redirect_client, &target, offset, length)
@@ -466,6 +475,12 @@ struct ReadAheadSet {
     windows: Vec<Option<Window>>,
     clock: i64,
     pending: std::collections::HashSet<i64>,
+    // Signaled whenever any pending fetch resolves (success or failure), so
+    // a reader that finds its window already being fetched by someone else
+    // can wait for that instead of duplicating the CDN fetch. Shared across
+    // all windows for this token rather than one per window -- a spurious
+    // wakeup just costs a cheap re-check of `find`/`pending`.
+    notify: Arc<Notify>,
 }
 
 impl ReadAheadSet {
@@ -474,6 +489,7 @@ impl ReadAheadSet {
             windows: vec![None; READ_AHEAD_WINDOWS],
             clock: 0,
             pending: std::collections::HashSet::new(),
+            notify: Arc::new(Notify::new()),
         }
     }
 
@@ -526,6 +542,9 @@ async fn prefetch(state: Arc<AppState>, set: Arc<Mutex<ReadAheadSet>>, token: St
         let clock = s.clock;
         s.store(Window { data, start, used: clock });
     }
+    // Wake anyone waiting on this window -- a real read can land on the
+    // same grid cell a background prefetch is already fetching.
+    s.notify.notify_waiters();
 }
 
 async fn buffered_read(state: &Arc<AppState>, token: &str, offset: i64, want: i64, file_size: i64) -> Result<Bytes, SmbError> {
@@ -557,12 +576,57 @@ async fn buffered_read(state: &Arc<AppState>, token: &str, offset: i64, want: i6
             if start + fetch_len > file_size {
                 fetch_len = file_size - start;
             }
-            drop(s);
-            let data = state.read_range(token, start, fetch_len).await?;
-            let mut s2 = set.lock().await;
-            let w = Window { data, start, used: clock };
-            s2.store(w.clone());
-            w
+
+            // Someone else (a concurrent read landing on the same fresh grid
+            // cell, or a background prefetch) may already be fetching this
+            // exact window -- concurrent dispatch means that's no longer
+            // rare, and a client's own read-ahead (e.g. smbclient's
+            // parallel_read) can trigger it directly. Wait briefly on the
+            // in-flight fetch instead of duplicating it; if it doesn't
+            // resolve promptly (slow, or it failed and gave up), fall
+            // through and fetch it ourselves.
+            const DEDUP_WAIT_ATTEMPTS: u32 = 100;
+            const DEDUP_WAIT_STEP: Duration = Duration::from_millis(50);
+            let mut waited_window = None;
+            if s.pending.contains(&start) {
+                for _ in 0..DEDUP_WAIT_ATTEMPTS {
+                    // Register interest (via the owned Arc, not a borrow of
+                    // `s`) *before* dropping the lock, so a notify_waiters()
+                    // from the fetching task -- which can't happen until it
+                    // acquires this same lock -- can never race ahead of us.
+                    let notify = s.notify.clone();
+                    let notified = notify.notified();
+                    drop(s);
+                    let _ = tokio::time::timeout(DEDUP_WAIT_STEP, notified).await;
+                    s = set.lock().await;
+                    if let Some(w) = s.find(start) {
+                        waited_window = Some(w);
+                        break;
+                    }
+                    if !s.pending.contains(&start) {
+                        break;
+                    }
+                }
+            }
+
+            match waited_window {
+                Some(w) => {
+                    drop(s);
+                    w
+                }
+                None => {
+                    s.pending.insert(start);
+                    drop(s);
+                    let result = state.read_range(token, start, fetch_len).await;
+                    let mut s2 = set.lock().await;
+                    s2.pending.remove(&start);
+                    s2.notify.notify_waiters();
+                    let data = result?;
+                    let w = Window { data, start, used: clock };
+                    s2.store(w.clone());
+                    w
+                }
+            }
         }
     };
 
@@ -716,6 +780,13 @@ impl Handle for SporeHandle {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // spore-smb's own logging is eprintln! (see the tracing-subscriber
+    // Cargo.toml comment), but the vendored smb-server crate's connection/
+    // dispatch/handler logging still goes through tracing:: macros. Without
+    // a subscriber installed, those are silently dropped -- init one here so
+    // that logging isn't lost.
+    tracing_subscriber::fmt().init();
+
     let base_url = env_or("MYCELIUM_BASE", "http://127.0.0.1:8088");
     let listen: std::net::SocketAddr = env_or("LISTEN_ADDR", "0.0.0.0:445").parse()?;
     let max_concurrent_fetches: usize = env_or("MAX_CONCURRENT_FETCHES", "4").parse()?;

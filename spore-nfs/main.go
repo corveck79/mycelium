@@ -261,16 +261,45 @@ var noRedirectClient = &http.Client{
 	},
 }
 
-// fetchRange issues a single Range GET against a known URL (either the
-// mycelium spore-stream endpoint or a directly-cached CDN url) and returns
-// up to length bytes, or an error for anything other than 200/206.
-func fetchRange(client *http.Client, url string, offset, length int64) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
+const maxRetries429 = 4
+const retryBaseDelay = 300 * time.Millisecond
+
+// rangeGetWithRetry issues a Range GET, retrying with backoff on a 429
+// instead of failing immediately: a rate limit means the CDN needs a moment
+// to clear, not that the request is doomed. Concurrent reads (multiple
+// viewers, or a client's own read-ahead) can legitimately overlap on the
+// same CDN link. Same retry policy as spore-smb's range_get_with_retry
+// (Rust) and mp4_faststart.py's _get() (Python) -- this Go path hits the
+// identical TorBox CDN and was the one consumer that hadn't been patched.
+func rangeGetWithRetry(client *http.Client, url string, offset, length int64) (*http.Response, error) {
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries429 {
+			resp.Body.Close()
+			backoff := retryBaseDelay * time.Duration(int64(1)<<uint(attempt))
+			log.Printf("range GET %s: 429 rate limited, retrying in %s (attempt %d/%d)",
+				url, backoff, attempt+1, maxRetries429)
+			time.Sleep(backoff)
+			continue
+		}
+		return resp, nil
 	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
-	resp, err := client.Do(req)
+}
+
+// fetchRange issues a Range GET (via rangeGetWithRetry) against a known URL
+// (either the mycelium spore-stream endpoint or a directly-cached CDN url)
+// and returns up to length bytes, or an error for anything other than
+// 200/206.
+func fetchRange(client *http.Client, url string, offset, length int64) ([]byte, error) {
+	resp, err := rangeGetWithRetry(client, url, offset, length)
 	if err != nil {
 		return nil, err
 	}
@@ -306,12 +335,7 @@ func readRange(token string, offset, length int64) ([]byte, error) {
 	}
 
 	target := myceliumBase + "/spore-stream/" + token
-	req, err := http.NewRequest(http.MethodGet, target, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
-	resp, err := noRedirectClient.Do(req)
+	resp, err := rangeGetWithRetry(noRedirectClient, target, offset, length)
 	if err != nil {
 		return nil, err
 	}
