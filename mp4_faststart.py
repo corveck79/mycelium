@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import struct
 import threading
+import time
 from pathlib import Path
 
 import requests as req_lib
@@ -35,6 +36,8 @@ _CONNECT_TIMEOUT = 10
 _READ_TIMEOUT    = 60
 _MAX_MOOV_BYTES  = 128 * 1024 * 1024  # refuse to buffer a moov bigger than this
 _MAX_FTYP_BYTES  = 1024 * 1024        # real ftyp boxes are a few dozen bytes; same cap idea as moov
+_MAX_429_RETRIES = 4
+_RETRY_BASE_DELAY_S = 0.3
 _CACHE_DIR: Path | None = None # set by init()
 # Per-token locks instead of one global lock, so building the fast-start
 # cache for one movie doesn't block every other concurrent cold-start build.
@@ -159,27 +162,46 @@ def _find_box_in(data: bytes, typ: bytes) -> int:
 
 def _get(url: str, start: int, end: int) -> bytes:
     headers = {"Range": f"bytes={start}-{end}"}
-    resp = req_lib.get(
-        url,
-        headers=headers,
-        timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT),
-        stream=True,
-    )
-    if resp.status_code == 200:
-        # CDN ignored the Range header and is about to send the WHOLE file
-        # starting at byte 0, not at `start` - every offset computed from
-        # this response would be wrong. Bail out instead of silently
-        # buffering/misreading it (every real TorBox CDN response uses 206).
-        raise ValueError(
-            f"CDN returned HTTP 200 (ignored Range header) for bytes={start}-{end} - "
-            "refusing to treat body as if it started at the requested offset"
+    attempt = 0
+    while True:
+        resp = req_lib.get(
+            url,
+            headers=headers,
+            timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT),
+            stream=True,
         )
-    if resp.status_code != 206:
-        raise ValueError(f"CDN returned HTTP {resp.status_code} for bytes={start}-{end}")
-    data = bytearray()
-    for chunk in resp.iter_content(1 << 17):
-        data += chunk
-    return bytes(data)
+        if resp.status_code == 429 and attempt < _MAX_429_RETRIES:
+            # A caller (spore-nfs/spore-smb) that hit this via the streaming
+            # /spore-stream proxy has no chance to retry itself: Flask has
+            # already committed the response status/Content-Length before
+            # this generator runs, so a truncated body here means a
+            # short-but-"200"-looking response reaches the client, which
+            # every caller since had to treat as a hard failure. Retry
+            # inline instead so a transient CDN rate limit doesn't turn
+            # into a truncated stream.
+            backoff = _RETRY_BASE_DELAY_S * (2 ** attempt)
+            log.warning(
+                "CDN rate limited (429) for bytes=%d-%d, retrying in %.1fs (attempt %d/%d)",
+                start, end, backoff, attempt + 1, _MAX_429_RETRIES,
+            )
+            time.sleep(backoff)
+            attempt += 1
+            continue
+        if resp.status_code == 200:
+            # CDN ignored the Range header and is about to send the WHOLE file
+            # starting at byte 0, not at `start` - every offset computed from
+            # this response would be wrong. Bail out instead of silently
+            # buffering/misreading it (every real TorBox CDN response uses 206).
+            raise ValueError(
+                f"CDN returned HTTP 200 (ignored Range header) for bytes={start}-{end} - "
+                "refusing to treat body as if it started at the requested offset"
+            )
+        if resp.status_code != 206:
+            raise ValueError(f"CDN returned HTTP {resp.status_code} for bytes={start}-{end}")
+        data = bytearray()
+        for chunk in resp.iter_content(1 << 17):
+            data += chunk
+        return bytes(data)
 
 
 def _locate_moov(cdn_url: str, cdn_size: int) -> tuple[int, int] | None:
