@@ -282,16 +282,45 @@ impl AppState {
         Ok(out.size)
     }
 
+    // Issues a Range GET, retrying with backoff on 429 instead of surfacing
+    // it immediately. Concurrent dispatch means several reads can land on
+    // TorBox's CDN at once even with fetch_limiter capping how many spore-smb
+    // itself has in flight -- a 429 means the CDN's own rate limit needs a
+    // moment to clear, not that the request is doomed. Without this, a rate
+    // limit hit turned into a hard read error that the SMB client (which has
+    // no backoff of its own) just retried into immediately, going nowhere.
+    async fn range_get_with_retry(
+        &self,
+        client: &reqwest::Client,
+        url: &str,
+        offset: i64,
+        length: i64,
+    ) -> Result<reqwest::Response, SmbError> {
+        let range = format!("bytes={}-{}", offset, offset + length - 1);
+        let mut attempt = 0u32;
+        loop {
+            let resp = client
+                .get(url)
+                .header(reqwest::header::RANGE, range.clone())
+                .send()
+                .await
+                .map_err(to_io_err)?;
+            if resp.status().as_u16() == 429 && attempt < MAX_429_RETRIES {
+                let backoff = RETRY_BASE_DELAY * 2u32.pow(attempt);
+                eprintln!(
+                    "range GET {url}: 429 rate limited, retrying in {backoff:?} (attempt {}/{MAX_429_RETRIES})",
+                    attempt + 1
+                );
+                tokio::time::sleep(backoff).await;
+                attempt += 1;
+                continue;
+            }
+            return Ok(resp);
+        }
+    }
+
     async fn fetch_range(&self, client: &reqwest::Client, url: &str, offset: i64, length: i64) -> Result<Bytes, SmbError> {
-        let resp = client
-            .get(url)
-            .header(
-                reqwest::header::RANGE,
-                format!("bytes={}-{}", offset, offset + length - 1),
-            )
-            .send()
-            .await
-            .map_err(to_io_err)?;
+        let resp = self.range_get_with_retry(client, url, offset, length).await?;
         let status = resp.status();
         if status.as_u16() != 206 && status.as_u16() != 200 {
             return Err(to_io_err(format!("range GET {url}: status {status}")));
@@ -328,15 +357,8 @@ impl AppState {
 
         let target = format!("{}/spore-stream/{}", self.base_url, token);
         let resp = self
-            .no_redirect_client
-            .get(&target)
-            .header(
-                reqwest::header::RANGE,
-                format!("bytes={}-{}", offset, offset + length - 1),
-            )
-            .send()
-            .await
-            .map_err(to_io_err)?;
+            .range_get_with_retry(&self.no_redirect_client, &target, offset, length)
+            .await?;
 
         let status = resp.status();
         if status.as_u16() == 302 || status.as_u16() == 301 {
@@ -366,6 +388,11 @@ const READ_AHEAD_SIZE: i64 = 16 << 20;
 const READ_AHEAD_WINDOWS: usize = 3;
 const SCAN_PROBE_THRESHOLD: i64 = 256 << 10;
 const PROBE_MIN_FETCH: i64 = 1 << 20;
+
+// ---- CDN rate-limit backoff ----------------------------------------------
+
+const MAX_429_RETRIES: u32 = 4;
+const RETRY_BASE_DELAY: Duration = Duration::from_millis(300);
 
 #[derive(Clone)]
 struct Window {
