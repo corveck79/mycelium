@@ -436,7 +436,10 @@ async fn buffered_read(state: &Arc<AppState>, token: &str, offset: i64, want: i6
     let clock = s.clock;
 
     let window = match s.find(start) {
-        Some(w) => w,
+        Some(w) => {
+            drop(s);
+            w
+        }
         None => {
             // Genuine miss: unavoidably blocks this reader. Small probe-sized
             // reads (Plex's scanner peeking a header) get a fetch close to
