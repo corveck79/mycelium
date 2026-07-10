@@ -204,6 +204,65 @@ impl Tree {
     }
 }
 
+// ---- rate limiting -------------------------------------------------------
+
+// A loose token bucket in front of fetch_limiter: fetch_limiter bounds how
+// many CDN fetches can be in flight *at once*, but says nothing about how
+// fast new ones may *start* -- a client that fires many short-lived requests
+// back to back can still spike the request rate through a low concurrency
+// cap. This paces new fetch attempts instead, with generous headroom (default
+// burst of 10, refilling ~6/s) so it's a safety net against bursts like
+// smbclient's parallel_read, not a throttle on normal playback: 5 concurrent
+// viewers doing paced, realistic reads measured well under 1 fetch/s
+// aggregate in testing (most reads hit the read-ahead cache; only a fresh
+// window boundary needs a real fetch).
+struct RateLimiter {
+    capacity: f64,
+    refill_per_sec: f64,
+    state: Mutex<RateLimiterState>,
+}
+
+struct RateLimiterState {
+    tokens: f64,
+    last_refill: Instant,
+}
+
+impl RateLimiter {
+    fn new(capacity: f64, refill_per_sec: f64) -> Self {
+        Self {
+            capacity,
+            refill_per_sec,
+            state: Mutex::new(RateLimiterState {
+                tokens: capacity,
+                last_refill: Instant::now(),
+            }),
+        }
+    }
+
+    async fn acquire(&self) {
+        loop {
+            let wait = {
+                let mut s = self.state.lock().await;
+                let now = Instant::now();
+                let elapsed = now.duration_since(s.last_refill).as_secs_f64();
+                s.tokens = (s.tokens + elapsed * self.refill_per_sec).min(self.capacity);
+                s.last_refill = now;
+                if s.tokens >= 1.0 {
+                    s.tokens -= 1.0;
+                    None
+                } else {
+                    let deficit = 1.0 - s.tokens;
+                    Some(Duration::from_secs_f64(deficit / self.refill_per_sec))
+                }
+            };
+            match wait {
+                None => return,
+                Some(d) => tokio::time::sleep(d.max(Duration::from_millis(5))).await,
+            }
+        }
+    }
+}
+
 // ---- HTTP-backed size / content ----------------------------------------
 
 struct AppState {
@@ -222,6 +281,7 @@ struct AppState {
     // acceleration. Cap concurrent CDN/backend fetches so bursts queue
     // client-side instead of hammering the CDN.
     fetch_limiter: Semaphore,
+    fetch_rate_limiter: RateLimiter,
 }
 
 impl AppState {
@@ -334,6 +394,7 @@ impl AppState {
     // drops it and re-resolves via /spore-stream/<token> instead of
     // surfacing an opaque I/O error to the SMB client with nothing logged.
     async fn read_range(&self, token: &str, offset: i64, length: i64) -> Result<Bytes, SmbError> {
+        self.fetch_rate_limiter.acquire().await;
         let _permit = self
             .fetch_limiter
             .acquire()
@@ -658,6 +719,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base_url = env_or("MYCELIUM_BASE", "http://127.0.0.1:8088");
     let listen: std::net::SocketAddr = env_or("LISTEN_ADDR", "0.0.0.0:445").parse()?;
     let max_concurrent_fetches: usize = env_or("MAX_CONCURRENT_FETCHES", "4").parse()?;
+    let fetch_rate_burst: f64 = env_or("FETCH_RATE_BURST", "10").parse()?;
+    let fetch_rate_per_sec: f64 = env_or("FETCH_RATE_PER_SEC", "6").parse()?;
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -676,6 +739,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cdn_url_cache: RwLock::new(HashMap::new()),
         read_aheads: RwLock::new(HashMap::new()),
         fetch_limiter: Semaphore::new(max_concurrent_fetches),
+        fetch_rate_limiter: RateLimiter::new(fetch_rate_burst, fetch_rate_per_sec),
     });
 
     state.tree.refresh(&state).await;
