@@ -1594,6 +1594,25 @@ def spore_stream_proxy(token: str):
             log.info("spore-stream: token=%s triggering background probe", token)
         if info["ftyp_size"] == 0:
             # Non-MP4 sentinel (MKV/other): 302 to CDN, no moov seeking required.
+            # catbox's URL cache holds a resolved link for up to 23h, but TorBox's
+            # CDN links can go dead sooner than that -- sending a stale one straight
+            # to the client (rather than proxying through mp4_faststart, which does
+            # validate) left Jellyfin/ffmpeg following a redirect into a 400 error
+            # page with no recovery. Cheaply confirm it's alive first and re-resolve
+            # once if not.
+            import requests as _req
+            try:
+                head = _req.head(cdn_url, timeout=5, allow_redirects=True)
+                alive = head.status_code < 400
+            except Exception:
+                alive = False
+            if not alive:
+                log.warning("spore-stream: cached CDN url dead for token=%s, re-resolving", token)
+                catbox.invalidate_url_cache(token)
+                fresh = catbox.materialize(token)
+                if not fresh:
+                    abort(502)
+                cdn_url = fresh
             _spore_cold_sizes.pop(token, None)
             log.info("spore-stream: token=%s non-MP4 sentinel, 302 to CDN", token)
             return redirect(cdn_url, code=302)
