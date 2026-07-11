@@ -1356,6 +1356,14 @@ def stream_redirect(token: str):
 _spore_cold_sizes: dict = {}  # token -> file_size, avoids repeated HEAD on CDN
 _spore_probing: set  = set()  # tokens currently running a background probe
 
+# Short-lived "confirmed alive" cache for the MKV-sentinel CDN liveness check
+# below, keyed by url. A single playback session can reopen the source (seek,
+# HLS-transcode restart, client reconnect) several times a minute; without
+# this, each reopen pays a fresh round trip to the CDN just to confirm a link
+# it already confirmed moments ago is still alive.
+_ALIVE_CHECK_TTL_SEC = 120
+_spore_alive_cache: dict = {}  # cdn_url -> expiry monotonic timestamp
+
 
 @app.get("/spore-nfs/tree")
 def spore_nfs_tree():
@@ -1599,16 +1607,25 @@ def spore_stream_proxy(token: str):
             # to the client (rather than proxying through mp4_faststart, which does
             # validate) left Jellyfin/ffmpeg following a redirect into a 400 error
             # page with no recovery. Cheaply confirm it's alive first and re-resolve
-            # once if not.
-            import requests as _req
-            try:
-                head = _req.head(cdn_url, timeout=5, allow_redirects=True)
-                alive = head.status_code < 400
-            except Exception:
-                alive = False
+            # once if not. A short local cache avoids re-checking with the CDN on
+            # every reopen/seek within the same playback session.
+            now_mono = _t.monotonic()
+            cached_until = _spore_alive_cache.get(cdn_url)
+            if cached_until and cached_until > now_mono:
+                alive = True
+            else:
+                import requests as _req
+                try:
+                    head = _req.head(cdn_url, timeout=5, allow_redirects=True)
+                    alive = head.status_code < 400
+                except Exception:
+                    alive = False
+                if alive:
+                    _spore_alive_cache[cdn_url] = now_mono + _ALIVE_CHECK_TTL_SEC
             if not alive:
                 log.warning("spore-stream: cached CDN url dead for token=%s, re-resolving", token)
                 catbox.invalidate_url_cache(token)
+                _spore_alive_cache.pop(cdn_url, None)
                 fresh = catbox.materialize(token)
                 if not fresh:
                     abort(502)

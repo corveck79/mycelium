@@ -124,6 +124,27 @@ def _content_key(item: dict) -> str | None:
     return imdb_id
 
 
+_TOUCH_DEBOUNCE_SEC = 60  # last_played/play_count precision we actually need
+_touch_cache: dict[str, float] = {}
+_touch_cache_lock = threading.Lock()
+
+
+def _touch_debounced(token: str) -> None:
+    """db.touch_virtual_item() writes (UPDATE + commit) on every call. The two
+    cache-hit call sites in materialize() run on every single byte-range
+    request during active playback -- one player can trigger dozens of these
+    a minute, each a synchronous SQLite write serializing against every other
+    concurrent playback session's writes. play_count/last_played don't need
+    per-chunk precision, so only actually write once per debounce window."""
+    now = time.monotonic()
+    with _touch_cache_lock:
+        last = _touch_cache.get(token)
+        if last is not None and now - last < _TOUCH_DEBOUNCE_SEC:
+            return
+        _touch_cache[token] = now
+    db.touch_virtual_item(token)
+
+
 def _cache_get(token: str) -> str | None:
     with _url_cache_lock:
         entry = _url_cache.get(token)
@@ -187,7 +208,7 @@ def materialize(token: str, allow_readd: bool | None = None) -> str | None:
     """
     cached = _cache_get(token)
     if cached:
-        db.touch_virtual_item(token)
+        _touch_debounced(token)
         return cached
 
     # Respect failure cooldown  -  don't spam TorBox after a recent failed attempt.
@@ -201,7 +222,7 @@ def materialize(token: str, allow_readd: bool | None = None) -> str | None:
         # Re-check inside the lock: another thread may have succeeded or set cooldown.
         cached = _cache_get(token)
         if cached:
-            db.touch_virtual_item(token)
+            _touch_debounced(token)
             return cached
         if _fail_get(token):
             return None
@@ -755,6 +776,10 @@ def _sweep_caches() -> None:
     with _fail_cache_lock:
         for t in [t for t, exp in _fail_cache.items() if exp <= now_mono]:
             del _fail_cache[t]
+
+    with _touch_cache_lock:
+        for t in [t for t, ts in _touch_cache.items() if now_mono - ts > _TOUCH_DEBOUNCE_SEC]:
+            del _touch_cache[t]
 
     with _search_cache_lock:
         for k in [k for k, (exp, _) in _search_cache.items() if exp <= now_mono]:
