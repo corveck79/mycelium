@@ -2,6 +2,18 @@
 
 All notable changes to Mycelium are documented in this file.
 
+## [0.6.2] - 2026-07-11
+
+### Added
+
+- **spore-nfs** and **spore-smb**: read-only NFSv3 and SMB2/3 servers exposing the virtual library as real files, backed by the existing `/spore-stream/<token>` endpoint (no new materialization logic). Server-side tricks to block Direct Play on Shield/Android TV (stub channel count, forced PGS subtitle burn-in) stopped working reliably - Android's local-network fast path bypasses the profile negotiation Linux/desktop clients respect, turning the fake stub into a black screen instead of a transcode. With real size/bytes served, Direct Play becomes correct instead of catastrophic, on every client. Both protocols share a 3-window read-ahead LRU, background prefetch, resolved-CDN-URL caching, self-healing on a dead cached URL, and a token-bucket rate limiter with retry/backoff against TorBox/CDN 429s. spore-nfs later merged into the main image (one container instead of two).
+
+### Fixed
+
+- MKV/non-MP4 playback via `/stream` (Jellyfin's path, and any other client not building a moov-first cache) could be redirected straight to a CDN URL that had gone dead earlier than its 23h in-memory cache TTL, with no validation - Jellyfin/ffmpeg would follow the dead link into a TorBox error page and fail with `FFmpegException: FFmpeg exited with code 8` / `ffprobe failed`. Now HEAD-checked before redirecting, with an automatic re-resolve on a dead link.
+- `play_count`/`last_played` were written to SQLite on every single byte-range request during playback, not just on play start - under concurrent playback these writes serialized against each other for no benefit. Debounced to once per token per 60s; the CDN liveness check above is similarly cached for 120s so repeated seeks in one session don't each pay a fresh CDN round trip.
+- Stale `JELLYFIN_API_KEY` on deploy could leave `refresh_library()`, `merge_duplicate_versions()`, `refresh_missing_images()` and continue-watching sync silently failing with 401 - not a code fix, but worth a mention since it was masking as playback flakiness.
+
 ## [0.6.1] - 2026-07-05
 
 A security- and correctness-focused release from a full multi-pass code review. No new features.
