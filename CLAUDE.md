@@ -39,7 +39,7 @@ Self-hosted media-request-and-stream pipeline. Watchlist clicks → `.strm` file
 User (SPA / of Seerr webhook)
   → processor.py  →  zilean / torrentio  →  torbox (cache-check + add)
   → strm_generator.py  →  /data/media/**/*.strm
-  → Jellyfin speelt strm af via /stream/<token> → TorBox CDN (302 redirect)
+  → Jellyfin speelt strm af via /stream/<token> → 302 naar /spore-stream/<token> (moov-first proxy, ook voor Jellyfin sinds 2026-07-04)
   → Plex speelt af via stub MKV + transcoder wrapper → /spore-stream/<token>
 ```
 
@@ -52,13 +52,16 @@ GET /stream/<token>
   → catbox.materialize(token)
      1. Check fail cooldown (429 / vorige fout)
      2. Check scan-burst guard (max 3x/minuut)
-     3. Check URL cache (actieve TorBox CDN URL?)
+     3. Check URL cache (actieve TorBox CDN URL?, TTL 23u -- kan korter dan dat al doodgaan, zie liveness-check hieronder)
      4. Check TorBox library (hash aanwezig?)  → directe CDN URL
      5. Zoek gecachede release via Torrentio/Zilean
         → gevonden: voeg toe aan TorBox
         → niet gevonden: 6h cooldown, strm NIET verwijderen
      6. Wacht op TorBox ready (poll max 10 min)
-     7. Haal CDN URL op, cache 1u, 302 redirect naar Jellyfin
+     7. Haal CDN URL op, cache, 302 naar /spore-stream/<token>
+        → MKV/non-MP4: HEAD-check op de CDN url voor de finale 302 (dode cache-entry
+          → invalidate + herresolve), daarna 302 naar CDN
+        → MP4: proxied via mp4_faststart (moov-first cache)
 ```
 
 ### Twee .strm modi
@@ -92,6 +95,8 @@ Plex scant /data/plex-media/**/*.mkv  (stub MKVs)
 | `spore/plex_transcoder_wrapper.sh` | Vervangt Plex Transcoder binary, herschrijft `-i stub.mkv` naar `/spore-stream/TOKEN` |
 | `spore_server.py` | TCP server poort 8089 (voor spore_server; momenteel minder relevant) |
 | `mp4_faststart.py` | Bouwt moov-first MP4 cache (.fsh bestanden), serveert virtuele byte ranges |
+| `spore-smb/` (Rust) | Losstaand SMB2/3-share proces, poort 445 (mapped 4450), read-only anonieme toegang tot de virtuele library. Eigen token-bucket rate limiter + 429-retry richting TorBox CDN. Draait naast gunicorn in dezelfde container (zie Dockerfile CMD) |
+| `spore-nfs/` (Go) | NFSv3-tegenhanger van spore-smb, poort 2049 |
 | `strm_generator.py` | `make_stub_mkv()`, `_write_spore_stubs()`, `update_stub_from_probe()` |
 
 ### Stub MKV opbouw
@@ -278,8 +283,8 @@ Tests zijn schaars; focus op integratiecorrectheid.
 | `/admin` | Jinja admin dashboard (iframe in SPA), tabs: Overview, Blacklist, Repair, Settings, Logs |
 | `/ui` | 301 redirect naar `/admin` |
 | `/ui/api/*` | Backend API endpoints |
-| `/stream/<token>` | Jellyfin catbox endpoint: altijd 302 naar CDN, nul server bandbreedte |
-| `/spore-stream/<token>` | Plex Spore proxy: moov-first MP4 met Range support |
+| `/stream/<token>` | Catbox endpoint (Jellyfin + Plex): altijd 302 naar `/spore-stream/<token>` |
+| `/spore-stream/<token>` | Moov-first proxy voor alle clients: MP4 proxied met Range support, MKV/other 302 naar (live-gecheckte) CDN url |
 
 ## Request statussen
 
