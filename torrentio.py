@@ -206,8 +206,85 @@ def fetch_streams(
         return []
     raw_streams = payload.get("streams", []) or []
     parsed = [s for s in (_to_stream(r, season) for r in raw_streams) if s is not None]
+    parsed = _filter_wrong_year(parsed, media_type, imdb_id, season, episode)
     log.info("Torrentio returned %d streams (%d parsed)", len(raw_streams), len(parsed))
     return parsed
+
+
+# Years touching a letter (720p, x264) don't count as a year in a release name.
+_YEAR_IN_NAME_RE = re.compile(r"(?<![a-zA-Z0-9])(?:19|20)\d{2}(?![a-zA-Z0-9])")
+
+
+def _filter_wrong_year(
+    streams: list["TorrentioStream"],
+    media_type: str,
+    imdb_id: str,
+    season: int | None,
+    episode: int | None,
+) -> list["TorrentioStream"]:
+    """Drop streams whose release-name year doesn't match the title's actual
+    year(s), so a same-titled remake/reboot doesn't get mixed into results.
+
+    Collects every year that's legitimately "valid" for this title: the
+    release/premiere year, any year embedded in the title itself (so a show
+    literally named "1923" isn't filtered against itself), and for a
+    season/episode lookup, that season's/episode's own air-date year. A
+    stream is only dropped when it has a year in its name AND that year
+    matches none of the valid ones; streams with no year in their name are
+    always kept. Fails open (returns streams unfiltered) on any TMDB error.
+    """
+    try:
+        import tmdb
+        results = tmdb._get(f"/find/{imdb_id}", params={"external_source": "imdb_id"}) or {}
+        valid_years: set[str] = set()
+
+        if media_type == "movie":
+            hits = results.get("movie_results") or []
+            if hits:
+                if hits[0].get("release_date"):
+                    valid_years.add(hits[0]["release_date"][:4])
+                if hits[0].get("title"):
+                    valid_years.update(_YEAR_IN_NAME_RE.findall(hits[0]["title"]))
+        elif media_type in ("series", "tv"):
+            hits = results.get("tv_results") or []
+            if hits:
+                show_info = hits[0]
+                if show_info.get("first_air_date"):
+                    valid_years.add(show_info["first_air_date"][:4])
+                if show_info.get("name"):
+                    valid_years.update(_YEAR_IN_NAME_RE.findall(show_info["name"]))
+                tmdb_id = show_info.get("id")
+                if tmdb_id and season:
+                    try:
+                        season_data = tmdb._get(f"/tv/{tmdb_id}/season/{season}") or {}
+                        if season_data.get("air_date"):
+                            valid_years.add(season_data["air_date"][:4])
+                        if episode and season_data.get("episodes"):
+                            ep_data = next(
+                                (e for e in season_data["episodes"] if e.get("episode_number") == episode), {}
+                            )
+                            if ep_data.get("air_date"):
+                                valid_years.add(ep_data["air_date"][:4])
+                    except Exception:
+                        pass
+
+        if not valid_years:
+            return streams
+
+        filtered = []
+        for s in streams:
+            found_years = _YEAR_IN_NAME_RE.findall(f"{s.name} {s.title}")
+            if not found_years or any(y in valid_years for y in found_years):
+                filtered.append(s)
+            else:
+                log.info(
+                    "Dropped stream '%s' - wrong year (expected one of %s, found %s)",
+                    s.title, valid_years, found_years,
+                )
+        return filtered
+    except Exception as exc:
+        log.warning("Year filter failed for %s: %s", imdb_id, exc)
+        return streams
 
 
 def _quality_rank(stream: TorrentioStream, quality_pref: list[str]) -> int:
