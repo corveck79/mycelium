@@ -2,6 +2,32 @@
 
 All notable changes to Mycelium are documented in this file.
 
+## [Unreleased]
+
+Fixes and features ported in from community forks (dmphx, Damosso).
+
+### Fixed
+
+- **The entire background scheduler was running paused.** Every job (`series_monitor`, `strm_generator`, `catbox_gc`, `db_backup`, `retry_queue`, `auto_approve`, `wanted_recheck`, `trending_precache`, `continue_watching`, `quota_warn`, the Zilean native sync, the deadman switch, ...) was added to APScheduler with `next_run_time=None`, which APScheduler 3.x treats as paused at creation - none of them were firing on their configured interval. They're now explicitly resumed right after `scheduler.start()`.
+- Spore TCP server (port 8089): tokens are now regex-validated before hitting the DB, and requests are rate-limited per source IP (10/60s, capped tracker) - closes a cheap DoS someone on the LAN could trigger by spraying random tokens.
+- `/setup/save` (reachable anonymously before the first admin exists) now only accepts a curated whitelist of settings keys - previously any form field was accepted, so a request racing the first-run window could set `AUTH_PASSWORD_HASH` and lock the instance to an attacker. New `/setup/create-admin` endpoint creates the first admin account properly.
+- SQLite backups now use `sqlite3.Connection.backup()` instead of a raw file copy, so a snapshot taken mid-write (WAL mode) can't produce a corrupt backup file.
+- `.strm`, `.nfo`, and stub `.mkv` writes go through a tempfile + `os.replace` now (new `io_utils.py`) instead of truncating the destination in place - a crash or kill mid-write used to leave an empty/partial file that Jellyfin would keep reading.
+- Module-level in-memory caches (`_spore_cold_sizes`, `_jellyfin_item_cache`, catbox's `_recent_tokens`) are now bounded `cachetools` TTL caches instead of plain unbounded dicts.
+- NFO writer XML-escapes title/IMDb/TMDB fields before interpolating them - a release name containing `<` or `&` could previously break the generated XML for Jellyfin/Kodi.
+- New optional `TORBOX_WEBHOOK_SECRET`: when set, `/torbox-webhook` requires it via `X-Webhook-Secret`, same constant-time comparison as `/webhook`. Empty (default) preserves the existing unauthenticated behaviour.
+- `tmdb.py` now auto-detects v3 (32-char hex) vs v4 (JWT) API keys and authenticates accordingly - a v3 key previously 401'd on Bearer-only calls, silently breaking season lookups.
+- Cleanup's unlink failures during strm repair are now logged instead of silently swallowed.
+- `db._dedup_requests()` no longer errors out on a completely fresh database (table doesn't exist yet).
+- `torrentio.fetch_streams()` returns `[]` on any error instead of raising, so a Torrentio outage never blocks the rest of the scraper pool.
+- Torrentio results are now filtered against the title's actual TMDB release year(s) (including per-season/episode air dates), so a same-titled remake/reboot's torrents don't mix into results. Fails open on any TMDB error.
+- Sonarr import and `nfo_generator`: a title that came back as a bare IMDb ID now gets a TMDB lookup to recover the real show name, and the series-folder NFO lookup no longer accidentally uses the movie title map.
+
+### Added
+
+- Two new opt-in scrapers, disabled by default: **MediaFusion** (`MEDIAFUSION_ENABLED`/`MEDIAFUSION_BASE_URL`) and **Prowlarr direct** (`PROWLARR_ENABLED`/`PROWLARR_BASE_URL`/`PROWLARR_API_KEY`), both run alongside Torrentio + Zilean and fail silently (`[]`) on any error.
+- `INSECURE_ALLOW_ANON` config flag: the app now refuses to start with no authentication configured at all, unless this is explicitly set (preserves the previous single-user behaviour when acknowledged).
+
 ## [0.6.2] - 2026-07-11
 
 ### Added
