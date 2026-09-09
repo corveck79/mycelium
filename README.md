@@ -247,8 +247,8 @@ Plex streams directly from TorBox CDN on demand.
 ```
 Plex scans stub .mkv files  →  user presses Play
   →  Plex Transcoder called with -i /plex-media/movie.mkv
-  →  plex_transcoder_wrapper.sh rewrites -i to http://mycelium/spore-stream/<token>
-  →  FFmpeg reads real video directly from TorBox CDN
+  →  plex_transcoder_wrapper.sh rewrites -i to http://127.0.0.1:8088/spore-stream/<token>
+  →  Mycelium 302-redirects to the real TorBox CDN URL, FFmpeg follows it
   →  Plex serves stream to client
 ```
 
