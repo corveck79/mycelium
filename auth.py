@@ -131,15 +131,18 @@ def _proxy_user() -> str | None:
 def is_enabled() -> bool:
     """Whether auth-gating is active.
 
-    Returns False ONLY when INSECURE_ALLOW_ANON is explicitly true (legacy
-    single-user mode, every caller treated as admin). Otherwise returns True;
-    the startup gate in app.py guarantees at least one auth method
-    (AUTH_ENABLED, OIDC_ENABLED, or TRUSTED_PROXY_AUTH) is configured before
-    the process is allowed to start.
+    Off by default (legacy single-user mode, every caller treated as admin)
+    unless a real auth method is configured: AUTH_ENABLED, OIDC_ENABLED, or
+    TRUSTED_PROXY_AUTH. INSECURE_ALLOW_ANON=true force-disables auth even if
+    one of those is set (manual escape hatch).
     """
     if settings.get("INSECURE_ALLOW_ANON", False):
         return False
-    return True
+    return bool(
+        settings.get("AUTH_ENABLED", False)
+        or settings.get("OIDC_ENABLED", False)
+        or settings.get("TRUSTED_PROXY_AUTH", False)
+    )
 
 
 def current_user() -> str | None:
