@@ -284,7 +284,15 @@ entrypoint:
     exec /init
 ```
 
-> **Status:** Confirmed working on Android (Plex app) and Linux desktop. Shield TV testing in progress. Dolby Vision and lossless audio passthrough are not supported  -  Plex always transcodes via the wrapper.
+> **Status:** Confirmed working on Linux desktop and the Plex Android app via the wrapper above. Dolby Vision and lossless audio passthrough are not supported there  -  Plex always transcodes via the wrapper. For Android TV / Shield TV, use **spore-nfs / spore-smb** below instead - the wrapper's stub-file trick doesn't survive Android's local-network fast path and produces a black screen there.
+
+### spore-nfs / spore-smb  -  mount the library directly (recommended for Android TV / Shield TV)
+
+As an alternative to the transcoder-wrapper approach above, Mycelium also ships **spore-nfs** (NFSv3, port 2049) and **spore-smb** (SMB2/3, port 445): read-only network file servers that expose the virtual library as real files, backed by the same `/spore-stream/<token>` CDN proxy. Both start automatically alongside the main container - no wrapper script, no Plex-container entrypoint hack, no extra setup.
+
+Because they serve real file sizes and byte ranges instead of a fake stub, **Direct Play works correctly on every client**, including Android TV / Shield TV, where the stub trick's fast local-network path bypasses Plex's profile negotiation and turns the fake stub into a black screen instead of a transcode.
+
+Point Plex, Jellyfin, or any other client at the container's NFS or SMB share instead of bind-mounting a `SPORE_MEDIA_PATH` folder, and the virtual library plays like any other network share.
 
 ---
 
