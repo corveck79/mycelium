@@ -288,7 +288,7 @@ entrypoint:
 
 ### spore-nfs / spore-smb  -  mount the library directly (recommended for Android TV / Shield TV)
 
-As an alternative to the transcoder-wrapper approach above, Mycelium also ships **spore-nfs** (NFSv3, port 2049) and **spore-smb** (SMB2/3, port 445): read-only network file servers that expose the virtual library as real files, backed by the same `/spore-stream/<token>` CDN proxy. Both start automatically alongside the main container - no wrapper script, no Plex-container entrypoint hack, no extra setup.
+As an alternative to the transcoder-wrapper approach above, Mycelium also ships **spore-nfs** (NFSv3, port 2049) and **spore-smb** (SMB2/3, port 445): read-only network file servers that expose the virtual library as real files, backed by the same `/spore-stream/<token>` CDN proxy. Both start automatically alongside the main container (toggle individually via `SPORE_NFS_ENABLED` / `SPORE_SMB_ENABLED`, both default `true`) - no wrapper script, no Plex-container entrypoint hack, no extra setup.
 
 Because they serve real file sizes and byte ranges instead of a fake stub, **Direct Play works correctly on every client**, including Android TV / Shield TV, where the stub trick's fast local-network path bypasses Plex's profile negotiation and turns the fake stub into a black screen instead of a transcode.
 
