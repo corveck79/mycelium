@@ -107,6 +107,10 @@ def wait_until_ready(rd_id: str) -> dict | None:
     return None
 
 
+class RateLimited(Exception):
+    """RealDebrid's hoster-link rate limit (429) was hit."""
+
+
 def unrestrict_link(link: str, timeout: int = 15) -> str | None:
     """Convert a RealDebrid hoster link to a direct streaming URL."""
     try:
@@ -114,8 +118,13 @@ def unrestrict_link(link: str, timeout: int = 15) -> str | None:
             f"{REALDEBRID_BASE_URL.rstrip('/')}/unrestrict/link",
             headers=_headers(), data={"link": link}, timeout=timeout,
         )
+        if r.status_code == 429:
+            log.warning("RealDebrid unrestrict rate-limited (429)")
+            raise RateLimited("unrestrict/link 429")
         r.raise_for_status()
         return (r.json() or {}).get("download")
+    except RateLimited:
+        raise
     except Exception as exc:
         log.warning("RealDebrid unrestrict failed: %s", exc)
         return None
@@ -154,22 +163,31 @@ def get_main_video_url(rd_id: str) -> str | None:
     return unrestrict_link(main[1])
 
 
+_UNRESTRICT_PACE_SEC = 0.25  # RealDebrid hoster-link ceiling: stay under ~4 req/s
+
+
 def get_video_files_with_urls(rd_id: str) -> list[tuple[dict, str]]:
     """For a ready RD torrent (typically a season pack), return (file_dict,
     unrestricted_url) for every video file. Used to fan out per-episode
-    .strm files."""
+    .strm files.
+
+    Raises RateLimited if RealDebrid 429s mid-pack; callers should reschedule
+    the whole title rather than treat it as a bad release.
+    """
     info = get_info(rd_id)
     if not info:
         return []
     pairs = _selected_with_links(info)
     out: list[tuple[dict, str]] = []
-    for f, hoster_link in pairs:
+    for i, (f, hoster_link) in enumerate(pairs):
         path = f.get("path") or f.get("name") or ""
         if not _is_video(path):
             continue
         # Skip tiny files (likely featurettes/extras)
         if (f.get("bytes") or 0) < 50 * 1024 * 1024:
             continue
+        if i > 0:
+            time.sleep(_UNRESTRICT_PACE_SEC)
         direct = unrestrict_link(hoster_link)
         if direct:
             out.append((f, direct))

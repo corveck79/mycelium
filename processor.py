@@ -352,6 +352,12 @@ def _try_realdebrid_fallback(title: str, candidates: list,
                 log.info("RD fallback: %d episode .strm(s) written for %s", written, title)
             log.info("RD fallback: served %s via RealDebrid (hash=%s)", title, cand.info_hash)
             return cand
+        except realdebrid.RateLimited:
+            log.warning(
+                "RD fallback: RealDebrid rate-limited on %s, giving up this run "
+                "(not blacklisting - will retry on next pass)", title,
+            )
+            return None
         except Exception as exc:
             log.warning("RD fallback failed for %s (%s): %s", title, cand.info_hash, exc)
             blacklist.record_failure(cand.info_hash, f"rd: {exc}")
