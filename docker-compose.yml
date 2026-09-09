@@ -6,7 +6,6 @@ services:
     restart: unless-stopped
     ports:
       - "8088:8088"
-      - "8089:8089"
       - "2049:2049"
       - "4450:445"
     env_file:

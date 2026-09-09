@@ -255,7 +255,6 @@ REALDEBRID_BASE_URL = _env("REALDEBRID_BASE_URL", "https://api.real-debrid.com/r
 # ── Mycelium Spore (Plex) ────────────────────────────────────────────────────
 # Stub .mkv library + transcoder wrapper. See spore/ directory for setup.
 SPORE_ENABLED    = _env("SPORE_ENABLED", "false").lower() in ("1", "true", "yes")
-SPORE_PORT       = _env_int("SPORE_PORT", 8089)
 SPORE_MEDIA_PATH = _env("SPORE_MEDIA_PATH", "/data/plex-media")
 
 # ── WebDAV server (Plex / Emby compatibility) ─────────────────────────────────
