@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 _VIDEO_EXTS = {'.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.ts', '.m2ts', '.webm'}
 
 _EP_RE = re.compile(r'[Ss](\d{1,2})[Ee](\d{1,2})', re.IGNORECASE)
+_SEASON_WORD_RE = re.compile(r'\b[Ss]eason\s+(\d{1,2})\b', re.IGNORECASE)
 _SEASON_RE = re.compile(r'\b[Ss](\d{1,2})\b', re.IGNORECASE)
 _YEAR_RE = re.compile(r'(?<!\d)((?:19|20)\d{2})(?!\d)')
 # Strip leading site/group prefixes from torrent names before parsing:
@@ -138,13 +139,13 @@ def _parse_info(torrent_name: str, file_name: str) -> dict | None:
 
             return {'type': 'episode', 'title': title or 'Unknown', 'season': season, 'episode': episode}
 
-    # Season pack: S03 without an episode number means a series.
+    # Season pack: S03 or Season 3 without an episode number means a series.
     for source in (_clean(torrent_name), _clean(file_base)):
-        season_m = _SEASON_RE.search(source)
+        season_m = _SEASON_RE.search(source) or _SEASON_WORD_RE.search(source)
         if season_m:
-            season = int(season_m.group(1))
             title = _safe(_strip_junk(source[:season_m.start()]).strip())
-            return {"type": "series", "title": title or "Unknown", "season": season}
+            if title:
+                return {"type": "series", "title": title, "season": int(season_m.group(1))}
 
     # Movie: find year
     for source in (_clean(torrent_name), _clean(file_base)):

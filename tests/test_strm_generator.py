@@ -77,6 +77,32 @@ class TestParseInfo:
     def test_garbage_returns_none(self):
         assert sg._parse_info("", "") is None
 
+    def test_season_one_pack_is_series(self):
+        info = sg._parse_info("Community S01", "Community S01")
+        assert info is not None
+        assert info["type"] == "series"
+        assert info["season"] == 1
+        assert info["title"] == "Community"
+
+    def test_season_pack_with_complete_suffix_is_series(self):
+        info = sg._parse_info("Community S03 COMPLETE", "Community S03 COMPLETE")
+        assert info is not None
+        assert info["type"] == "series"
+        assert info["season"] == 3
+
+    def test_season_word_format_is_series(self):
+        info = sg._parse_info("Community Season 3", "Community Season 3")
+        assert info is not None
+        assert info["type"] == "series"
+        assert info["season"] == 3
+
+    def test_movie_with_year_remains_movie(self):
+        info = sg._parse_info("S03 2024", "S03 2024.mkv")
+        assert info is not None
+        assert info["type"] == "movie"
+        assert info["year"] == 2024
+
+
     def test_site_prefix_stripped(self):
         info = sg._parse_info("[DEVIL-TORRENTS PL] Elevation 2024 1080p", "Elevation.2024.mkv")
         assert info is not None
