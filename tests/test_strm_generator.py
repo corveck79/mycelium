@@ -203,6 +203,29 @@ class TestProcessTorrentCanonicalTitle:
         assert nfo.exists()
         assert "tt0092359" in nfo.read_text()
 
+    def test_season_pack_creates_episode_strms(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
+        monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: False)
+        monkeypatch.setattr(sg, "_resolve_url", lambda *a, **kw: "http://cdn.example/x")
+        item = {
+            "id": 10,
+            "name": "Community S03",
+            "hash": "e" * 40,
+            "files": [
+                {"id": 1, "name": "Community S03E01.mkv"},
+                {"id": 2, "name": "Community S03E02.mkv"},
+                {"id": 3, "name": "Community S03E03.mkv"},
+            ],
+        }
+        monkeypatch.setattr(sg.torbox_mod, "find_by_id", lambda torrent_id: item)
+        written = sg.create_strm_for_torrent(10, "Community", "series")
+        assert written == 3
+        season = Path(tmp_path) / "series" / "Community" / "Season 03"
+        assert (season / "Community S03E01.strm").exists()
+        assert (season / "Community S03E02.strm").exists()
+        assert (season / "Community S03E03.strm").exists()
+
     def test_two_differently_named_torrents_land_in_same_folder(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
         monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
