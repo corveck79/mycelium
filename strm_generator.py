@@ -1629,6 +1629,7 @@ def _resolve_url(item: dict, file_id: int, file_name: str, info: dict, media_typ
         import catbox
         magnet = item.get("magnet") or f"magnet:?xt=urn:btih:{item.get('hash')}"
         title = f"{info.get('title','')} ({info['year']})" if info.get("year") else info.get("title", file_name)
+        strm_path = str(_strm_path(info)) if info.get("type") != "movie" else None
         token = catbox.register(
             info_hash=(item.get("hash") or "").lower(),
             magnet=magnet,
@@ -1636,6 +1637,11 @@ def _resolve_url(item: dict, file_id: int, file_name: str, info: dict, media_typ
             media_type=media_type,
             torbox_id=torrent_id,
             file_id=file_id,
+            strm_path=strm_path,
+            imdb_id=info.get("imdb_id"),
+            season=info.get("season"),
+            episode=info.get("episode"),
+            year=info.get("year"),
         )
         return catbox.proxy_url(token)
     return _get_stream_url(torrent_id, file_id)

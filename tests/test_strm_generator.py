@@ -252,6 +252,36 @@ class TestProcessTorrentCanonicalTitle:
         assert (season / "Community S03E02.strm").exists()
         assert (season / "Community S03E03.strm").exists()
 
+    def test_catbox_series_registration_keeps_episode_metadata(self, tmp_path, monkeypatch):
+        captured = {}
+        class FakeCatbox:
+            @staticmethod
+            def register(**kwargs):
+                captured.update(kwargs)
+                return "test-token"
+            @staticmethod
+            def proxy_url(token):
+                return "http://mycelium:8088/stream/" + token
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: True if key == "CATBOX_MODE" else False)
+        monkeypatch.setattr(sg, "_write_strm", lambda path, url: True)
+        monkeypatch.setattr(sg, "Path", Path)
+        import sys
+        monkeypatch.setitem(sys.modules, "catbox", FakeCatbox)
+        info = {"type": "episode", "title": "Community", "season": 3, "episode": 1}
+        item = {
+            "id": 66666486,
+            "hash": "a" * 40,
+            "magnet": "magnet:?xt=urn:btih:" + "a" * 40,
+        }
+        result = sg._resolve_url(item, 1, "Community.S03E01.mkv", info, "series")
+        assert result == "http://mycelium:8088/stream/test-token"
+        assert captured["media_type"] == "series"
+        assert captured["torbox_id"] == 66666486
+        assert captured["file_id"] == 1
+        assert captured["season"] == 3
+        assert captured["episode"] == 1
+        assert captured["strm_path"].endswith("Season 03/Community S03E01.strm")
+
     def test_season_word_pack_is_treated_as_series(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
         monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
