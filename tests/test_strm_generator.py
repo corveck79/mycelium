@@ -252,6 +252,36 @@ class TestProcessTorrentCanonicalTitle:
         assert (season / "Community S03E02.strm").exists()
         assert (season / "Community S03E03.strm").exists()
 
+    def test_season_word_pack_is_treated_as_series(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
+        monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: False)
+        monkeypatch.setattr(sg, "_resolve_url", lambda *a, **kw: "http://cdn.example/x")
+        item = {
+            "id": 20,
+            "name": "Community Season 3",
+            "hash": "c" * 40,
+            "files": [{"id": 1, "name": "Community S03E01.mkv"}],
+        }
+        written = sg.process_torrent(item, canonical_title="Community")
+        assert written == 1
+        assert (Path(tmp_path) / "series" / "Community" / "Season 03" / "Community S03E01.strm").exists()
+
+    def test_s03_year_torrent_is_not_treated_as_series(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
+        monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: False)
+        monkeypatch.setattr(sg, "_resolve_url", lambda *a, **kw: "http://cdn.example/x")
+        item = {
+            "id": 21,
+            "name": "S03 2024",
+            "hash": "d" * 40,
+            "files": [{"id": 1, "name": "S03 2024.mkv"}],
+        }
+        written = sg.process_torrent(item)
+        assert written == 1
+        assert (Path(tmp_path) / "movies" / "S03 (2024)" / "S03 (2024).strm").exists()
+
     def test_two_differently_named_torrents_land_in_same_folder(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
         monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
