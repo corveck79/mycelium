@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 _VIDEO_EXTS = {'.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.ts', '.m2ts', '.webm'}
 
 _EP_RE = re.compile(r'[Ss](\d{1,2})[Ee](\d{1,2})', re.IGNORECASE)
+_SEASON_RE = re.compile(r'\b[Ss](\d{1,2})\b', re.IGNORECASE)
 _YEAR_RE = re.compile(r'(?<!\d)((?:19|20)\d{2})(?!\d)')
 # Strip leading site/group prefixes from torrent names before parsing:
 #   [DEVIL-TORRENTS PL]  /  rutor.info  /  www.UIndex.org  /  HIDRATORRENTS.ORG  etc.
@@ -122,7 +123,6 @@ def _parse_info(torrent_name: str, file_name: str) -> dict | None:
             title = _safe(_strip_junk(source[:ep_m.start()]).strip())
 
             # --- FOOLPROOF TMDB FALLBACK ---
-            import re
             imdb_match = re.search(r'(tt\d{7,})', title, re.IGNORECASE)
             if imdb_match:
                 found_id = imdb_match.group(1).lower()
@@ -137,6 +137,14 @@ def _parse_info(torrent_name: str, file_name: str) -> dict | None:
             # -------------------------------
 
             return {'type': 'episode', 'title': title or 'Unknown', 'season': season, 'episode': episode}
+
+    # Season pack: S03 without an episode number means a series.
+    for source in (_clean(torrent_name), _clean(file_base)):
+        season_m = _SEASON_RE.search(source)
+        if season_m:
+            season = int(season_m.group(1))
+            title = _safe(_strip_junk(source[:season_m.start()]).strip())
+            return {"type": "series", "title": title or "Unknown", "season": season}
 
     # Movie: find year
     for source in (_clean(torrent_name), _clean(file_base)):
@@ -1778,7 +1786,7 @@ def scan_torbox_library() -> dict:
             if not guess:
                 skipped += 1
                 continue
-            media_type = 'series' if guess['type'] == 'episode' else 'movie'
+            media_type = 'series' if guess['type'] in ('episode', 'series') else 'movie'
             imdb_id = None
             try:
                 if media_type == 'movie':

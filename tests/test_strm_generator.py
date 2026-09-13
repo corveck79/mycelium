@@ -68,6 +68,12 @@ class TestParseInfo:
         assert info["season"] == 2
         assert info["episode"] == 1
 
+    def test_season_pack_is_series(self):
+        info = sg._parse_info("Community S03", "Community S03")
+        assert info is not None
+        assert info["type"] == "series"
+        assert info["season"] == 3
+
     def test_garbage_returns_none(self):
         assert sg._parse_info("", "") is None
 
@@ -132,6 +138,27 @@ class TestScanTorboxLibrary:
         assert result == {"scanned": 1, "imported": 1, "skipped": 0, "failed": 0}
         path = Path(tmp_path) / "movies" / "Pulp Fiction (1994)" / "Pulp Fiction (1994).strm"
         assert path.exists()
+
+    def test_imports_season_pack_as_series(self, monkeypatch):
+        import tmdb as real_tmdb
+        monkeypatch.setattr(sg.db, "get_virtual_item_by_hash", lambda info_hash: None)
+        monkeypatch.setattr(real_tmdb, "search_tv", lambda title: "tt1439629")
+        monkeypatch.setattr(real_tmdb, "display_title", lambda imdb_id, media_type: "Community")
+        captured = {}
+        def fake_create(torrent_id, title, media_type, imdb_id=None, tmdb_id=None):
+            captured.update(torrent_id=torrent_id, title=title, media_type=media_type, imdb_id=imdb_id)
+            return 1
+        monkeypatch.setattr(sg, "create_strm_for_torrent", fake_create)
+        item = {
+            "id": 4, "name": "Community S03", "hash": "d" * 40,
+            "files": [{"id": 1, "name": "Community S03"}],
+        }
+        sg.torbox_mod.list_torrents = lambda force_refresh=True: [item]
+        sg.torbox_mod._is_ready = lambda item: True
+        result = sg.scan_torbox_library()
+        assert result == {"scanned": 1, "imported": 1, "skipped": 0, "failed": 0}
+        assert captured["media_type"] == "series"
+        assert captured["title"] == "Community"
 
     def test_skips_torrent_already_known(self, monkeypatch):
         monkeypatch.setattr(sg.db, "get_virtual_item_by_hash", lambda info_hash: {"token": "existing"})
