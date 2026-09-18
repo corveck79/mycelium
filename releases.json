@@ -1,5 +1,24 @@
 [
   {
+    "version": "0.6.3",
+    "date": "2026-09-18",
+    "notes": [
+      "Fix: the entire background scheduler was running paused since startup - series_monitor, strm_generator, catbox_gc, db_backup, retry_queue and every other scheduled job now actually fire on their configured interval",
+      "Security: Spore TCP server (port 8089) tokens are now validated and rate-limited per source IP",
+      "Security: /setup/save now only accepts a whitelisted set of fields before the first admin exists",
+      "Fix: SQLite backups use a proper WAL-safe backup API instead of a raw file copy",
+      "Fix: .strm/.nfo/stub .mkv writes are now atomic (tempfile + rename), preventing partial files on a crash mid-write",
+      "Fix: NFO writer now XML-escapes title/IMDb/TMDB fields",
+      "Fix: tmdb.py auto-detects v3 vs v4 API keys instead of always assuming v3",
+      "Fix: Torrentio outages no longer block the rest of the scraper pool",
+      "Fix: Torrentio results are filtered against the title's actual TMDB release year(s), so same-titled remakes don't mix in",
+      "Fix: season-pack torrent names (e.g. \"Show S03\", \"Show Season 3\") are now correctly classified as series, and Catbox-mode episodes keep their season/episode/year/IMDb metadata (#50, contributed by @erik-een)",
+      "Fix: spore-nfs/spore-smb no longer re-poll the full virtual library every 10 seconds forever - backs off to a 10-minute steady-state interval once populated, freeing up close to a full CPU core on 4-core NAS setups",
+      "Added: optional MediaFusion and Prowlarr-direct scrapers, disabled by default",
+      "Added: INSECURE_ALLOW_ANON flag - the app now refuses to start with no authentication configured unless explicitly acknowledged"
+    ]
+  },
+  {
     "version": "0.6.1",
     "date": "2026-07-05",
     "notes": [
