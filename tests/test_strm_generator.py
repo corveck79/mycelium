@@ -68,8 +68,40 @@ class TestParseInfo:
         assert info["season"] == 2
         assert info["episode"] == 1
 
+    def test_season_pack_is_series(self):
+        info = sg._parse_info("Community S03", "Community S03")
+        assert info is not None
+        assert info["type"] == "series"
+        assert info["season"] == 3
+
     def test_garbage_returns_none(self):
         assert sg._parse_info("", "") is None
+
+    def test_season_one_pack_is_series(self):
+        info = sg._parse_info("Community S01", "Community S01")
+        assert info is not None
+        assert info["type"] == "series"
+        assert info["season"] == 1
+        assert info["title"] == "Community"
+
+    def test_season_pack_with_complete_suffix_is_series(self):
+        info = sg._parse_info("Community S03 COMPLETE", "Community S03 COMPLETE")
+        assert info is not None
+        assert info["type"] == "series"
+        assert info["season"] == 3
+
+    def test_season_word_format_is_series(self):
+        info = sg._parse_info("Community Season 3", "Community Season 3")
+        assert info is not None
+        assert info["type"] == "series"
+        assert info["season"] == 3
+
+    def test_movie_with_year_remains_movie(self):
+        info = sg._parse_info("S03 2024", "S03 2024.mkv")
+        assert info is not None
+        assert info["type"] == "movie"
+        assert info["year"] == 2024
+
 
     def test_site_prefix_stripped(self):
         info = sg._parse_info("[DEVIL-TORRENTS PL] Elevation 2024 1080p", "Elevation.2024.mkv")
@@ -133,6 +165,27 @@ class TestScanTorboxLibrary:
         path = Path(tmp_path) / "movies" / "Pulp Fiction (1994)" / "Pulp Fiction (1994).strm"
         assert path.exists()
 
+    def test_imports_season_pack_as_series(self, monkeypatch):
+        import tmdb as real_tmdb
+        monkeypatch.setattr(sg.db, "get_virtual_item_by_hash", lambda info_hash: None)
+        monkeypatch.setattr(real_tmdb, "search_tv", lambda title: "tt1439629")
+        monkeypatch.setattr(real_tmdb, "display_title", lambda imdb_id, media_type: "Community")
+        captured = {}
+        def fake_create(torrent_id, title, media_type, imdb_id=None, tmdb_id=None):
+            captured.update(torrent_id=torrent_id, title=title, media_type=media_type, imdb_id=imdb_id)
+            return 1
+        monkeypatch.setattr(sg, "create_strm_for_torrent", fake_create)
+        item = {
+            "id": 4, "name": "Community S03", "hash": "d" * 40,
+            "files": [{"id": 1, "name": "Community S03"}],
+        }
+        sg.torbox_mod.list_torrents = lambda force_refresh=True: [item]
+        sg.torbox_mod._is_ready = lambda item: True
+        result = sg.scan_torbox_library()
+        assert result == {"scanned": 1, "imported": 1, "skipped": 0, "failed": 0}
+        assert captured["media_type"] == "series"
+        assert captured["title"] == "Community"
+
     def test_skips_torrent_already_known(self, monkeypatch):
         monkeypatch.setattr(sg.db, "get_virtual_item_by_hash", lambda info_hash: {"token": "existing"})
         item = {"id": 2, "name": "Known.Movie.2020", "hash": "b" * 40, "files": []}
@@ -175,6 +228,89 @@ class TestProcessTorrentCanonicalTitle:
         nfo = folder / "tvshow.nfo"
         assert nfo.exists()
         assert "tt0092359" in nfo.read_text()
+
+    def test_season_pack_creates_episode_strms(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
+        monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: False)
+        monkeypatch.setattr(sg, "_resolve_url", lambda *a, **kw: "http://cdn.example/x")
+        item = {
+            "id": 10,
+            "name": "Community S03",
+            "hash": "e" * 40,
+            "files": [
+                {"id": 1, "name": "Community S03E01.mkv"},
+                {"id": 2, "name": "Community S03E02.mkv"},
+                {"id": 3, "name": "Community S03E03.mkv"},
+            ],
+        }
+        monkeypatch.setattr(sg.torbox_mod, "find_by_id", lambda torrent_id: item)
+        written = sg.create_strm_for_torrent(10, "Community", "series")
+        assert written == 3
+        season = Path(tmp_path) / "series" / "Community" / "Season 03"
+        assert (season / "Community S03E01.strm").exists()
+        assert (season / "Community S03E02.strm").exists()
+        assert (season / "Community S03E03.strm").exists()
+
+    def test_catbox_series_registration_keeps_episode_metadata(self, tmp_path, monkeypatch):
+        captured = {}
+        class FakeCatbox:
+            @staticmethod
+            def register(**kwargs):
+                captured.update(kwargs)
+                return "test-token"
+            @staticmethod
+            def proxy_url(token):
+                return "http://mycelium:8088/stream/" + token
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: True if key == "CATBOX_MODE" else False)
+        monkeypatch.setattr(sg, "_write_strm", lambda path, url: True)
+        monkeypatch.setattr(sg, "Path", Path)
+        import sys
+        monkeypatch.setitem(sys.modules, "catbox", FakeCatbox)
+        info = {"type": "episode", "title": "Community", "season": 3, "episode": 1}
+        item = {
+            "id": 66666486,
+            "hash": "a" * 40,
+            "magnet": "magnet:?xt=urn:btih:" + "a" * 40,
+        }
+        result = sg._resolve_url(item, 1, "Community.S03E01.mkv", info, "series")
+        assert result == "http://mycelium:8088/stream/test-token"
+        assert captured["media_type"] == "series"
+        assert captured["torbox_id"] == 66666486
+        assert captured["file_id"] == 1
+        assert captured["season"] == 3
+        assert captured["episode"] == 1
+        assert captured["strm_path"].endswith("Season 03/Community S03E01.strm")
+
+    def test_season_word_pack_is_treated_as_series(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
+        monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: False)
+        monkeypatch.setattr(sg, "_resolve_url", lambda *a, **kw: "http://cdn.example/x")
+        item = {
+            "id": 20,
+            "name": "Community Season 3",
+            "hash": "c" * 40,
+            "files": [{"id": 1, "name": "Community S03E01.mkv"}],
+        }
+        written = sg.process_torrent(item, canonical_title="Community")
+        assert written == 1
+        assert (Path(tmp_path) / "series" / "Community" / "Season 03" / "Community S03E01.strm").exists()
+
+    def test_s03_year_torrent_is_not_treated_as_series(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))
+        monkeypatch.setattr(sg.torbox_mod, "_is_ready", lambda item: True)
+        monkeypatch.setattr(sg.settings, "get", lambda key, default=None: False)
+        monkeypatch.setattr(sg, "_resolve_url", lambda *a, **kw: "http://cdn.example/x")
+        item = {
+            "id": 21,
+            "name": "S03 2024",
+            "hash": "d" * 40,
+            "files": [{"id": 1, "name": "S03 2024.mkv"}],
+        }
+        written = sg.process_torrent(item)
+        assert written == 1
+        assert (Path(tmp_path) / "movies" / "S03 (2024)" / "S03 (2024).strm").exists()
 
     def test_two_differently_named_torrents_land_in_same_folder(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sg, "MEDIA_PATH", str(tmp_path))

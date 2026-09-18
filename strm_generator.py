@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 _VIDEO_EXTS = {'.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.ts', '.m2ts', '.webm'}
 
 _EP_RE = re.compile(r'[Ss](\d{1,2})[Ee](\d{1,2})', re.IGNORECASE)
+_SEASON_WORD_RE = re.compile(r'\b[Ss]eason\s+(\d{1,2})\b', re.IGNORECASE)
+_SEASON_RE = re.compile(r'\b[Ss](\d{1,2})\b', re.IGNORECASE)
 _YEAR_RE = re.compile(r'(?<!\d)((?:19|20)\d{2})(?!\d)')
 # Strip leading site/group prefixes from torrent names before parsing:
 #   [DEVIL-TORRENTS PL]  /  rutor.info  /  www.UIndex.org  /  HIDRATORRENTS.ORG  etc.
@@ -122,7 +124,6 @@ def _parse_info(torrent_name: str, file_name: str) -> dict | None:
             title = _safe(_strip_junk(source[:ep_m.start()]).strip())
 
             # --- FOOLPROOF TMDB FALLBACK ---
-            import re
             imdb_match = re.search(r'(tt\d{7,})', title, re.IGNORECASE)
             if imdb_match:
                 found_id = imdb_match.group(1).lower()
@@ -137,6 +138,14 @@ def _parse_info(torrent_name: str, file_name: str) -> dict | None:
             # -------------------------------
 
             return {'type': 'episode', 'title': title or 'Unknown', 'season': season, 'episode': episode}
+
+    # Season pack: S03 or Season 3 without an episode number means a series.
+    for source in (_clean(torrent_name), _clean(file_base)):
+        season_m = _SEASON_RE.search(source) or _SEASON_WORD_RE.search(source)
+        if season_m:
+            title = _safe(_strip_junk(source[:season_m.start()]).strip())
+            if title:
+                return {"type": "series", "title": title, "season": int(season_m.group(1))}
 
     # Movie: find year
     for source in (_clean(torrent_name), _clean(file_base)):
@@ -1620,6 +1629,7 @@ def _resolve_url(item: dict, file_id: int, file_name: str, info: dict, media_typ
         import catbox
         magnet = item.get("magnet") or f"magnet:?xt=urn:btih:{item.get('hash')}"
         title = f"{info.get('title','')} ({info['year']})" if info.get("year") else info.get("title", file_name)
+        strm_path = str(_strm_path(info)) if info.get("type") != "movie" else None
         token = catbox.register(
             info_hash=(item.get("hash") or "").lower(),
             magnet=magnet,
@@ -1627,6 +1637,11 @@ def _resolve_url(item: dict, file_id: int, file_name: str, info: dict, media_typ
             media_type=media_type,
             torbox_id=torrent_id,
             file_id=file_id,
+            strm_path=strm_path,
+            imdb_id=info.get("imdb_id"),
+            season=info.get("season"),
+            episode=info.get("episode"),
+            year=info.get("year"),
         )
         return catbox.proxy_url(token)
     return _get_stream_url(torrent_id, file_id)
@@ -1778,7 +1793,7 @@ def scan_torbox_library() -> dict:
             if not guess:
                 skipped += 1
                 continue
-            media_type = 'series' if guess['type'] == 'episode' else 'movie'
+            media_type = 'series' if guess['type'] in ('episode', 'series') else 'movie'
             imdb_id = None
             try:
                 if media_type == 'movie':

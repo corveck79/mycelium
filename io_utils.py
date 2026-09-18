@@ -24,6 +24,7 @@ def _write(path: Path, mode: str, payload, encoding: str | None) -> None:
         dir=str(path.parent),
     )
     try:
+        os.chmod(tmp, 0o644)
         if encoding is None:
             with os.fdopen(fd, mode) as fh:
                 fh.write(payload)
