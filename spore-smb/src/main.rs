@@ -82,6 +82,7 @@ struct TreeInner {
     by_path: HashMap<String, String>,
     dirs: std::collections::HashSet<String>,
     fetched_at: Option<Instant>,
+    ever_populated: bool,
 }
 
 struct Tree {
@@ -98,9 +99,14 @@ impl Tree {
                 by_path: HashMap::new(),
                 dirs,
                 fetched_at: None,
+                ever_populated: false,
             }),
             ttl: Duration::from_secs(10),
         }
+    }
+
+    async fn populated(&self) -> bool {
+        self.inner.read().await.ever_populated
     }
 
     async fn refresh_if_stale(&self, state: &AppState) {
@@ -161,6 +167,9 @@ impl Tree {
         g.by_path = by_path;
         g.dirs = dirs;
         g.fetched_at = Some(Instant::now());
+        if count > 0 {
+            g.ever_populated = true;
+        }
         drop(g);
         eprintln!("tree refreshed: {count} files, {dcount} dirs");
     }
@@ -877,6 +886,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Retry independently of incoming requests: a fresh container can win
     // the race against mycelium's own startup (same reasoning as spore-nfs).
+    //
+    // Only the startup race needs the tight 10s cadence; once the tree has
+    // been populated at least once, drop to a long steady-state interval
+    // purely as a self-healing safety net. Real SMB traffic is already kept
+    // fresh cheaply via refresh_if_stale().
     {
         let state = state.clone();
         tokio::spawn(async move {
@@ -884,6 +898,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             loop {
                 ticker.tick().await;
                 state.tree.refresh(&state).await;
+                if state.tree.populated().await {
+                    ticker = tokio::time::interval(Duration::from_secs(600));
+                    ticker.tick().await; // consume the immediate first tick
+                }
             }
         });
     }

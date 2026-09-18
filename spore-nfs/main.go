@@ -36,7 +36,13 @@ var (
 	myceliumBase = envOr("MYCELIUM_BASE", "http://mycelium:8088")
 	listenAddr   = envOr("LISTEN_ADDR", ":2049")
 	treeTTL      = 10 * time.Second
-	httpClient   = &http.Client{Timeout: 30 * time.Second}
+	// Background safety-net interval once the tree has been populated at
+	// least once. refreshIfStale() (against treeTTL) already covers real
+	// NFS traffic cheaply; this ticker only exists to self-heal a client
+	// that gave up after an empty first listing, so it doesn't need to be
+	// nearly as tight as the startup-race retry loop.
+	steadyStateTTL = 10 * time.Minute
+	httpClient     = &http.Client{Timeout: 30 * time.Second}
 )
 
 func envOr(k, def string) string {
@@ -54,10 +60,11 @@ type treeEntry struct {
 }
 
 type tree struct {
-	mu        sync.RWMutex
-	byPath    map[string]string // path -> token
-	dirs      map[string]bool   // every ancestor directory of every file
-	fetchedAt time.Time
+	mu            sync.RWMutex
+	byPath        map[string]string // path -> token
+	dirs          map[string]bool   // every ancestor directory of every file
+	fetchedAt     time.Time
+	everPopulated bool // true once a refresh has seen at least one entry
 }
 
 func newTree() *tree { return &tree{byPath: map[string]string{}, dirs: map[string]bool{"": true}} }
@@ -108,8 +115,17 @@ func (t *tree) refresh() {
 	t.byPath = byPath
 	t.dirs = dirs
 	t.fetchedAt = time.Now()
+	if len(byPath) > 0 {
+		t.everPopulated = true
+	}
 	t.mu.Unlock()
 	log.Printf("tree refreshed: %d files, %d dirs", len(byPath), len(dirs))
+}
+
+func (t *tree) populated() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.everPopulated
 }
 
 func (t *tree) tokenFor(p string) (string, bool) {
@@ -703,11 +719,19 @@ func main() {
 	// refreshIfStale() alone won't retry again until something actually
 	// asks the filesystem for a file, which never happens on a client
 	// that gave up mounting after an empty first listing.
+	//
+	// Only the startup race needs the tight treeTTL cadence; once the tree
+	// has been populated at least once, drop to a long steady-state
+	// interval purely as a self-healing safety net. Real NFS traffic is
+	// already kept fresh cheaply via refreshIfStale().
 	go func() {
 		ticker := time.NewTicker(treeTTL)
 		defer ticker.Stop()
 		for range ticker.C {
 			t.refresh()
+			if t.populated() {
+				ticker.Reset(steadyStateTTL)
+			}
 		}
 	}()
 

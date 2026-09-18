@@ -22,6 +22,8 @@ Fixes and features ported in from community forks (dmphx, Damosso).
 - `torrentio.fetch_streams()` returns `[]` on any error instead of raising, so a Torrentio outage never blocks the rest of the scraper pool.
 - Torrentio results are now filtered against the title's actual TMDB release year(s) (including per-season/episode air dates), so a same-titled remake/reboot's torrents don't mix into results. Fails open on any TMDB error.
 - Sonarr import and `nfo_generator`: a title that came back as a bare IMDb ID now gets a TMDB lookup to recover the real show name, and the series-folder NFO lookup no longer accidentally uses the movie title map.
+- Season-pack torrent names (`Community S03`, `Community Season 3`) are now correctly classified as series instead of falling through to movie/unknown handling; a bare `S03 2024`-style name (no title text before the season marker) still correctly stays a movie. Catbox-mode episode registration now also preserves season/episode/`strm_path`/year/IMDb metadata, which was previously dropped for season-pack episodes. (#50, contributed by @erik-een)
+- **spore-nfs**/**spore-smb**: the background tree-refresh ticker kept re-polling `/spore-nfs/tree` (and re-fetching/rebuilding the full virtual library) every 10s forever - it was only ever meant to retry a possible startup race against mycelium's own boot, not run at that cadence indefinitely. It now backs off to a 10-minute steady-state interval once the tree has been populated at least once; real NFS/SMB traffic is unaffected since `refreshIfStale()`/`refresh_if_stale()` already keep it fresh on-demand. Was pinning close to a full core continuously on a 4-core NAS.
 
 ### Added
 
