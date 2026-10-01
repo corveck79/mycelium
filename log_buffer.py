@@ -1,6 +1,8 @@
 import logging
 from collections import deque
 
+from redact import install_logging_redaction
+
 _buffer: deque[str] = deque(maxlen=500)
 
 
@@ -17,6 +19,7 @@ _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(
 
 
 def install() -> None:
+    install_logging_redaction()
     logging.getLogger().addHandler(_handler)
 
 

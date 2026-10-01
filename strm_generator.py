@@ -13,6 +13,7 @@ _maintenance_lock = threading.Lock()  # prevents migrate + repair running simult
 import db
 import jellyfin
 import settings
+from redact import safe_exc
 import torbox as torbox_mod
 import config as cfg
 from config import MEDIA_PATH, TORBOX_BASE_URL as _TORBOX_BASE_URL_DEFAULT, SPORE_MEDIA_PATH
@@ -186,7 +187,7 @@ def _get_stream_url(torrent_id: int, file_id: int) -> str | None:
         data = resp.json() or {}
         return data.get("data") or None
     except Exception as exc:
-        log.warning("requestdl failed torrent=%s file=%s: %s", torrent_id, file_id, exc)
+        log.warning("requestdl failed torrent=%s file=%s: %s", torrent_id, file_id, safe_exc(exc))
         return None
 
 

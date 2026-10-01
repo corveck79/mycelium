@@ -2,6 +2,13 @@
 
 All notable changes to Mycelium are documented in this file.
 
+## [Unreleased]
+
+### Security
+
+- **API keys no longer end up in the logs.** `requests` errors echo the full request URL, and the TorBox `requestdl` call (`strm_generator.py`, the web player) and the MDBList client sent the key as a query parameter, so a failed call logged it in clear text into the in-memory log buffer and stdout. The call sites now log a redacted error, and a new `redact.py` scrubs every log record (message and traceback) for `token=`, `apikey=`, `api_key=`, `access_token=`, `password=`, `secret=` and bearer/authorization headers before it reaches any handler.
+- `/ui/logs`, `/ui/backup-now` and `/ui/api/backups` are now admin-only (403 for other users). `/ui/logs` showed the last 100 log lines to every logged-in user.
+
 ## [0.6.3] - 2026-09-18
 
 Fixes and features ported in from community forks (dmphx, Damosso).

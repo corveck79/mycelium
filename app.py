@@ -1011,6 +1011,8 @@ def ui_sync_movies():
 
 @app.get("/ui/logs")
 def ui_logs():
+    if not auth.is_admin():
+        abort(403)
     return jsonify(lines=log_buffer.get_lines(100))
 
 
@@ -1914,6 +1916,8 @@ def ui_blacklist_clear(info_hash: str):
 
 @app.post("/ui/backup-now")
 def ui_backup_now():
+    if not auth.is_admin():
+        abort(403)
     threading.Thread(target=backup.run, name="backup-manual", daemon=True).start()
     flash("DB backup started", "ok")
     return redirect(url_for("ui_dashboard"))
@@ -1921,6 +1925,8 @@ def ui_backup_now():
 
 @app.get("/ui/api/backups")
 def ui_api_backups():
+    if not auth.is_admin():
+        abort(403)
     return jsonify(backups=backup.list_backups())
 
 

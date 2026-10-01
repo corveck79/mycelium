@@ -19,6 +19,7 @@ import settings as _settings
 import subtitles as _subtitles
 import torbox
 import torrentio
+from redact import safe_exc
 import zilean
 
 log = logging.getLogger(__name__)
@@ -300,7 +301,7 @@ def _request_dl(torrent_id: int, file_id: int) -> str | None:
         resp.raise_for_status()
         return (resp.json() or {}).get("data") or None
     except Exception as exc:
-        log.warning("web_player: requestdl failed: %s", exc)
+        log.warning("web_player: requestdl failed: %s", safe_exc(exc))
         return None
 
 
